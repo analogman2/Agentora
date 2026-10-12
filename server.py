@@ -681,10 +681,13 @@ async def assistant_chat(request):
         await resp.write(("data: " + json.dumps(obj) + "\n\n").encode())
 
     try:
-        async with aiohttp.ClientSession().request("POST", req, data=data, headers=headers, timeout=timeout) as r:
+        async with http.post(req, data=data, headers=headers, timeout=timeout) as r:   # the shared session: nothing left open
             event = None
-            async for raw, _ in r.content.iter_chunks():
-                for line in raw.decode(errors="replace").strip().split("\n"):
+            if r.status != 200:
+                await emit({"error": f"Hermes said {r.status}: {(await r.text())[:300]}"})
+                return resp
+            async for raw in r.content:                    # one SSE line at a time, even when a chunk splits a line
+                for line in [raw.decode(errors="replace").strip()]:
                     if line.startswith("event:"):
                         event = line[6:].strip()
                         continue
