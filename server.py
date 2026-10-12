@@ -579,6 +579,87 @@ def save_uploads():
 
 AGENT_TOKEN = HERE / "agent.token"              # {"token", "user"}: lets the local Hermes assistant act as that account
 
+HERMES = "http://127.0.0.1:8642"
+INSTRUCTIONS = ("You are being used from the Image & Video Studio's Assistant panel in a web browser. Keep replies short and "
+                "conversational, use plain text or light markdown, and prefer the radio_* and studio_* tools for the radio "
+                "and the Image & Video Studio. When you make pictures or videos, mention they appear in the Studio.")
+
+
+def _hermes_key():
+    for line in (Path.home() / ".hermes" / ".env").read_text().splitlines():
+        if line.startswith("API_SERVER_KEY="):
+            return line.split("=", 1)[1].strip()
+    raise RuntimeError("The Hermes API server isn't configured")
+
+
+def _tool_names(item):
+    name, args = item.get("name") or "", item.get("arguments") or "{}"
+    try:
+        args = json.loads(args) if isinstance(args, str) else args
+    except ValueError:
+        args = {}
+    if name == "tool_describe":
+        return []
+    names = [c.get("name", "") for c in args.get("calls", [])] if name == "tool_call" else [name]
+    return [n.replace("mcp__local_apps__", "").replace("_", " ") for n in names if n]
+
+
+async def assistant_chat(request):
+    """Stream a Hermes turn to the browser as simple server-sent events."""
+    require_admin(request)
+    body = await request.json()
+    text = str(body.get("message") or "").strip()[:8000]
+    if not text:
+        raise web.HTTPBadRequest(text="Write a message first")
+    prev = body.get("previous") if re.fullmatch(r"resp_[\w-]{6,80}", str(body.get("previous") or "")) else None
+
+    chat_body = {"model": "hermes-agent", "input": text, "instructions": INSTRUCTIONS, "store": True, "stream": True}
+    if prev:
+        chat_body["previous_response_id"] = prev
+    req = HERMES + "/v1/responses"
+    headers = {"Content-Type": "application/json", "Authorization": "Bearer " + _hermes_key()}
+    data = json.dumps(chat_body).encode()
+    timeout = aiohttp.ClientTimeout(total=1800)
+
+    resp = web.StreamResponse(status=200, headers={
+        "Content-Type": "text/event-stream", "Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+    await resp.prepare(request)
+
+    async def emit(obj):
+        await resp.write(("data: " + json.dumps(obj) + "\n\n").encode())
+
+    try:
+        async with aiohttp.ClientSession().request("POST", req, data=data, headers=headers, timeout=timeout) as r:
+            event = None
+            async for raw, _ in r.content.iter_chunks():
+                for line in raw.decode(errors="replace").strip().split("\n"):
+                    if line.startswith("event:"):
+                        event = line[6:].strip()
+                        continue
+                    if not line.startswith("data:"):
+                        continue
+                    try:
+                        d = json.loads(line[5:].strip())
+                    except ValueError:
+                        continue
+                    t = d.get("type") or event
+                    if t == "response.output_text.delta":
+                        await emit({"delta": d.get("delta", "")})
+                    elif t == "response.output_item.done" and (d.get("item") or {}).get("type") == "function_call":
+                        for n in _tool_names(d["item"]):
+                            await emit({"tool": n})
+                    elif t == "response.completed":
+                        rid = (d.get("response") or {}).get("id")
+                        await emit({"done": rid})
+                    elif t in ("response.failed", "error"):
+                        err = (d.get("response") or {}).get("error") or d.get("error") or d
+                        await emit({"error": (err.get("message") if isinstance(err, dict) else str(err))[:400]})
+    except (ConnectionResetError, aiohttp.ClientConnectionError):
+        pass  # browser went away
+    except Exception as e:
+        await emit({"error": "Couldn't reach Hermes: " + str(e)[:400]})
+    return resp
+
 
 def agent_user(request):
     """The local assistant's tools send "Authorization: Bearer <token>" from agent.token (readable only by this account)."""
@@ -1119,6 +1200,7 @@ def main():
     app.router.add_get("/api/models/tasks", models_tasks)
     app.router.add_get("/api/models/installed", models_installed)
     app.router.add_delete("/api/models/installed", models_remove)
+    app.router.add_post("/api/assistant/chat", assistant_chat)
     app.router.add_get("/model-media/{path:.+}", model_media)
     app.router.add_get("/media/{path:.+}", media)
     app.router.add_get("/input/{name}", input_file)

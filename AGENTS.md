@@ -12,6 +12,8 @@ A web front end over ComfyUI for pictures and videos, with user accounts. Served
   install tasks (downloads, node packs, ComfyUI restart), building prompts to run.
 - `models.py`: the Models page (Civitai / Hugging Face browse and download into ComfyUI's model folders).
 - `auth.py`: accounts (scrypt hashes), sessions, lockout.
+- `hermes_gate.py`: unit `hermes-gate` on :7880, lets only signed-in Studio admins through to the Hermes web dashboard
+  (unit `hermes-dashboard`, 127.0.0.1:9119), WebSockets included.
 - `index.html`: the whole front end (one file: CSS tokens on :root with a dark-mode block, then markup, then one script).
   `$` is `document.querySelector` here. Use `escapeHtml` for anything user- or web-supplied.
 - Data (never commit, never print): `settings.json` (holds API keys), `users.json`, `sessions.json`, `agent.token`,

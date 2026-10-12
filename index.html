@@ -361,6 +361,30 @@ body.view-workflows .wflist span { padding: 0; }
   body.view-workflows #wfPanel:not([hidden]) { grid-template-columns: 1fr; gap: 18px; }
   body.view-workflows #wfDetail { border-left: 0; padding-left: 0; border-top: 1px solid var(--line); padding-top: 6px; }
 }
+
+/* ---------- assistant panel ---------- */
+.asst { position: fixed; right: 16px; bottom: 16px; width: 600px; max-width: calc(100vw - 32px); height: min(620px, calc(100vh - 32px));
+        z-index: 45; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 8px 32px rgba(0,0,0,.3);
+        display: flex; flex-direction: column; overflow: hidden; }
+.asst[hidden] { display: none; }
+.asst .ah { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.asst .ah strong { flex: 1; }
+.asst .al { flex: 1; overflow: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.asst .m { max-width: 88%; padding: 8px 11px; border-radius: 12px; line-height: 1.45; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.asst .m.me { align-self: flex-end; background: var(--accent, #6c8aff); color: white; border-bottom-right-radius: 4px; }
+.asst .m.ai { align-self: flex-start; background: var(--panel-2, #2a2a30); border-bottom-left-radius: 4px; }
+.asst .m.ai code { background: var(--line, #444); padding: 0 4px; border-radius: 4px; font-size: 13px; }
+.asst .m.err { align-self: stretch; background: transparent; border: 1px solid var(--err, #d33); color: var(--err, #d33); }
+.asst .tools { font-size: 12px; color: var(--muted); margin: 0 0 4px; }
+.asst .af { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
+.asst .af .ia { position: relative; flex: 1; }
+.asst .af textarea { width: 100%; resize: none; min-height: 44px; max-height: 40vh; font: inherit; font-size: 14px; padding: 8px 42px 8px 10px;
+                    border: 1px solid var(--line); border-radius: 10px; background: var(--bg, #1a1a20); color: var(--text, #e0e0e8); display: block; }
+.asst .af .ia button { position: absolute; right: 6px; bottom: 6px; font-size: 13px; padding: 4px 12px; }
+.asst .af[hidden] { display: none; }
+.asst .typing::after { content: "▍"; animation: astBlink 1s steps(2) infinite; }
+@keyframes astBlink { 50% { opacity: 0; } }
+@media (max-width: 560px) { .asst { inset: 0; width: auto; max-width: none; height: auto; border-radius: 0; border: 0; } }
 </style>
 </head>
 <body>
@@ -394,10 +418,26 @@ body.view-workflows .wflist span { padding: 0; }
       <div class="links"><button class="btn" id="freeBtn2" title="Switches the radio off and unloads chat models">Free the GPU</button></div></section>
     <section class="scard"><h3>Studios</h3><div class="links">
       <a class="btn" id="lnRadio" href="#">📻 Radio</a><a class="btn" id="lnMusic" href="#">🎵 Music Studio</a>
+      <a class="btn" id="lnHermes" href="#" target="_blank" rel="noopener" hidden title="Settings, sessions, skills, tools and chat for the Hermes AI agent (admins)">☤ Hermes dashboard</a>
       <a class="btn" id="lnComfy" href="http://127.0.0.1:8188/" target="_blank" rel="noopener" hidden>🧩 ComfyUI editor (this PC only)</a></div></section>
     <section class="scard"><h3>Settings</h3><div class="links"><button class="btn" id="setBtn">⚙ Open settings</button></div></section>
+    <section class="scard"><h3>Assistant</h3><div class="links"><button class="btn" id="asstOpen">💬 Open chat</button></div></section>
   </div>
 </aside>
+
+<!-- Assistant panel -->
+<div class="asst" id="asst" role="dialog" aria-modal="false">
+  <div class="ah"><strong>✦ <span id="asstUser">Assistant</span></strong>
+    <div class="small" id="asstWho"></div>
+    <button class="x" id="asstClose" title="Close">✕</button></div>
+  <div id="asstLog" class="al"></div>
+  <form class="af" id="asstForm">
+    <div class="ia">
+      <textarea id="asstIn" placeholder="Message…" rows="1" aria-label="Message"></textarea>
+      <button type="submit" id="asstSend" aria-label="Send">➤</button>
+    </div>
+  </form>
+</div>
 
 <div class="wrap">
 
@@ -1212,6 +1252,7 @@ window.matchMedia("(min-width: 1100px)").addEventListener("change", renderSide);
 $("#freeBtn2").onclick = () => $("#freeBtn").click();
 $("#lnRadio").href = `${location.protocol}//${location.hostname}:7860/radio`;
 $("#lnMusic").href = `${location.protocol}//${location.hostname}:7860/`;
+$("#lnHermes").href = `${location.protocol}//${location.hostname}:7880/`;
 $("#lnComfy").hidden = !["127.0.0.1", "localhost"].includes(location.hostname);
 function renderQueue(jobs) {
   const run = jobs.filter(j => j.status === "running"), wait = jobs.filter(j => j.status === "queued");
@@ -1471,6 +1512,7 @@ $("#authForm").onsubmit = async (e) => {
 };
 function signedIn(user) {
   ME = user; $("#auth").classList.remove("show");
+  $("#lnHermes").hidden = user.role !== "admin";
   $("#userName").textContent = user.name; $("#userWho").textContent = `Signed in as ${user.name}${user.role === "admin" ? " · admin" : ""}`;
   $("#mUsers").hidden = user.role !== "admin";
   cards.forEach(c => c.remove()); cards.clear();
@@ -1561,6 +1603,108 @@ _fetch("/api/session").then(r => r.json()).then(d => d.user ? signedIn(d.user) :
   const scan = (root) => { if (root.tagName === "TEXTAREA") enhance(root); else if (root.querySelectorAll) root.querySelectorAll("textarea").forEach(enhance); };
   scan(document.body);
   new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach(scan))).observe(document.body, {childList: true, subtree: true});
+})();
+
+/* ---------- Assistant chat ---------- */
+(function(){
+  let A = {prev: null};
+
+  const asst   = document.getElementById("asst");
+  const asstLog = document.getElementById("asstLog");
+  const asstIn  = document.getElementById("asstIn");
+  const asstOpen  = document.getElementById("asstOpen");
+  const asstClose = document.getElementById("asstClose");
+  const asstForm  = document.getElementById("asstForm");
+  const asstSend  = document.getElementById("asstSend");
+
+  // Open/close
+  if (asstOpen) asstOpen.addEventListener("click", () => { asst.hidden = false; asstIn.focus(); });
+  if (asstClose) asstClose.addEventListener("click", () => { asst.hidden = true; });
+
+  // Auto-resize textarea
+  if (asstIn) {
+    asstIn.addEventListener("input", () => {
+      asstIn.style.height = "auto";
+      asstIn.style.height = Math.min(asstIn.scrollHeight, window.innerHeight * 0.4) + "px";
+    });
+  }
+
+  // Append message to chat log
+  function msg(text, cls) {
+    const el = document.createElement("div");
+    el.className = "m " + cls;
+    el.textContent = text;
+    asstLog.appendChild(el);
+    asstLog.scrollTop = asstLog.scrollHeight;
+    return el;
+  }
+
+  // Stream a single turn
+  async function chat(text) {
+    if (A.busy) return;
+    A.busy = true;
+    asstSend.disabled = true;
+    msg(text, "me");
+
+    try {
+      const r = await fetch("/api/assistant/chat", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({message: text, previous: A.prev})});
+      if (!r.ok) throw new Error(`Server ${r.status}`);
+      const reader = r.body.getReader();
+      let buf = "";
+      const aiEl = msg("", "ai typing");
+
+      while (true) {
+        const {value, done} = await reader.read();
+        if (done) break;
+        buf += new TextDecoder().decode(value);
+        const lines = buf.split("\n\n");
+        buf = lines.pop();
+        for (const raw of lines) {
+          const m = raw.match(/^data: (.+)$/);
+          if (!m) continue;
+          const d = JSON.parse(m[1]);
+          if (d.delta) aiEl.textContent += d.delta;
+          else if (d.tool) {
+            aiEl.classList.remove("typing");
+            const t = document.createElement("div");
+            t.className = "tools";
+            t.textContent = "⚡ " + d.tool;
+            asstLog.appendChild(t);
+            aiEl.classList.add("typing");
+          } else if (d.done) {
+            A.prev = d.done;
+            aiEl.classList.remove("typing");
+          } else if (d.error) {
+            msg("✖ " + d.error, "err");
+            aiEl.classList.remove("typing");
+            if (aiEl.textContent.length === 0) aiEl.remove();
+          }
+        }
+      }
+      if (asstLog.lastElementChild && asstLog.lastElementChild.classList.contains("typing"))
+        asstLog.lastElementChild.classList.remove("typing");
+    } catch(e) {
+      msg("✖ " + e.message, "err");
+    }
+    A.busy = false;
+    asstSend.disabled = false;
+    asstIn.focus();
+  }
+
+  // Form submit
+  if (asstForm) {
+    asstForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const text = asstIn.value.trim();
+      if (!text) return;
+      asstIn.value = "";
+      asstIn.style.height = "auto";
+      chat(text);
+    });
+  }
+
+  // Init: hide panel
+  if (asst) asst.hidden = true;
 })();
 </script>
 </body>
