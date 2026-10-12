@@ -476,6 +476,7 @@ body.view-workflows .wflist span { padding: 0; }
 <div class="asst" id="asst" role="dialog" aria-modal="false">
   <div class="ah"><strong>✦ <span id="asstUser">Assistant</span></strong>
     <div class="small" id="asstWho"></div>
+    <button data-b70-brain></button>
     <button class="x" id="asstClose" title="Close">✕</button></div>
   <div id="asstLog" class="al"></div>
   <form class="af" id="asstForm">
@@ -1989,7 +1990,7 @@ _fetch("/api/session").then(r => r.json()).then(d => d.user ? signedIn(d.user) :
     msg(text, "me");
 
     try {
-      const r = await fetch("/api/assistant/chat", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({message: text, previous: A.prev})});
+      const r = await fetch("/api/assistant/chat", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({message: text, previous: A.prev, model: window.b70Brain ? b70Brain() : "agi"})});
       if (!r.ok) throw new Error(`Server ${r.status}`);
       const reader = r.body.getReader();
       let buf = "";

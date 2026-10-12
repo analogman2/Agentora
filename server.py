@@ -704,6 +704,38 @@ async def nowplaying_action(request):
         return web.json_response(await r.json(content_type=None), status=r.status)
 
 
+# ---------- the assistant's internet access (Hermes's web search + browser tools on the chat connection)
+HERMES_BIN = str(Path.home() / ".local" / "bin" / "hermes")
+NET_TOOLSETS = ("web", "browser")
+OFFLINE_ALSO = ("terminal", "code_execution")          # shell commands and scripts could reach the internet too: off with it
+
+
+async def _hermes_toolsets():
+    async with http.get(HERMES + "/v1/toolsets", headers={"Authorization": "Bearer " + _hermes_key()},
+                        timeout=aiohttp.ClientTimeout(total=10)) as r:
+        d = await r.json()
+    items = d.get("toolsets", d.get("data", [])) if isinstance(d, dict) else d
+    return {t.get("name"): bool(t.get("enabled")) for t in items}
+
+
+async def assistant_internet(request):
+    """Admins: is the assistant allowed on the internet (web search, reading pages, its own browser)? POST {on} to change it.
+    Hermes reads its tool settings on every request, so this applies from the next message, in every app's chat panel."""
+    require_admin(request)
+    if request.method == "POST":
+        on = bool((await request.json()).get("on"))
+        p = await asyncio.create_subprocess_exec(HERMES_BIN, "tools", "enable" if on else "disable", *NET_TOOLSETS, *OFFLINE_ALSO, "--platform", "api_server",
+                                                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        out, _ = await asyncio.wait_for(p.communicate(), 60)
+        if p.returncode:
+            raise web.HTTPBadGateway(text="Hermes couldn't change it: " + out.decode(errors="replace")[-300:])
+    try:
+        ts = await _hermes_toolsets()
+    except Exception as e:
+        raise web.HTTPServiceUnavailable(text=f"Hermes isn't answering ({e})")
+    return web.json_response({"on": all(ts.get(n) for n in NET_TOOLSETS), "tools": {n: ts.get(n) for n in NET_TOOLSETS + OFFLINE_ALSO}})
+
+
 async def home_page(request):
     return web.FileResponse(HERE / "home.html", headers={"Cache-Control": "no-cache"})
 
@@ -896,7 +928,8 @@ async def assistant_chat(request):
         raise web.HTTPBadRequest(text="Write a message first")
     prev = body.get("previous") if re.fullmatch(r"resp_[\w-]{6,80}", str(body.get("previous") or "")) else None
 
-    chat_body = {"model": "hermes-agent", "input": text, "instructions": INSTRUCTIONS, "store": True, "stream": True}
+    model = body.get("model") if body.get("model") in ("lemming", "agi") else "agi"    # Hermes model routes (config.yaml)
+    chat_body = {"model": model, "input": text, "instructions": INSTRUCTIONS, "store": True, "stream": True}
     if prev:
         chat_body["previous_response_id"] = prev
     req = HERMES + "/v1/responses"
@@ -1559,6 +1592,8 @@ def main():
     app.router.add_post("/api/prompt/improve", improve_prompt)
     app.router.add_get("/home", home_page)
     app.router.add_get("/b70/{name}", shared_file)
+    app.router.add_get("/api/assistant/internet", assistant_internet)
+    app.router.add_post("/api/assistant/internet", assistant_internet)
     app.router.add_get("/api/nowplaying", nowplaying)
     app.router.add_post("/api/nowplaying/{action}", nowplaying_action)
     app.router.add_get("/api/home", home_summary)

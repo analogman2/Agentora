@@ -50,6 +50,27 @@ h1 { font-size: 26px; margin: 0 0 4px; }
 .meter { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin: 4px 0 2px; }
 .meter i { display: block; height: 100%; background: var(--accent); }
 .meter i.warn { background: var(--warn); } .meter i.full { background: var(--err); }
+.chat { grid-column: 1 / -1; }
+.chathead { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.chatctl { display: flex; align-items: center; gap: 10px; }
+.net { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; cursor: pointer; padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; }
+.net input { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
+.log { max-height: 420px; overflow: auto; display: flex; flex-direction: column; gap: 8px; padding: 2px; }
+.log:empty { display: none; }
+.log .m { max-width: 85%; padding: 8px 12px; border-radius: 12px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
+.log .me { align-self: flex-end; background: var(--accent); color: var(--accent-ink); border-bottom-right-radius: 4px; }
+.log .ai { align-self: flex-start; background: var(--soft); border-bottom-left-radius: 4px; }
+.log .ai code { background: var(--line); padding: 0 4px; border-radius: 4px; font-size: 13px; }
+.log .tool { align-self: flex-start; font-size: 12px; color: var(--muted); }
+.log .err { align-self: stretch; color: var(--err); border: 1px solid var(--err); background: none; }
+.log .typing::after { content: "▍"; animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chips button { font: inherit; font-size: 13px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--soft); color: var(--text); cursor: pointer; }
+.chatform { display: flex; gap: 8px; align-items: flex-end; }
+.chatform textarea { flex: 1; resize: none; min-height: 44px; max-height: 40vh; font: inherit; padding: 10px 12px; border: 1px solid var(--line);
+  border-radius: 12px; background: var(--bg); color: var(--text); }
+.chatform textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; font-size: 14px; }
 .kv span { color: var(--muted); }
 @media (max-width: 900px) { .who { display: none; } }
@@ -90,6 +111,23 @@ h1 { font-size: 26px; margin: 0 0 4px; }
       <div class="kv"><span>GPU priority</span><b id="prio">—</b></div>
       <div class="btns" id="adminBtns" hidden><a class="btn" id="hermesLink" href="#" target="_blank" rel="noopener">☤ Hermes dashboard</a></div>
     </section>
+    <section class="card chat" aria-labelledby="hChat">
+      <div class="chathead"><h2 id="hChat">💬 Assistant <span class="muted small" style="font-weight:400">Hermes, running on this machine</span></h2>
+        <span class="chatctl" id="chatCtl" hidden>
+          <label class="net" title="On: the assistant can search the web, read pages, use its browser and run commands. Off: only this machine's apps and its own knowledge."><input type="checkbox" id="netToggle"> 🌐 Internet</label>
+          <button data-b70-brain></button>
+          <button class="btn" id="chatNew" type="button">New chat</button></span></div>
+      <div id="chatGate" class="small muted"></div>
+      <div id="chatBody" hidden>
+        <div class="log" id="chatLog" aria-live="polite"></div>
+        <div class="chips" id="chatChips"></div>
+        <form class="chatform" id="chatForm" autocomplete="off">
+          <textarea id="chatIn" rows="1" placeholder="Ask anything… e.g. “switch the radio to Neon Nights” or “make 2 pictures of a cabin in the snow”" aria-label="Message to the assistant"></textarea>
+          <button class="btn primary" id="chatSend" type="submit">Send</button>
+        </form>
+        <div class="small muted" id="chatNote"></div>
+      </div>
+    </section>
   </div>
 </main>
 <script>
@@ -125,12 +163,84 @@ async function load() {
   $("diskBar").style.width = dp.toFixed(1) + "%"; $("diskBar").className = y.disk_free < 15 * 2 ** 30 ? "full" : dp > 85 ? "warn" : "";
   $("diskText").textContent = `${size(y.disk_free)} free of ${size(y.disk_total)}`;
   $("prio").textContent = PRIO[y.priority] || y.priority;
+  if (!chatReady) { chatReady = true; setupChat(d.user); }
   if (d.user) {
     $("hello").textContent = `Hi, ${d.user.name}`;
     $("who").innerHTML = `Signed in as ${esc(d.user.name)}${d.user.admin ? " · admin" : ""}`;
     $("adminBtns").hidden = !d.user.admin; $("hermesLink").href = base(7880) + "/";
   } else $("who").innerHTML = `<a href="/">Sign in</a> to see your creations`;
 }
+
+// ---------- the assistant: chat with Hermes (Studio admins only; the Studio relays it, the key stays on the server)
+const C = {prev: null, busy: false, log: []};
+try { Object.assign(C, JSON.parse(sessionStorage.getItem("b70.homechat") || "{}"), {busy: false}); } catch (e) {}
+const saveChat = () => { try { sessionStorage.setItem("b70.homechat", JSON.stringify({prev: C.prev, log: C.log.slice(-60)})); } catch (e) {} };
+const fmt = (t) => esc(t.trim()).replace(/`([^`\n]+)`/g, "<code>$1</code>").replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+const CHIPS = ["What's on the radio?", "Make 2 pictures of a cabin in the snow at dusk", "How much disk space is left?", "Create a new station for rainy-day jazz"];
+function drawChat() {
+  $("chatLog").innerHTML = C.log.map(m => m.who === "tool" ? `<div class="tool">⚡ ${esc(m.text)}</div>`
+    : `<div class="m ${m.who}">${m.who === "ai" ? fmt(m.text) : esc(m.text)}</div>`).join("");
+  if (C.busy) { const last = $("chatLog").querySelector(".m.ai:last-of-type"); if (last) last.classList.add("typing"); }
+  $("chatChips").hidden = C.log.length > 0;
+  $("chatLog").scrollTop = $("chatLog").scrollHeight;
+}
+$("chatChips").innerHTML = CHIPS.map(c => `<button type="button">${esc(c)}</button>`).join("");
+$("chatChips").onclick = (e) => { const b = e.target.closest("button"); if (b) { $("chatIn").value = b.textContent; $("chatForm").requestSubmit(); } };
+$("chatIn").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("chatForm").requestSubmit(); } });
+$("chatIn").addEventListener("input", () => { const t = $("chatIn"); t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, innerHeight * 0.4) + "px"; });
+$("chatNew").onclick = () => { if (C.busy) return; C.prev = null; C.log = []; saveChat(); drawChat(); $("chatIn").focus(); };
+$("chatForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const text = $("chatIn").value.trim(); if (!text || C.busy) return;
+  $("chatIn").value = ""; $("chatIn").style.height = ""; C.busy = true; $("chatSend").disabled = true;
+  C.log.push({who: "me", text}); const reply = {who: "ai", text: ""}; C.log.push(reply); drawChat();
+  try {
+    const r = await fetch("/api/assistant/chat", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({message: text, previous: C.prev, model: window.b70Brain ? b70Brain() : "agi"})});
+    if (!r.ok) throw new Error(r.status === 403 ? "Only a Studio admin can use the assistant." : (await r.text()).slice(0, 200));
+    const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "";
+    for (;;) {
+      const {value, done} = await rd.read(); if (done) break;
+      buf += dec.decode(value, {stream: true}); let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 2);
+        if (!line.startsWith("data:")) continue;
+        let d; try { d = JSON.parse(line.slice(5)); } catch (err) { continue; }
+        if (d.delta) reply.text += d.delta;
+        if (d.tool) C.log.splice(C.log.indexOf(reply), 0, {who: "tool", text: d.tool});
+        if (d.done) C.prev = d.done;
+        if (d.error) C.log.push({who: "err", text: d.error});
+        drawChat();
+      }
+    }
+    if (!reply.text.trim()) reply.text = "(no reply)";
+  } catch (err) { C.log.push({who: "err", text: err.message}); }
+  C.busy = false; $("chatSend").disabled = false; saveChat(); drawChat(); load();
+};
+async function setupChat(user) {
+  const admin = user && user.admin;
+  $("chatBody").hidden = !admin; $("chatCtl").hidden = !admin;
+  $("chatGate").textContent = !user ? "Sign in with a Studio admin account to chat with the assistant. It can control the radio and the Studio, and run commands on this machine."
+    : admin ? "" : "The assistant can run commands on this machine, so only admin accounts can use it.";
+  if (!admin) return;
+  drawChat();
+  try {
+    const r = await fetch("/api/assistant/internet"); if (!r.ok) throw new Error(await r.text());
+    const d = await r.json(); $("netToggle").checked = d.on;
+    $("chatNote").textContent = d.on ? "Internet is on: it can search the web and read pages." : "Internet is off: no web search, browsing, shell commands or scripts; it still controls the radio and the Studio.";
+  } catch (e) { $("netToggle").disabled = true; $("chatNote").textContent = "Couldn't read the assistant's internet setting."; }
+}
+$("netToggle").onchange = async () => {
+  const want = $("netToggle").checked; $("netToggle").disabled = true; $("chatNote").textContent = want ? "Turning internet on…" : "Turning internet off…";
+  try {
+    const r = await fetch("/api/assistant/internet", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({on: want})});
+    if (!r.ok) throw new Error(await r.text());
+    const d = await r.json(); $("netToggle").checked = d.on;
+    $("chatNote").textContent = d.on ? "Internet is on: it can search the web and read pages (from the next message, in every chat panel)."
+      : "Internet is off: no web search, browsing, shell commands or scripts — it still controls the radio and the Studio (from the next message, in every chat panel).";
+  } catch (e) { $("netToggle").checked = !want; $("chatNote").textContent = e.message.slice(0, 200); }
+  $("netToggle").disabled = false;
+};
+let chatReady = false;
 load(); setInterval(() => { if (!document.hidden) load(); }, 10000);
 
 </script>

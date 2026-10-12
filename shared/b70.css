@@ -26,3 +26,7 @@
 .b70-np .x { width: 28px; height: 28px; font-size: 13px; color: var(--muted, #888); }
 body.b70-np-shown { padding-bottom: 76px; }
 @media (prefers-reduced-motion: no-preference) { .b70-np { transition: transform .2s; } }
+
+.b70-brain { display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px; border-radius: 999px; font: inherit; font-size: 13px;
+  border: 1px solid var(--line, #3333); background: var(--soft, transparent); color: var(--text, inherit); cursor: pointer; white-space: nowrap; }
+.b70-brain[data-brain="agi"] { border-color: var(--accent, #3157e0); }

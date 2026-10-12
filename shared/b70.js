@@ -20,6 +20,25 @@
   }
   window.b70Open = open;
 
+  // Assistant brain: <button data-b70-brain> becomes a two-way toggle. 🐹 Lemming = quick answers, 🧠 AGI = the smartest
+  // local model (slower). Remembered per site; chats send b70Brain() as the model ("lemming" | "agi").
+  const BRAINS = {lemming: ["🐹", "Lemming", "Quick answers (Qwen 3.6 35B-A3B). Click for AGI."],
+                  agi: ["🧠", "AGI", "Smartest local model, slower (Qwen 3.6 27B). Click for Lemming."]};
+  const brain = () => { try { const v = localStorage.getItem("b70.brain"); return BRAINS[v] ? v : "agi"; } catch (e) { return "agi"; } };
+  window.b70Brain = brain;
+  const drawBrain = () => document.querySelectorAll("[data-b70-brain]").forEach(b => {
+    const [icon, name, tip] = BRAINS[brain()];
+    b.classList.add("b70-brain"); b.dataset.brain = brain(); b.type = "button"; b.title = tip;
+    b.setAttribute("aria-label", "Assistant model: " + name + ". " + tip);
+    b.innerHTML = `<span aria-hidden="true">${icon}</span> ${name}`;
+  });
+  document.addEventListener("click", e => {
+    const b = e.target.closest("[data-b70-brain]"); if (!b) return;
+    try { localStorage.setItem("b70.brain", brain() === "agi" ? "lemming" : "agi"); } catch (e) {}
+    drawBrain();
+  });
+  drawBrain();
+
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
   document.querySelectorAll("[data-b70-apps]").forEach(el => {
     el.className = "b70-apps"; el.setAttribute("role", "navigation"); el.setAttribute("aria-label", "Switch app");
