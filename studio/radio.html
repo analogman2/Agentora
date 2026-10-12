@@ -352,6 +352,7 @@ textarea { resize: vertical; max-height: 85vh; }
   <div class="mid">
     <div class="ctl">
       <button class="cbtn" id="bDown" title="Thumbs down — fewer like this (skips it)" aria-label="Thumbs down"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M17 14V3h3v11h-3ZM17 14l-4.5 7a2 2 0 0 1-2.5-2.4L11 15H5.3a2 2 0 0 1-2-2.3l1.2-7.6A2.5 2.5 0 0 1 7 3h10"/></svg></button>
+      <button class="cbtn" id="bBack" title="Back: restart this song · press again for the previous song (for everyone listening)" aria-label="Back"><svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M19 5v14l-9-7zM9 5H6v14h3z"/></svg></button>
       <button class="cbtn play" id="bPlay" title="Play / pause" aria-label="Play"><svg id="bPlayIcon" width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button>
       <button class="cbtn" id="bSkip" title="Skip this song (for everyone listening)" aria-label="Skip"><svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M5 5v14l9-7zM15 5h3v14h-3z"/></svg></button>
       <button class="cbtn" id="bUp" title="Thumbs up — make more songs like this" aria-label="Thumbs up"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M7 10v11H4V10h3ZM7 10l4.5-7a2 2 0 0 1 2.5 2.4L13 9h5.7a2 2 0 0 1 2 2.3l-1.2 7.6A2.5 2.5 0 0 1 17 21H7"/></svg></button>
@@ -620,7 +621,7 @@ function renderBar() {
   $("bStation").textContent = t ? (t.station_name || (st && st.name) || "") + (t.airing === "rerun" ? " · rerun" : t.airing === "runner-up" ? " · runner-up" : "") : st ? (lid ? "tuning in…" : "press play") : "b70 radio";
   $("bUp").classList.toggle("on-up", !!t && t.feedback === "keep");
   setAddKey(!!t && !!t.in_playlist);
-  ["bUp", "bDown", "bAdd", "bSkip"].forEach(k => $(k).disabled = !t);
+  ["bUp", "bDown", "bAdd", "bSkip", "bBack"].forEach(k => $(k).disabled = !t);
   $("wash").style.background = t ? `radial-gradient(1200px 600px at 20% 0%, hsla(${trackHue(t)},70%,55%,.16), transparent 70%)` : "none";
 }
 function waitText() {
@@ -660,6 +661,18 @@ async function skipNow(kind) {
 }
 $("bDown").onclick = () => { toast("👎 Noted — fewer like this. Skipping…"); skipNow("dislike"); };
 $("bSkip").onclick = () => { toast("Skipping for everyone listening…"); skipNow("skip"); };
+// ⏮ like any player: once restarts the song, again (within 4 s) goes to the previous one, and so on back through the history
+let backAt = 0;
+async function backNow() {
+  const again = Date.now() - backAt < 4000; backAt = Date.now();
+  toast(again ? "⏮ Previous song…" : "⏮ Back to the start of this song…");
+  try {
+    const r = await post("/api/radio/back", again ? {steps: 1} : {track: current ? current.id : null, steps: 0});
+    backAt = Date.now();
+    if (r.error) toast(r.error); else { followCut(r.cut); if (again) toast(`⏮ ${r.title}${r.first ? " — the oldest song in this session's history" : ""}`); }
+  } catch (e) { toast(e.message); }
+}
+$("bBack").onclick = backNow;
 function setAddKey(on) {
   $("bAdd").classList.toggle("inlist", on); $("bAdd").setAttribute("aria-pressed", on);
   $("bAdd").title = on ? "In your playlist — press to remove" : "Add to my playlist";
@@ -692,6 +705,7 @@ if (ms) {
   act("pause", () => { if (lid) togglePlay(); });
   act("stop", () => { if (lid) togglePlay(); });
   act("nexttrack", () => $("bSkip").click());
+  act("previoustrack", backNow);
 }
 
 // ---------------- data

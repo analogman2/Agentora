@@ -1129,6 +1129,9 @@ def _air(entry):
         entry = dict(entry or {"id": None}, start_pos=round(bc["bytes"] / BPS, 3))
         bc["now"] = entry if entry.get("id") else None
         bc["aired"] = (bc["aired"] + [entry])[-8:]
+    if entry.get("id") and entry.get("airing") != "history":
+        with nav_lock:
+            nav["hist"].append(entry["id"])
     if entry.get("id"):
         log_listen(entry)               # playout only runs while someone listens, so every airing was heard
 
@@ -1172,7 +1175,7 @@ def _play_track(t):
                 break
             if time.time() - checked > 1:          # retuned to another station: cut over once it has a song ready
                 checked = time.time()
-                if t.get("station") != state["station"] and station_tracks(state["station"]):
+                if t.get("tuned", t.get("station")) != state["station"] and station_tracks(state["station"]):
                     bc["cut_next"] = True
                     break
     finally:
@@ -1236,7 +1239,7 @@ def _play_silence():
     while bc["listeners"]:
         for i in range(0, len(bc["silence"]), 8 * FRAME):
             _broadcast(bc["silence"][i:i + 8 * FRAME])
-        if state["on"] and state["station"] and next_track(state["station"], mark=False):   # a new song, runner-up or rerun
+        if nav["queued"] or (state["on"] and state["station"] and next_track(state["station"], mark=False)):   # ⏮, a new song, runner-up or rerun
             return
 
 
@@ -1252,7 +1255,7 @@ def playout_loop():
             if BITRATE != ACTIVE_BITRATE:
                 _switch_format()
                 continue
-            t = next_track(state["station"]) if state["on"] and state["station"] else None
+            t = (_take_queued() or _nav_next() or next_track(state["station"])) if state["on"] and state["station"] else None
             if t:
                 _play_track(t)
                 for _ in range(round(GAP / 1.152)):       # a little silence between songs
@@ -1356,8 +1359,8 @@ def _agent(h):
     return ua[:30] or "unknown"
 
 def skip(track_id, kind="skip"):
-    """Skip (or NOPE) the song on air - for everyone, it's one broadcast."""
-    if track_id:
+    """Skip (or NOPE) the song on air - for everyone, it's one broadcast. After ⏮, ⏭ steps forward through the history."""
+    if track_id and (kind != "skip" or nav["cursor"] is None):      # stepping through the history isn't a skip vote
         feedback(track_id, kind)
     now, cut = bc["now"], bc["cut"]
     if now and track_id and now["id"] != track_id and now.get("start_pos") is not None:
@@ -1371,10 +1374,73 @@ def skip(track_id, kind="skip"):
         return {"ok": True, "cut": bc["cut"]}
     if now and (not track_id or now["id"] == track_id):
         bc["skip"].set()
-        t0 = time.time()
-        while bc["cut"] == cut and time.time() - t0 < 8:      # the next song is on air: players can reconnect to it now
-            time.sleep(0.1)
+        return _wait_cut(cut)
     return {"ok": True, "cut": bc["cut"]}
+
+
+def _wait_cut(cut):
+    t0 = time.time()
+    while bc["cut"] == cut and time.time() - t0 < 8:      # the next song is on air: players can reconnect to it now
+        time.sleep(0.1)
+    return {"ok": True, "cut": bc["cut"]}
+
+
+# ---- ⏮ / ⏭ through the song history, like any player: ⏮ restarts the song, ⏮ again goes to the one before, and so
+# on; ⏭ then walks forward again, and past the newest song new songs resume. One broadcast: it moves everyone listening.
+nav = {"hist": collections.deque(maxlen=200), "cursor": None, "queued": None}   # hist: song ids as they aired
+nav_lock = threading.Lock()
+
+
+def _hist_track(i):
+    with app.lock:
+        j = app.jobs.get(nav["hist"][i])
+    if not j or j.get("status") != "done":
+        return None
+    return track_view(j) | {"airing": "history", "tuned": state["station"]}
+
+
+def _take_queued():
+    with nav_lock:
+        t, nav["queued"] = nav["queued"], None
+    return t
+
+
+def _nav_next():
+    """The next song while walking the history (after ⏮); None once past the newest one: new songs again."""
+    with nav_lock:
+        while nav["cursor"] is not None and nav["cursor"] < len(nav["hist"]) - 1:
+            nav["cursor"] += 1
+            t = _hist_track(nav["cursor"])
+            if t:
+                return t
+        nav["cursor"] = None
+    return None
+
+
+def back(track_id=None, steps=0):
+    """⏮: steps=0 restarts the song (the one the caller hears), steps=N goes N songs further back."""
+    with nav_lock:
+        hist = nav["hist"]
+        if len(hist) < 2 and state["station"]:          # just restarted: rebuild the history from the station's play log
+            older, keep = [t["id"] for t in reversed(history(state["station"], 50))], list(hist)   # oldest first
+            hist.clear(); hist.extend([x for x in older if x not in keep] + keep)
+        if not hist:
+            return {"ok": False, "cut": bc["cut"], "error": "Nothing has played yet"}
+        if nav["cursor"] is None or (track_id and hist[nav["cursor"]] != track_id):
+            idx = [k for k, x in enumerate(hist) if x == track_id]
+            nav["cursor"] = idx[-1] if idx else len(hist) - 1
+        c = max(0, nav["cursor"] - max(0, steps))
+        t = _hist_track(c)
+        while not t and c > 0:                          # a deleted song: one further back
+            c -= 1; t = _hist_track(c)
+        if not t:
+            return {"ok": False, "cut": bc["cut"], "error": "That song isn't available any more"}
+        nav["cursor"], nav["queued"] = c, t
+    cut = bc["cut"]
+    bc["cut_next"] = True
+    bc["skip"].set()
+    out = _wait_cut(cut)
+    return out | {"title": t["title"], "first": c == 0}
 
 
 def stream_view(listener=None):
@@ -1539,6 +1605,9 @@ def set_power(on, sid=None):
         if sid:
             if sid not in stations and sid != RERUNS:
                 raise app.BadRequest("No such station")
+            if sid != state["station"]:
+                with nav_lock:
+                    nav["hist"].clear(); nav["cursor"] = None; nav["queued"] = None
             state["station"] = sid
         if on and not state["station"]:
             raise app.BadRequest("Pick a station first")
@@ -1839,6 +1908,8 @@ def handle(h, method, path):
             return h.send(200, {"tracks": listened(min(500, int(q.get("limit") or 100)))}) or True
         if method == "GET" and path == "/api/radio/state":
             return h.send(200, api_state(q.get("listener"))) or True
+        if method == "POST" and path == "/api/radio/back":
+            b = h.body(); return h.send(200, back(b.get("track"), int(b.get("steps") or 0))) or True
         if method == "POST" and path == "/api/radio/skip":
             b = h.body(); return h.send(200, skip(b.get("track"), "dislike" if b.get("kind") == "dislike" else "skip")) or True
         if method == "GET" and path == "/api/radio/next":
