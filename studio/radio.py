@@ -48,6 +48,7 @@ def generating():
     """True while the radio is on a real station (and so wants the GPUs); rerun mode leaves them to the LLM."""
     return state["on"] and state["station"] in stations
 writing = {}                        # station id -> number of specs being written right now
+requested = {}                      # station id -> specs being written because someone pressed "Create a song now"
 backoff = {}                        # station id -> {"until": t, "delay": s, "reason": str}
 AUDIO_EXT = {".mp3", ".flac", ".wav", ".ogg", ".m4a", ".aac", ".opus"}
 KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
@@ -535,7 +536,22 @@ def spool_loop():
             app.log("radio spool error:", traceback.format_exc())
 
 
-def produce(sid):
+def request_song(sid):
+    """🎵 Create a song now: write and record one song for this station straight away, whatever the radio is playing."""
+    if sid not in stations:
+        raise app.BadRequest("No such station")
+    with app.lock:
+        busy = sum(1 for j in app.jobs.values() if j.get("station") == sid and j.get("requested") and j["status"] in ("queued", "running"))
+    with lock:
+        if busy + requested.get(sid, 0) >= 3:
+            raise app.BadRequest("Three songs for this station are already on the way")
+        requested[sid] = requested.get(sid, 0) + 1
+        writing[sid] = writing.get(sid, 0) + 1
+    threading.Thread(target=produce, args=(sid, True), daemon=True).start()
+    return {"ok": True}
+
+
+def produce(sid, on_request=False):
     try:
         s = stations.get(sid)
         if not s:
@@ -544,10 +560,10 @@ def produce(sid):
             busy = any(j.get("station") == sid and j.get("source") == "radio" and j["status"] in ("queued", "running")
                        for j in app.jobs.values())
         ready = len(station_tracks(sid, ("approved",)))
-        short = not busy and not ready and writing.get(sid, 0) <= 1
+        short = not busy and not ready and writing.get(sid, 0) <= 1 and not on_request
         takes = TAKES if ready >= 2 else 1      # spool running low: one take, so the broadcast never runs dry
         spec = write_spec(s, short=short)
-        if not state["on"] or state["station"] != sid:
+        if not on_request and (not state["on"] or state["station"] != sid):
             app.log("radio: discarding a spec written after the radio was switched off / retuned")
             return
         body = {"mode": "instrumental" if spec["instrumental"] else "song", "title": spec["title"], "author": "radio",
@@ -556,8 +572,8 @@ def produce(sid):
                 "abc_sampling": dict(SCORE_SAMPLING)}   # a safety cap only: songs should end on their own
         if not spec["instrumental"] and not spec["lyrics"].strip():
             body["mode"] = "instrumental"
-        app.new_jobs(body, extra={"source": "radio", "station": sid, "priority": 1, "radio_status": "rendering",
-                                  "spec_writer": spec["writer"]})
+        app.new_jobs(body, extra={"source": "radio", "station": sid, "priority": 0 if on_request else 1, "radio_status": "rendering",
+                                  "spec_writer": spec["writer"], **({"requested": True} if on_request else {})})
         with lock:
             s["stats"]["generated"] += 1; save_station(s)
     except Exception:
@@ -565,6 +581,8 @@ def produce(sid):
     finally:
         with lock:
             writing[sid] = max(0, writing.get(sid, 1) - 1)
+            if on_request:
+                requested[sid] = max(0, requested.get(sid, 1) - 1)
 
 
 def judge(job):
@@ -617,7 +635,8 @@ def settle_takes(job, s):
         best = max(scored, key=rank)
         bar = station_bar(s)
         score = best["critic"]["score"]
-        verdict = "approved" if best["critic"]["sane"] and (score is None or score >= bar) else "rejected"
+        asked = any(j.get("requested") for j in takes)    # someone asked for this song: keep it unless it's broken
+        verdict = "approved" if best["critic"]["sane"] and (asked or score is None or score >= bar) else "rejected"
         if job.get("spec_writer") != "fallback":
             s["scores"] = (s["scores"] + [j["critic"]["score"] for j in scored if j["critic"]["score"] is not None])[-50:]
         s["stats"]["approved" if verdict == "approved" else "rejected"] += 1
@@ -627,6 +646,8 @@ def settle_takes(job, s):
             j["critic"].update(bar=round(bar, 4), takes=len(takes))
             j.update(radio_status=verdict if j is best else "rejected", approved_at=now)
             app.save_job(j)
+    if asked and not generating():                       # made on request while the radio is off: give the GPUs back
+        app.gpu["release_on_idle"] = True
     for j in scored:
         sc = j["critic"]["score"]
         app.log("radio critic", j["title"], f"take {j.get('take', 1)}/{len(takes)}",
@@ -997,13 +1018,14 @@ def api_state(listener=None):
         st = []
         for s in sorted(stations.values(), key=lambda s: s["created"]):
             st.append({k: s.get(k) for k in ("id", "name", "kind", "description", "vocals", "language", "theme", "stats", "analysis")} |
-                      {"art": art.stamp(art.station_path(s["id"])), "ready": len(station_tracks(s["id"])), "inflight": inflight(s["id"]),
+                      {"art": art.stamp(art.station_path(s["id"])), "asked": requested.get(s["id"], 0), "ready": len(station_tracks(s["id"])), "inflight": inflight(s["id"]),
                        "problem": (backoff[s["id"]]["reason"] + f" — retrying in {int(backoff[s['id']]['until'] - time.time())}s")
                                   if s["id"] in backoff and time.time() < backoff[s["id"]]["until"] else None,
                        "profile": {k: v for k, v in (s.get("profile") or {}).items() if k in ("tracks", "top", "bpm_median", "bpm_range", "keys", "vocal_share")} or None,
                        "files": len([p for p in (sdir(s["id"]) / "music").rglob("*") if p.suffix.lower() in AUDIO_EXT]) if s["kind"] == "folder" and (sdir(s["id"]) / "music").exists() else None})
     with app.lock:
-        making = [{"title": j["title"], "status": j["status"], "stage": j.get("stage"), "progress": j.get("progress"), "station": j.get("station")}
+        making = [{"title": j["title"], "status": j["status"], "stage": j.get("stage"), "progress": j.get("progress"), "station": j.get("station"),
+                   "requested": bool(j.get("requested"))}
                   for j in app.jobs.values() if j.get("source") == "radio" and j["status"] in ("queued", "running")]
         judging = sum(1 for j in app.jobs.values() if j.get("radio_status") == "judging")
     return {"on": state["on"], "station": state["station"], "target_ahead": state["target_ahead"], "stations": st,
@@ -1131,6 +1153,8 @@ def set_power(on, sid=None):
     if not on or state["station"] == RERUNS:
         with app.lock:                         # drop queued (and, when switching off, in-progress) radio work so the GPUs free up
             for j in app.jobs.values():
+                if j.get("requested"):
+                    continue                           # songs someone asked for are made anyway
                 if j.get("source") == "radio" and j["status"] == "queued":
                     j.update(status="cancelled", stage="", finished=time.time(), radio_status="cancelled"); app.save_job(j)
                 elif j.get("source") == "radio" and j["status"] == "running" and not on:
@@ -1397,6 +1421,9 @@ def handle(h, method, path):
             if not f.is_file():
                 return h.send(404, {"error": "No art yet"}) or True
             return h.send(200, f.read_bytes(), "image/jpeg", {"Cache-Control": "private, max-age=604800"}) or True
+        m = re.fullmatch(r"/api/radio/stations/([\w]+)/song", path)
+        if method == "POST" and m:
+            return h.send(200, request_song(m.group(1))) or True
         if method == "POST" and path == "/api/radio/art":
             b = h.body()
             return h.send(200, art.request("station", b["station"]) if b.get("station") else art.request("song", str(b.get("track") or ""))) or True

@@ -799,6 +799,8 @@ async function stationView(id) {
         <button class="iconbtn bigplay" data-play="${esc(id)}" title="${playing ? "Playing" : "Play this station"}" aria-label="Play this station">${playing ? "<b>≋</b>" : '<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'}</button>
         <a class="iconbtn" href="/radio/stream.mp3" target="_blank" title="Open the live stream in another player" aria-label="Open stream">📡</a></div>
       ${air ? `<div class="chip" style="display:inline-block">On air now</div>` : `<div class="small muted">Playing it retunes the radio for everyone listening.</div>`}
+      ${id !== RERUNS ? `<div style="margin-top:14px"><button class="btn" data-act="make-song" title="Write and record a new song for this station right away">🎵 Create a song now</button>
+        <div class="small muted" id="mkStat" role="status" style="margin-top:6px"></div></div>` : ""}
     </div>
     <div>
       <div class="two">
@@ -853,6 +855,12 @@ $("page").addEventListener("click", async (e) => {
   if (act === "np-art" && current) { post("/api/radio/art", {track: current.id}).then(() => hint("Drawing a new cover — it appears in a minute or two (between songs).")).catch(e => hint(e.message)); return; }
   if (act === "preview" || act === "preview-feature") return preview(row ? row.dataset.audio : a.dataset.audio, row);
   if (act === "edit") return editStation(stOf(view.id));
+  if (act === "make-song") {
+    a.disabled = true;
+    post(`/api/radio/stations/${encodeURIComponent(view.id)}/song`).then(() => { hint("Writing a new song for this station — it's recorded next, ahead of everything else."); refresh().then(updateMk); })
+      .catch(e => hint(e.message)).finally(() => { a.disabled = false; });
+    return;
+  }
   if (act === "delete") {
     const s = stOf(view.id); if (!s || !confirm(`Delete “${s.name}” and its songs?`)) return;
     await api(`/api/radio/stations/${s.id}`, {method: "DELETE"}).catch(err => toast(err.message));
@@ -1317,6 +1325,18 @@ function b70Open(key) {
 }
 document.querySelectorAll("[data-app]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); b70Open(a.dataset.app); }));
 document.addEventListener("keydown", e => { if (e.altKey && !e.ctrlKey && !e.metaKey && ["1", "2", "3"].includes(e.key)) { e.preventDefault(); b70Open(["radio", "studio", "music"][+e.key - 1]); } });
+
+// ---------- "Create a song now": progress for the station page (writing -> recording -> ready)
+function updateMk() {
+  const el = $("mkStat"); if (!el || view.tab !== "station" || !R) return;
+  const s = stOf(view.id); if (!s) return;
+  const mine = (R.making || []).filter(m => m.station === s.id);
+  const parts = [];
+  if (s.asked) parts.push(`✍ writing ${s.asked === 1 ? "a song" : s.asked + " songs"} (the songwriter runs on the CPU, about a minute)`);
+  for (const m of mine) parts.push(`${m.status === "running" ? "🎙 recording" : "⏳ waiting to record"} “${esc(m.title)}”${m.stage ? " · " + esc(m.stage) : ""}${m.requested ? "" : " (radio queue)"}`);
+  el.innerHTML = parts.length ? parts.join("<br>") : (s.ready ? `${s.ready} song${s.ready === 1 ? "" : "s"} ready to play` : "");
+}
+setInterval(updateMk, 2000);
 </script>
 </body>
 </html>

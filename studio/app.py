@@ -549,7 +549,7 @@ class Worker(threading.Thread):
         import radio
         with lock:
             for j in jobs.values():           # radio work never starts (or re-takes the GPUs) while the radio is off
-                if j["status"] == "queued" and j.get("source") == "radio" and not radio.generating():
+                if j["status"] == "queued" and j.get("source") == "radio" and not radio.generating() and not j.get("requested"):
                     j.update(status="cancelled", stage="", finished=time.time(), radio_status="cancelled"); save_job(j)
             return sorted((j for j in jobs.values() if j["status"] == "queued"), key=lambda j: (j.get("priority", 0), j["created"]))
 
