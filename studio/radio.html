@@ -203,6 +203,13 @@ pre.ly { white-space: pre-wrap; font: 14px/1.7 system-ui, sans-serif; margin: 10
 .diskparts { list-style: none; margin: 6px 0 0; padding: 0; font-size: 12px; color: var(--muted); }
 .diskparts li { display: flex; justify-content: space-between; gap: 8px; padding: 1px 0; }
 .diskparts li b { font-weight: 500; color: var(--text); white-space: nowrap; }
+.assist { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 2px; }
+.assist .btn { font-size: 13px; padding: 5px 10px; }
+#aIdeas { display: grid; gap: 8px; margin: 6px 0; }
+#aIdeas:empty { display: none; }
+.idea { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--soft); }
+.idea p { margin: 4px 0 8px; font-size: 14px; line-height: 1.45; }
+.idea .btn { font-size: 13px; padding: 4px 10px; }
 .prio { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .prio button { font-size: 13px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
 .prio button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
@@ -1036,11 +1043,13 @@ function editStation(s) {
   const opt = (v, l) => `<option value="${v}" ${s.vocals === v ? "selected" : ""}>${l}</option>`;
   openDialog("Edit " + s.name, `<label class="f" for="eN">Name</label><input type="text" id="eN" value="${esc(s.name)}" maxlength="60">
     <label class="f" for="eD">Description <span>${s.kind === "folder" ? "(optional for learned stations)" : "— the sound the songwriter and critic aim for"}</span></label><textarea id="eD" rows="4" maxlength="2000">${esc(s.description || "")}</textarea>
+    ${assistBar()}
     <label class="f" for="eV">Vocals</label><select id="eV">${opt("mix", "Mix of songs and instrumentals")}${opt("vocals", "Always vocals")}${opt("instrumental", "Instrumental only")}</select>
     <label class="f" for="eL">Language <span>(blank = any)</span></label><input type="text" id="eL" value="${esc(s.language || "")}" maxlength="40">
     <label class="f" for="eT">Lyrics theme <span>(optional)</span></label><textarea id="eT" rows="2" maxlength="1000">${esc(s.theme || "")}</textarea>
     <p class="small muted">${s.kind === "text" ? "Changing the description restarts the station's quality scores, since the critic measures songs against it. " : ""}Songs already made keep their old style; new ones follow the changes.</p>
     <div style="display:flex;gap:8px;align-items:center;margin-top:10px"><button class="btn primary" id="eSave">Save</button><button class="btn" id="eBack">Cancel</button><span class="small" id="eMsg"></span></div>`);
+  wireAssist({name: "eN", desc: "eD", vocals: "eV", lang: "eL", theme: "eT"}, false);
   $("eBack").onclick = () => openStation(s.id);
   $("eSave").onclick = async () => {
     try {
@@ -1073,17 +1082,57 @@ function wireFolderTools(s) {
   $("files").onchange = () => send($("files").files);
   $("analyze").onclick = async () => { await post(`/api/radio/stations/${s.id}/analyze`).catch(e => ($("anaStat").textContent = e.message)); $("anaStat").textContent = "Learning… (about a second per song after a short warm-up)"; };
 }
+// ---------- ✨ Improve / 💡 Suggest for a station's description, with the radio's own songwriter model
+const assistBar = () => `<div class="assist"><button type="button" class="btn" data-assist="improve" title="Rewrite the description into a richer brief for the songwriter">✨ Improve with AI</button>
+  <button type="button" class="btn" data-assist="suggest" title="Three different directions to pick from">💡 Suggest ideas</button><span class="small muted" id="aMsg" role="status"></span></div><div id="aIdeas"></div>`;
+function wireAssist(ids, creating) {
+  const f = (k) => $(ids[k]), msg = $("aMsg");
+  const fields = () => ({name: f("name").value, description: f("desc").value, vocals: f("vocals").value, language: f("lang").value, theme: f("theme").value});
+  const fill = (d, all) => {
+    if (d.description) f("desc").value = d.description;
+    if (d.name && (all || !f("name").value.trim())) f("name").value = d.name;
+    if (d.theme && (all || f("theme").value.trim() || !f("theme").value)) f("theme").value = d.theme;
+    if (d.vocals && all) f("vocals").value = d.vocals;
+    [f("desc"), f("theme")].forEach(t => t.dispatchEvent(new Event("input")));
+  };
+  document.querySelectorAll("[data-assist]").forEach(b => b.onclick = async () => {
+    const mode = b.dataset.assist, before = fields();
+    document.querySelectorAll("[data-assist]").forEach(x => x.disabled = true);
+    msg.textContent = (mode === "improve" ? "Improving" : "Thinking up ideas") + "… the songwriter model runs on the CPU: usually under a minute, up to a few while the radio is writing songs.";
+    $("aIdeas").innerHTML = "";
+    try {
+      const r = await post("/api/radio/stations/assist", {mode, ...before});
+      if (mode === "improve") {
+        fill(r.improved, false);
+        msg.innerHTML = `Improved ✓ <a href="#" id="aUndo">Undo</a>`;
+        $("aUndo").onclick = (e) => { e.preventDefault(); f("desc").value = before.description; f("name").value = before.name; f("theme").value = before.theme; msg.textContent = "Back to your version."; };
+      } else {
+        msg.textContent = "Pick one to use it" + (creating ? "" : " (Save to keep it)") + ":";
+        $("aIdeas").innerHTML = r.ideas.map((d, i) => `<div class="idea"><b>${esc(d.name || "Idea " + (i + 1))}</b>${d.vocals ? ` <span class="small muted">· ${esc(d.vocals)}</span>` : ""}
+          <p>${esc(d.description)}</p>${d.theme ? `<p class="small muted">Lyrics: ${esc(d.theme)}</p>` : ""}<button type="button" class="btn" data-idea="${i}">Use this</button></div>`).join("");
+        $("aIdeas").querySelectorAll("[data-idea]").forEach(x => x.onclick = () => {
+          fill(r.ideas[+x.dataset.idea], true); $("aIdeas").innerHTML = "";
+          msg.innerHTML = `Using “${esc(r.ideas[+x.dataset.idea].name || "that idea")}” <a href="#" id="aUndo">Undo</a>`;
+          $("aUndo").onclick = (e) => { e.preventDefault(); Object.entries({name: "name", desc: "description", vocals: "vocals", theme: "theme"}).forEach(([k, v]) => f(k).value = before[v]); msg.textContent = "Back to your version."; };
+        });
+      }
+    } catch (e) { msg.innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+    document.querySelectorAll("[data-assist]").forEach(x => x.disabled = false);
+  });
+}
 const openNewStation = () => {
   openDialog("New station", `<div class="seg" role="group"><button type="button" data-k="text" aria-pressed="true">Describe it</button><button type="button" data-k="folder" aria-pressed="false">Learn from my music</button></div>
     <label class="f" for="nName">Name</label><input type="text" id="nName" maxlength="60" placeholder="e.g. Sunday Morning Jazz">
     <label class="f" for="nDesc">Sound <span id="nDescHint">— genres, moods, instruments, era, vocals</span></label>
     <textarea id="nDesc" rows="3" placeholder="e.g. Warm Sunday-morning jazz: brushed drums, upright bass, piano trio, occasional soft female vocal, coffee-shop calm"></textarea>
+    ${assistBar()}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><label class="f" for="nVocals">Vocals</label><select id="nVocals"><option value="mix">Mix of both</option><option value="vocals">Mostly vocals</option><option value="instrumental">Instrumental only</option></select></div>
     <div><label class="f" for="nLang">Language <span>(vocals)</span></label><select id="nLang"><option value="">Any / from description</option><option>English</option><option>Mandarin</option><option>Japanese</option><option>Korean</option><option>Spanish</option><option>French</option><option>German</option></select></div></div>
     <label class="f" for="nTheme">Lyrics theme <span>— optional, e.g. "Halloween horror stories" or "songs about the sea"</span></label>
     <input type="text" id="nTheme" maxlength="1000" placeholder="what every song's lyrics should be about">
     <p class="small muted" id="nFolderNote" hidden>After creating it, open the station tape to drop in your songs, then press “Learn from these songs”. The radio analyzes tempo, key, energy and sound (CLAP), and its critic keeps the takes that sound most like them.</p>
     <div style="margin-top:12px;display:flex;gap:8px;align-items:center"><button class="btn primary" id="nCreate">Create station</button><span class="err" id="nErr"></span></div>`);
+  wireAssist({name: "nName", desc: "nDesc", vocals: "nVocals", lang: "nLang", theme: "nTheme"}, true);
   let kind = "text";
   document.querySelectorAll("[data-k]").forEach(b => b.onclick = () => { kind = b.dataset.k; document.querySelectorAll("[data-k]").forEach(x => x.setAttribute("aria-pressed", x === b)); $("nFolderNote").hidden = kind !== "folder"; $("nDescHint").textContent = kind === "folder" ? "— optional; your songs define it" : "— genres, moods, instruments, era, vocals"; });
   $("nCreate").onclick = async () => {

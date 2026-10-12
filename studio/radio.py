@@ -1287,6 +1287,60 @@ def clear_history():
     return {"ok": True}
 
 
+ASSIST_SYSTEM = """You help someone set up a station on an AI radio. A songwriter model reads the station's description and
+writes each song's style tags and lyrics; the YuE music model then sings it. Good descriptions are one paragraph of 25-70 words
+naming: genres and sub-genres, signature instruments, vocal type (or instrumental), mood and energy, a tempo range in BPM,
+and era or production feel. The music model knows no artists or song titles, so describe a named artist's SOUND instead of
+naming them. Keep every specific thing the person asked for. No hashtags, no lists, no quotes.
+Reply with JSON only."""
+
+
+def station_assist(body):
+    """✨ Improve a station's description (and theme), or 💡 suggest three directions, with the radio's songwriter model."""
+    mode = body.get("mode")
+    if mode not in ("improve", "suggest"):
+        raise app.BadRequest("mode must be improve or suggest")
+    cur = {k: str(body.get(k) or "")[:2000] for k in ("name", "description", "vocals", "language", "theme")}
+    have = "\n".join(f"{k}: {v}" for k, v in cur.items() if v.strip()) or "(nothing yet)"
+    if mode == "improve":
+        if not (cur["description"].strip() or cur["name"].strip()):
+            raise app.BadRequest("Write a name or a few words about the sound first")
+        ask = ("Rewrite this station so the songwriter gets a vivid, specific brief. Keep its idea, language and vocals choice.\n"
+               f"{have}\n\nReturn {{\"name\": short station name (keep theirs if they gave one), \"description\": the improved paragraph, "
+               "\"theme\": improved lyrics theme in one sentence, or \"\" if they gave none and none fits}")
+    else:
+        ask = ("Suggest three DIFFERENT directions for this station: one close to what they have, one bolder twist, one surprising "
+               "neighbouring style. Keep each description to 25-40 words. What they have so far:\n"
+               f"{have}\n\nReturn {{\"ideas\": [{{\"name\", \"description\", "
+               "\"vocals\": \"mix\"|\"vocals\"|\"instrumental\", \"theme\": one-sentence lyrics theme or \"\"}} x3]}}")
+    last = None
+    for base, model, label in llm_candidates():
+        try:
+            req = {"model": model, "temperature": 0.8 if mode == "suggest" else 0.6, "top_p": 0.95, "max_tokens": 900,
+                   "chat_template_kwargs": {"enable_thinking": False},
+                   "messages": [{"role": "system", "content": ASSIST_SYSTEM}, {"role": "user", "content": ask}], **app.LLM_EXTRA}
+            r = json.loads(urllib.request.urlopen(urllib.request.Request(base + "/chat/completions", json.dumps(req).encode(),
+                           {"Content-Type": "application/json"}), timeout=max(app.LLM_TIMEOUT, 300)).read())
+            out = parse_json_reply(r["choices"][0]["message"]["content"])
+            clean = lambda d: {"name": str(d.get("name") or "").strip()[:60], "description": str(d.get("description") or "").strip()[:2000],
+                               "theme": str(d.get("theme") or "").strip()[:1000],
+                               **({"vocals": d["vocals"]} if d.get("vocals") in ("mix", "vocals", "instrumental") else {})}
+            if mode == "improve":
+                res = clean(out)
+                if not res["description"]:
+                    raise ValueError("no description in the reply")
+                return {"improved": res, "writer": label}
+            ideas = [clean(i) for i in (out.get("ideas") or []) if isinstance(i, dict)]
+            ideas = [i for i in ideas if i["description"]][:3]
+            if not ideas:
+                raise ValueError("no ideas in the reply")
+            return {"ideas": ideas, "writer": label}
+        except Exception as e:
+            last = e
+            app.log(f"station assist ({label}): {e}")
+    raise app.BadRequest(f"The songwriter model couldn't help right now ({last}). Try again in a moment.")
+
+
 def handle(h, method, path):
     """Route /api/radio/* requests. Returns True if handled."""
     q = {}
@@ -1331,6 +1385,8 @@ def handle(h, method, path):
         m = re.fullmatch(r"/api/radio/stations/([\w]+)/history", path)
         if method == "GET" and m:
             return h.send(200, {"tracks": history(m.group(1))}) or True
+        if method == "POST" and path == "/api/radio/stations/assist":
+            return h.send(200, station_assist(h.body())) or True
         if method == "POST" and path == "/api/radio/stations":
             return h.send(200, {"station": create_station(h.body())}) or True
         m = re.fullmatch(r"/api/radio/stations/([\w]+)", path)
