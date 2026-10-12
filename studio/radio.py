@@ -1342,18 +1342,26 @@ def station_assist(body):
     if mode == "improve":
         if not (cur["description"].strip() or cur["name"].strip()):
             raise app.BadRequest("Write a name or a few words about the sound first")
-        ask = ("Rewrite this station so the songwriter gets a vivid, specific brief. Keep its idea, language and vocals choice.\n"
-               f"{have}\n\nReturn {{\"name\": short station name (keep theirs if they gave one), \"description\": the improved paragraph, "
-               "\"theme\": improved lyrics theme in one sentence, or \"\" if they gave none and none fits}")
+        ask = ("EDIT this station description; do not replace it. It is the person's own idea and must stay recognisably theirs.\n"
+               f"ORIGINAL DESCRIPTION: {cur['description'] or cur['name']}\n"
+               + (f"Station name: {cur['name']}\n" if cur["name"] else "") + (f"Lyrics theme: {cur['theme']}\n" if cur["theme"] else "")
+               + (f"Vocals: {cur['vocals']}\n" if cur["vocals"] else "") + (f"Language: {cur['language']}\n" if cur["language"] else "")
+               + "\nRules: keep EVERY genre, instrument, artist, mood, place and detail the original mentions, in roughly the same order. "
+               "Fix spelling (artist names especially). Keep artist names, and add a few words on what their sound is like. "
+               "Only ADD what is missing: tempo range in BPM, era or production feel, vocal type, mood. Do not change the style, "
+               "do not invent a different sound, do not drop anything. One paragraph, at most about twice the original length.\n"
+               "Return {\"name\": the station name unchanged (or a short one if there was none), \"description\": the edited paragraph, "
+               "\"theme\": the lyrics theme lightly polished, or \"\" if there was none}")
     else:
         ask = ("Suggest three DIFFERENT directions for this station: one close to what they have, one bolder twist, one surprising "
                "neighbouring style. Keep each description to 25-40 words. What they have so far:\n"
                f"{have}\n\nReturn {{\"ideas\": [{{\"name\", \"description\", "
                "\"vocals\": \"mix\"|\"vocals\"|\"instrumental\", \"theme\": one-sentence lyrics theme or \"\"}} x3]}}")
-    last = None
-    for base, model, label in gpu_first(llm_candidates()):
+    last, best = None, None
+    keep = _key_words(cur["description"] or cur["name"])          # what an improvement must not lose
+    for base, model, label in [c for c in gpu_first(llm_candidates()) for _ in range(2 if mode == "improve" else 1)]:
         try:
-            req = {"model": model, "temperature": 0.8 if mode == "suggest" else 0.6, "top_p": 0.95, "max_tokens": 900,
+            req = {"model": model, "temperature": 0.8 if mode == "suggest" else 0.3, "top_p": 0.9, "max_tokens": 900,
                    "chat_template_kwargs": {"enable_thinking": False},
                    "messages": [{"role": "system", "content": ASSIST_SYSTEM}, {"role": "user", "content": ask}], **app.LLM_EXTRA}
             r = json.loads(urllib.request.urlopen(urllib.request.Request(base + "/chat/completions", json.dumps(req).encode(),
@@ -1366,7 +1374,16 @@ def station_assist(body):
                 res = clean(out)
                 if not res["description"]:
                     raise ValueError("no description in the reply")
-                return {"improved": res, "writer": label}
+                if not cur["theme"]:
+                    res["theme"] = ""                    # don't invent a lyrics theme they didn't ask for
+                kept = _kept(keep, res["description"])
+                if not best or kept > best[0]:
+                    best = (kept, {"improved": res, "writer": label, "kept": round(kept, 2)})
+                if kept >= 0.66:
+                    return best[1]
+                last = f"it dropped too much of the original ({kept:.0%} kept)"
+                app.log(f"station assist ({label}): {last}, trying again")
+                continue
             ideas = [clean(i) for i in (out.get("ideas") or []) if isinstance(i, dict)]
             ideas = [i for i in ideas if i["description"]][:3]
             if not ideas:
@@ -1375,7 +1392,25 @@ def station_assist(body):
         except Exception as e:
             last = e
             app.log(f"station assist ({label}): {e}")
+    if best:
+        return best[1]                                  # the most faithful version we got
     raise app.BadRequest(f"The songwriter model couldn't help right now ({last}). Try again in a moment.")
+
+
+_STOP = set("with that this from have them they their there what when your into over than then also just like some very much more most "
+            "about after before music sound songs song style station".split())
+
+
+def _key_words(text):
+    return {w for w in re.findall(r"[a-z][a-z0-9'/-]{3,}", str(text or "").lower()) if w not in _STOP}
+
+
+def _kept(words, text):
+    """Share of the original's meaningful words still in the result (prefix match, so 'guitars' keeps 'guitar')."""
+    if not words:
+        return 1.0
+    low = str(text or "").lower()
+    return sum(1 for w in words if w[:max(4, len(w) - 2)] in low) / len(words)
 
 
 def handle(h, method, path):
