@@ -10,7 +10,7 @@ steers both the prompts and the critic.
 
 Everything runs on the CPU here (CLAP, librosa); the GPUs stay with YuE2.
 """
-import json, os, queue, random, re, shutil, subprocess, threading, time, traceback, urllib.request, uuid
+import collections, json, os, queue, random, re, shutil, subprocess, threading, time, traceback, urllib.request, uuid
 from pathlib import Path
 
 import numpy as np
@@ -21,6 +21,25 @@ lock = threading.RLock()
 stations: dict[str, dict] = {}
 state = {"on": False, "station": None, "target_ahead": 4, "max_inflight": 2}
 RERUNS = "__reruns__"               # pseudo-station: replays songs from every station, generates nothing
+TAKES = int(os.environ.get("RADIO_TAKES", "2"))   # takes rendered per song; the critic airs the best one
+# tunables below are defaults; the ⚙ Settings dialog (settings.py) changes them live
+MAX_SECONDS, OPENER_SECONDS = 300, 150   # length caps (safety only: songs should end on their own)
+INSTRUMENTAL_SHARE = 0.4                 # 'mix' stations: share of instrumentals
+KEEP_TEXT, KEEP_LEARNED = 0.85, 0.7      # critic: share of takes kept once a station has WARMUP_SCORES scores
+WARMUP_SCORES, WARMUP_FLOOR = 4, 0.75    # before that: drop takes under WARMUP_FLOOR x the station's median
+MIN_SONG_SECONDS = 30                    # shorter takes are broken
+SPEC_TEMPERATURE = 1.0                   # songwriter creativity
+# broadcast sound (applied per song by the ffmpeg encoder; see audio_filters)
+BITRATE = 192                            # kbit/s; a change takes effect at the next song (listeners reconnect)
+LOUDNESS = None                          # target LUFS for loudness evening (EBU R128), None = off
+BASS_DB = TREBLE_DB = 0.0                # tone controls
+STEREO_WIDTH = 1.0                       # 0 = mono, 1 = as recorded, 2 = extra wide
+COMPRESSION = "off"                      # off | light | medium | heavy
+LIMITER = True                           # stop clipping
+FADE_IN, FADE_OUT, GAP = 0.0, 0.0, 0.0   # seconds
+# music model (YuE2) for radio songs; None = the model's own default
+ODE_STEPS, CFG_SCALE = 32, None
+SONG_SAMPLING, SCORE_SAMPLING = {}, {}   # temperature / top_p / top_k / repetition_penalty overrides
 
 
 def generating():
@@ -60,6 +79,10 @@ def init(studio_module):
         state.update(json.loads((RADIO / "state.json").read_text()))
     except Exception:
         pass
+    if os.environ.get("RADIO_AHEAD"):                 # songs to keep ready or in the making (overrides the saved value)
+        state["target_ahead"] = int(os.environ["RADIO_AHEAD"])
+    import settings, sys
+    settings.init(app, sys.modules[__name__])        # saved ⚙ settings win over env vars and built-ins
     # resume only after a quick service restart (studio was alive < 2 min ago); after a reboot the radio starts off
     state["on"] = bool(state.get("on")) and time.time() - (state.get("heartbeat") or 0) < 120 and state.get("station") is not None
     if state["on"]:
@@ -379,7 +402,7 @@ def llm_candidates():
 
 
 def write_spec(s, short=False):
-    want_inst = s["vocals"] == "instrumental" or (s["vocals"] == "mix" and random.random() < 0.4)
+    want_inst = s["vocals"] == "instrumental" or (s["vocals"] == "mix" and random.random() < INSTRUMENTAL_SHARE)
     recent = [j for j in app.jobs.values() if j.get("station") == s["id"] and j.get("source") == "radio"
               and j.get("radio_status") in ("approved", "played", "rendering", "judging")]
     recent = sorted(recent, key=lambda j: -j["created"])[:14]
@@ -425,11 +448,12 @@ def write_spec(s, short=False):
         if not state["on"]:
             break
         try:
-            body = {"model": model, "temperature": 1.0, "top_p": 0.95, "max_tokens": 2200,
+            body = {"model": model, "temperature": SPEC_TEMPERATURE, "top_p": 0.95, "max_tokens": 2200,
                     "chat_template_kwargs": {"enable_thinking": False},
-                    "messages": [{"role": "system", "content": SPEC_SYSTEM}, {"role": "user", "content": "\n".join(u)}]}
+                    "messages": [{"role": "system", "content": SPEC_SYSTEM}, {"role": "user", "content": "\n".join(u)}],
+                    **app.LLM_EXTRA}
             r = json.loads(urllib.request.urlopen(urllib.request.Request(base + "/chat/completions", json.dumps(body).encode(),
-                           {"Content-Type": "application/json"}), timeout=180).read())
+                           {"Content-Type": "application/json"}), timeout=app.LLM_TIMEOUT).read())
             text = r["choices"][0]["message"]["content"]
             spec = parse_json_reply(text)
             style = str(spec.get("style", "")).strip()[:600]
@@ -475,6 +499,7 @@ def spool_loop():
             time.sleep(2)
             if time.time() - state.get("heartbeat", 0) > 20:
                 save_state()                               # heartbeat: lets a quick restart resume the broadcast
+            settle_stragglers()
             sid = state["station"]
             if not state["on"] or sid not in stations:
                 continue
@@ -515,13 +540,17 @@ def produce(sid):
         with app.lock:   # nothing ready and nothing being made for this station -> open with a short song
             busy = any(j.get("station") == sid and j.get("source") == "radio" and j["status"] in ("queued", "running")
                        for j in app.jobs.values())
-        short = not busy and not station_tracks(sid, ("approved",)) and writing.get(sid, 0) <= 1
+        ready = len(station_tracks(sid, ("approved",)))
+        short = not busy and not ready and writing.get(sid, 0) <= 1
+        takes = TAKES if ready >= 2 else 1      # spool running low: one take, so the broadcast never runs dry
         spec = write_spec(s, short=short)
         if not state["on"] or state["station"] != sid:
             app.log("radio: discarding a spec written after the radio was switched off / retuned")
             return
         body = {"mode": "instrumental" if spec["instrumental"] else "song", "title": spec["title"], "author": "radio",
-                "style": spec["style"], "lyrics": spec["lyrics"], "cot": "full", "max_seconds": 150 if short else 300}   # a safety cap only: songs should end on their own
+                "style": spec["style"], "lyrics": spec["lyrics"], "cot": "full", "max_seconds": OPENER_SECONDS if short else MAX_SECONDS, "takes": takes,
+                "ode_steps": ODE_STEPS, "cfg_scale": CFG_SCALE, "semantic_sampling": dict(SONG_SAMPLING),
+                "abc_sampling": dict(SCORE_SAMPLING)}   # a safety cap only: songs should end on their own
         if not spec["instrumental"] and not spec["lyrics"].strip():
             body["mode"] = "instrumental"
         app.new_jobs(body, extra={"source": "radio", "station": sid, "priority": 1, "radio_status": "rendering",
@@ -536,88 +565,211 @@ def produce(sid):
 
 
 def judge(job):
-    """Called (in a thread) when a radio job finishes rendering: CLAP critic decides approve/reject."""
+    """Called (in a thread) when a radio job finishes rendering. Each take is scored by the CLAP critic; once every
+    take of the song is in, the best one faces the station's bar and the others become runners-up (filler)."""
     sid = job.get("station"); s = stations.get(sid)
     if not s:
         return
     if job["status"] != "done":
         job["radio_status"] = "failed"; app.save_job(job)
-        return
+        return settle_takes(job, s)
     job["radio_status"] = "judging"
     try:
-        path = app.DATA / job["id"] / "song.mp3"
-        if not path.is_file():
-            path = app.DATA / job["id"] / "song" / "audio.flac"
-        emb, y = audio_embedding(path)
-        np.save(app.DATA / job["id"] / "clap.npy", emb)
-        rms = float(np.sqrt(np.mean(y ** 2)))
-        sane = (job.get("seconds") or 0) >= 30 and rms > 0.01
-        if s["kind"] == "folder" and (sdir(sid) / "corpus.npy").is_file():
-            ref = np.load(sdir(sid) / "corpus.npy")
-        else:
-            ref = text_embeddings([s["description"][:300] or s["name"]])
-        base = float(np.sort(ref @ emb)[::-1][:5].mean())
-        likes, dislikes, recent = [], [], []
-        for f in s["feedback"]:
-            p = app.DATA / f["track"] / "clap.npy"
-            if p.is_file() and f["kind"] in ("keep", "dislike"):
-                (likes if f["kind"] == "keep" else dislikes).append(np.load(p))
-        with app.lock:
-            aired = sorted((j for j in app.jobs.values() if j.get("station") == sid and j.get("source") == "radio" and
-                            j["id"] != job["id"] and j.get("radio_status") in ("approved", "played")),
-                           key=lambda j: -j.get("approved_at", 0))[:12]
-        for j in aired:
-            p = app.DATA / j["id"] / "clap.npy"
-            if p.is_file():
-                recent.append(np.load(p))
-        like_b = 0.15 * (float(np.max(np.stack(likes) @ emb)) - 0.5) if likes else 0.0       # gentle nudge only
-        dis_p = 0.5 * max(0.0, float(np.max(np.stack(dislikes) @ emb)) - 0.6) if dislikes else 0.0
-        dup = float(np.max(np.stack(recent) @ emb)) if recent else 0.0
-        score = base + like_b - dis_p - 1.0 * max(0.0, dup - 0.93)    # CLAP saturates within a genre: soft novelty penalty
-        if dup > 0.99:
-            sane = False          # only a true clone; same-station songs routinely score 0.95-0.97 (CLAP saturates)
-        hist = s["scores"][-20:]
-        learned = s["kind"] == "folder"
-        keep_frac, warmup = (0.7, 4) if learned else (0.85, 8)    # text stations only drop clear misses
-        bar = float(np.quantile(hist, 1 - keep_frac)) if len(hist) >= warmup else -1.0
-        verdict = "approved" if sane and score >= bar else "rejected"
-        with lock:
-            if job.get("spec_writer") != "fallback":
-                s["scores"] = (s["scores"] + [score])[-50:]
-            s["stats"]["approved" if verdict == "approved" else "rejected"] += 1
-            save_station(s)
-        job.update(radio_status=verdict, critic={"score": round(score, 4), "bar": round(bar, 4), "sane": sane, "dup": round(dup, 3)},
-                   approved_at=time.time())
-        app.save_job(job)
-        app.log("radio critic", job["title"], verdict, round(score, 3), "bar", round(bar, 3))
+        score, sane, dup = critic_score(job, s)
+        job["critic"] = {"score": round(score, 4), "sane": sane, "dup": round(dup, 3)}
     except Exception:
         app.log("radio critic error:", traceback.format_exc())
-        job["radio_status"] = "approved"; job["approved_at"] = time.time(); app.save_job(job)
+        job["critic"] = {"score": None, "sane": True, "dup": 0.0}      # critic broke: don't hold the song back
+    app.save_job(job)
+    settle_takes(job, s)
+
+
+def station_bar(s):
+    """The score a song must reach to air. Text stations keep the top KEEP_TEXT share, learned ones KEEP_LEARNED,
+    once WARMUP_SCORES scores exist; before that, only clear misses (under WARMUP_FLOOR x the station's median) are
+    dropped. Scores live on each station's own scale (CLAP similarity to its description), so the bar is relative."""
+    hist = s["scores"][-20:]
+    keep_frac = KEEP_LEARNED if s["kind"] == "folder" else KEEP_TEXT
+    if len(hist) >= WARMUP_SCORES:
+        return float(np.quantile(hist, 1 - keep_frac))
+    if len(hist) >= 2:
+        return WARMUP_FLOOR * float(np.median(hist))
+    return -1.0
+
+
+def settle_takes(job, s):
+    """Once all takes of a song are finished and scored, approve the best take (if it clears the bar)."""
+    batch = job.get("batch")
+    with app.lock:
+        takes = [j for j in app.jobs.values() if j.get("source") == "radio" and j.get("batch") == batch] if batch else [job]
+    if any(j["status"] in ("queued", "running") or (j["status"] == "done" and "critic" not in j) for j in takes):
+        return                                           # wait for the other takes
+    with lock:
+        if any(j.get("radio_status") in ("approved", "rejected", "played") for j in takes):
+            return                                       # already settled by another thread
+        scored = [j for j in takes if j["status"] == "done" and j.get("critic")]
+        if not scored:
+            return
+        rank = lambda j: (j["critic"]["sane"], j["critic"]["score"] if j["critic"]["score"] is not None else float("inf"))
+        best = max(scored, key=rank)
+        bar = station_bar(s)
+        score = best["critic"]["score"]
+        verdict = "approved" if best["critic"]["sane"] and (score is None or score >= bar) else "rejected"
+        if job.get("spec_writer") != "fallback":
+            s["scores"] = (s["scores"] + [j["critic"]["score"] for j in scored if j["critic"]["score"] is not None])[-50:]
+        s["stats"]["approved" if verdict == "approved" else "rejected"] += 1
+        save_station(s)
+        now = time.time()
+        for j in scored:
+            j["critic"].update(bar=round(bar, 4), takes=len(takes))
+            j.update(radio_status=verdict if j is best else "rejected", approved_at=now)
+            app.save_job(j)
+    for j in scored:
+        sc = j["critic"]["score"]
+        app.log("radio critic", j["title"], f"take {j.get('take', 1)}/{len(takes)}",
+                verdict if j is best else "runner-up", "n/a" if sc is None else round(sc, 3), "bar", round(bar, 3))
+
+
+def settle_stragglers():
+    """Songs whose remaining takes were cancelled (radio switched off) or that were scored before a restart."""
+    with app.lock:
+        waiting = [j for j in app.jobs.values() if j.get("source") == "radio" and j.get("radio_status") == "judging"
+                   and "critic" in j]
+    for j in waiting:
+        s = stations.get(j.get("station"))
+        if s:
+            settle_takes(j, s)
+
+
+def critic_score(job, s):
+    """CLAP critic: how well this take fits the station, nudged by likes/dislikes, minus a novelty penalty."""
+    sid = s["id"]
+    path = app.DATA / job["id"] / "song.mp3"
+    if not path.is_file():
+        path = app.DATA / job["id"] / "song" / "audio.flac"
+    emb, y = audio_embedding(path)
+    np.save(app.DATA / job["id"] / "clap.npy", emb)
+    rms = float(np.sqrt(np.mean(y ** 2)))
+    sane = (job.get("seconds") or 0) >= MIN_SONG_SECONDS and rms > 0.01
+    if s["kind"] == "folder" and (sdir(sid) / "corpus.npy").is_file():
+        ref = np.load(sdir(sid) / "corpus.npy")
+    else:
+        ref = text_embeddings([s["description"][:300] or s["name"]])
+    base = float(np.sort(ref @ emb)[::-1][:5].mean())
+    likes, dislikes, recent = [], [], []
+    for f in s["feedback"]:
+        p = app.DATA / f["track"] / "clap.npy"
+        if p.is_file() and f["kind"] in ("keep", "dislike"):
+            (likes if f["kind"] == "keep" else dislikes).append(np.load(p))
+    with app.lock:
+        aired = sorted((j for j in app.jobs.values() if j.get("station") == sid and j.get("source") == "radio" and
+                        j["id"] != job["id"] and j.get("radio_status") in ("approved", "played")),
+                       key=lambda j: -j.get("approved_at", 0))[:12]
+    for j in aired:
+        p = app.DATA / j["id"] / "clap.npy"
+        if p.is_file():
+            recent.append(np.load(p))
+    like_b = 0.15 * (float(np.max(np.stack(likes) @ emb)) - 0.5) if likes else 0.0       # gentle nudge only
+    dis_p = 0.5 * max(0.0, float(np.max(np.stack(dislikes) @ emb)) - 0.6) if dislikes else 0.0
+    dup = float(np.max(np.stack(recent) @ emb)) if recent else 0.0
+    score = base + like_b - dis_p - 1.0 * max(0.0, dup - 0.93)    # CLAP saturates within a genre: soft novelty penalty
+    if dup > 0.99:
+        sane = False          # only a true clone; same-station songs routinely score 0.95-0.97 (CLAP saturates)
+    return score, sane, dup
 
 
 # ----------------------------------------------------------------------------- broadcast
 # One shared live MP3 stream: a single playout thread picks the next approved track and every listener
 # (browser deck, VLC, phone) hears the same audio. 192 kbit/s CBR at 48 kHz -> exactly 24000 bytes per second,
 # so a byte offset in the stream is also a time offset; clients use that to know which song is audible.
-BPS = 24000
-FRAME = 576                         # 144 * 192000 / 48000: every frame is exactly this size (no padding)
-BURST = 4 * BPS // FRAME * FRAME   # ~4 s, whole frames: new listeners get it at once so playback starts immediately
+BPS = 24000                         # bytes per second of the stream (BITRATE / 8)
+FRAME = 576                         # 144 * 192000 / 48000: at 48 kHz CBR every frame is exactly this size (no padding)
+# whole frames sent at once to a new listener: playback starts immediately and the player holds this much slack
+# against network hiccups (phones on Wi-Fi/cell). The listener hears the broadcast this far behind live.
+BURST = int(os.environ.get("RADIO_BURST_SECONDS", "15")) * BPS // FRAME * FRAME
+LEAD = BURST / BPS                # seconds the stream runs ahead of real time (see _broadcast)
+STALE = 60                        # after this long without listeners the buffered audio is dropped; a phone that
+                                  # reconnects sooner (Wi-Fi/cell handover) gets its slack back at once
 ENCODE = ["-vn", "-ac", "2", "-ar", "48000", "-c:a", "libmp3lame", "-b:a", "192k", "-id3v2_version", "0",
           "-write_xing", "0", "-map_metadata", "-1", "-f", "mp3", "pipe:1"]
+ACTIVE_BITRATE = 192                # what the stream is encoded at right now
+
+
+def set_buffer(seconds):
+    global BURST, LEAD
+    BURST = int(seconds) * BPS // FRAME * FRAME
+    LEAD = BURST / BPS
+
+
+def _switch_format():
+    """Apply a new BITRATE between songs: listeners are dropped (players reconnect by themselves) and the stream
+    clock restarts, because byte offsets map to time differently at another bitrate."""
+    global BPS, FRAME, ACTIVE_BITRATE
+    seconds = LEAD
+    with bc_lock:
+        BPS, FRAME, ACTIVE_BITRATE = BITRATE * 1000 // 8, 144 * BITRATE * 1000 // 48000, BITRATE
+        ENCODE[ENCODE.index("-b:a") + 1] = f"{BITRATE}k"
+        set_buffer(seconds)
+        bc["listeners"].clear()
+        bc.update(bytes=0, epoch=time.time(), buf=bytearray(), aired=[], now=None)
+    _make_silence()
+    app.log(f"radio: stream now {BITRATE} kbit/s")
+
+
+def _make_silence():
+    try:
+        bc["silence"] = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+                                        "anullsrc=r=48000:cl=stereo", "-t", "1.152", *ENCODE], capture_output=True, timeout=30).stdout
+    except Exception:
+        app.log("radio: could not make the silence frames:", traceback.format_exc())
+
+
+COMPRESSORS = {"light": "acompressor=threshold=-18dB:ratio=2:attack=20:release=250:makeup=2",
+               "medium": "acompressor=threshold=-20dB:ratio=3:attack=10:release=200:makeup=4",
+               "heavy": "acompressor=threshold=-24dB:ratio=6:attack=5:release=150:makeup=7"}
+
+
+def audio_filters(seconds):
+    """ffmpeg -af chain for one song: tone, stereo width, compression, loudness, limiter, fades."""
+    f = []
+    if BASS_DB:
+        f.append(f"bass=g={BASS_DB:g}:f=100")
+    if TREBLE_DB:
+        f.append(f"treble=g={TREBLE_DB:g}:f=8000")
+    if STEREO_WIDTH == 0:
+        f.append("pan=stereo|c0=0.5*c0+0.5*c1|c1=0.5*c0+0.5*c1")
+    elif STEREO_WIDTH != 1:
+        f.append(f"extrastereo=m={STEREO_WIDTH:g}:c=false")
+    if COMPRESSION in COMPRESSORS:
+        f.append(COMPRESSORS[COMPRESSION])
+    if LOUDNESS is not None:
+        f.append(f"loudnorm=I={LOUDNESS:g}:TP=-1.5:LRA=11")
+    if LIMITER:
+        f.append("alimiter=limit=0.95:level=false")
+    if FADE_IN:
+        f.append(f"afade=t=in:d={FADE_IN:g}")
+    if FADE_OUT and seconds and seconds > FADE_OUT * 2:
+        f.append(f"afade=t=out:st={seconds - FADE_OUT:.2f}:d={FADE_OUT:g}")
+    return ["-af", ",".join(f)] if f else []
 bc = {"listeners": {}, "buf": bytearray(), "bytes": 0, "epoch": 0.0, "now": None, "aired": [],
       "skip": threading.Event(), "wake": threading.Event(), "silence": b"", "last": 0.0}
 bc_lock = threading.Lock()
+listen_lock = threading.Lock()
 
 
 def _broadcast(chunk):
-    """Pace the stream at real time (bytes sent == elapsed seconds * BPS), then fan the chunk out to listeners."""
-    ahead = (bc["bytes"] + len(chunk)) / BPS - (time.time() - bc["epoch"])
+    """Pace the stream at real time (bytes sent == elapsed seconds * BPS), then fan the chunk out to listeners.
+    The stream runs LEAD seconds ahead of the clock, so every player - also the first one after the stream was
+    idle, or one that just reconnected - holds that much audio in its buffer."""
+    ahead = (bc["bytes"] + len(chunk)) / BPS - (time.time() - bc["epoch"]) - LEAD
     if ahead > 0:
         time.sleep(ahead)
     with bc_lock:
-        if ahead < -1.0:                # we were idle (no listeners): restart the clock instead of bursting to catch up
-            bc["epoch"] = time.time() - (bc["bytes"] + len(chunk)) / BPS
-            bc["buf"].clear()
+        if ahead < -1.0 - LEAD:         # we were idle (no listeners): restart the clock instead of bursting to catch up
+            if time.time() - bc["last"] > STALE:
+                bc["buf"].clear()       # silent for long: the buffered audio is stale
+            # a newcomer gets the kept buffer at once; send only the rest of LEAD ahead, so the slack stays ~LEAD
+            bc["epoch"] = time.time() - (bc["bytes"] + len(chunk) - len(bc["buf"])) / BPS
         bc["bytes"] += len(chunk)
         bc["last"] = time.time()
         bc["buf"] += chunk
@@ -634,6 +786,8 @@ def _air(entry):
         entry = dict(entry or {"id": None}, start_pos=round(bc["bytes"] / BPS, 3))
         bc["now"] = entry if entry.get("id") else None
         bc["aired"] = (bc["aired"] + [entry])[-8:]
+    if entry.get("id"):
+        log_listen(entry)               # playout only runs while someone listens, so every airing was heard
 
 
 def _play_track(t):
@@ -641,8 +795,8 @@ def _play_track(t):
     src = d / "song.mp3"
     if not src.is_file():
         src = d / "song" / "audio.flac"
-    proc = subprocess.Popen(["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(src), *ENCODE],
-                            stdout=subprocess.PIPE, stdin=subprocess.DEVNULL)
+    proc = subprocess.Popen(["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(src), *audio_filters(t.get("seconds")),
+                             *ENCODE], stdout=subprocess.PIPE, stdin=subprocess.DEVNULL)
     bc["skip"].clear()
     _air(t | {"duration": t.get("seconds")})
     app.log("radio on air:", t["title"], f"({len(bc['listeners'])} listening)")
@@ -685,11 +839,7 @@ def _play_silence():
 
 
 def playout_loop():
-    try:
-        bc["silence"] = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
-                                        "anullsrc=r=48000:cl=stereo", "-t", "1.152", *ENCODE], capture_output=True, timeout=30).stdout
-    except Exception:
-        app.log("radio: could not make the silence frames:", traceback.format_exc())
+    _make_silence()
     while True:
         try:
             if not bc["listeners"]:                 # nobody listening: don't burn songs into the void
@@ -697,9 +847,17 @@ def playout_loop():
                     _air(None)
                 bc["wake"].wait(2); bc["wake"].clear()
                 continue
+            if BITRATE != ACTIVE_BITRATE:
+                _switch_format()
+                continue
             t = next_track(state["station"]) if state["on"] and state["station"] else None
             if t:
                 _play_track(t)
+                for _ in range(round(GAP / 1.152)):       # a little silence between songs
+                    if not bc["listeners"]:
+                        break
+                    for i in range(0, len(bc["silence"]), 8 * FRAME):
+                        _broadcast(bc["silence"][i:i + 8 * FRAME])
             else:
                 _play_silence()
         except Exception:
@@ -711,11 +869,16 @@ def stream(h):
     lid = re.sub(r"\W", "", (h.path.split("l=", 1)[1] if "l=" in h.path else "").split("&")[0])[:40] or uuid.uuid4().hex[:12]
     q = queue.Queue(maxsize=400)                    # ~2 minutes of slack before a stuck client is dropped
     with bc_lock:
-        if time.time() - bc["last"] > 1.5:          # stream was idle: the buffer holds stale audio
+        if time.time() - bc["last"] > STALE:        # stream was idle for long: the buffer holds stale audio
             bc["buf"].clear()
         burst = bytes(bc["buf"])
         bc["listeners"][lid] = {"q": q, "p0": (bc["bytes"] - len(burst)) / BPS, "since": time.time(),
-                                "agent": (h.headers.get("User-Agent") or "")[:80]}
+                                "agent": (h.headers.get("User-Agent") or "")[:80], "device": _agent(h), "sent": 0,
+                                "samples": collections.deque(maxlen=64)}
+    _joined[(lid, id(q))] = time.time()
+    peer = h.headers.get("X-Forwarded-For") or h.client_address[0]
+    app.log(f"radio: listener {lid[:6]} joined from {peer} ({_agent(h)}), {len(burst) / BPS:.0f} s cushion")
+    why = "left"
     bc["wake"].set()
     try:
         h.send_response(200)
@@ -723,22 +886,71 @@ def stream(h):
                      ("Access-Control-Allow-Origin", "*"), ("icy-name", "b70 radio"), ("X-Content-Type-Options", "nosniff")):
             h.send_header(k, v)
         h.end_headers()
+        li = bc["listeners"][lid]
         if burst:
             h.wfile.write(burst)
+            _count(li, len(burst))
         while lid in bc["listeners"] and bc["listeners"][lid]["q"] is q:
             try:
                 chunk = q.get(timeout=5)
             except queue.Empty:
                 continue
             h.wfile.write(chunk)
-    except (BrokenPipeError, ConnectionResetError, OSError):
-        pass
+            _count(li, len(chunk))
+        else:
+            why = "dropped by the server (too slow to keep up, or a format change)"
+    except (BrokenPipeError, ConnectionResetError, OSError) as e:
+        why = f"connection closed ({type(e).__name__})"
     finally:
         with bc_lock:
             if bc["listeners"].get(lid, {}).get("q") is q:
                 bc["listeners"].pop(lid, None)
+        app.log(f"radio: listener {lid[:6]} {why} after {time.time() - bc_since(lid, q):.0f} s")
     h.close_connection = True
 
+
+def _count(li, n):
+    li["sent"] += n
+    li["samples"].append((time.time(), li["sent"]))
+
+
+def listeners_view(me=None):
+    """Per-listener metrics: what the server delivered over the last ~10 s and how much is still queued for it."""
+    now, out = time.time(), []
+    with bc_lock:
+        for lid, li in bc["listeners"].items():
+            recent = [x for x in li["samples"] if now - x[0] <= 10]
+            rate = (recent[-1][1] - recent[0][1]) / (recent[-1][0] - recent[0][0]) if len(recent) > 1 and recent[-1][0] > recent[0][0] else 0
+            out.append({"id": lid[:6], "me": lid == me, "device": li.get("device", "?"), "seconds": round(now - li["since"]),
+                        "kbps": round(rate * 8 / 1000), "sent_mb": round(li["sent"] / 2**20, 1), "sent": li["sent"],
+                        "backlog_s": round(li["q"].qsize() * 8192 / BPS, 1)})
+    return sorted(out, key=lambda x: (not x["me"], x["seconds"]))
+
+
+_noise_cache = b""
+
+
+def _noise(n):
+    """Incompressible bytes for the speed test (cached)."""
+    global _noise_cache
+    if len(_noise_cache) < n:
+        _noise_cache = os.urandom(n)
+    return _noise_cache[:n]
+
+_joined = {}
+
+
+def bc_since(lid, q):
+    return _joined.pop((lid, id(q)), time.time())
+
+
+def _agent(h):
+    ua = h.headers.get("User-Agent") or ""
+    for key, name in (("VLC", "VLC"), ("Android", "Android"), ("iPhone", "iPhone"), ("Windows", "Windows"), ("Macintosh", "Mac"),
+                      ("Linux", "Linux"), ("curl", "curl"), ("Python", "script")):
+        if key in ua:
+            return name + (" Chrome" if "Chrome" in ua and key != "VLC" else "")
+    return ua[:30] or "unknown"
 
 def skip(track_id, kind="skip"):
     """Skip (or NOPE) the song on air - for everyone, it's one broadcast."""
@@ -754,7 +966,9 @@ def stream_view(listener=None):
     with bc_lock:
         li = bc["listeners"].get(listener) if listener else None
         return {"pos": round(bc["bytes"] / BPS, 3), "listeners": len(bc["listeners"]), "aired": bc["aired"],
-                "now": bc["now"], "p0": li["p0"] if li else None, "url": "/radio/stream.mp3"}
+                "now": bc["now"], "p0": li["p0"] if li else None, "url": "/radio/stream.mp3",
+                "clock": round(time.time() - bc["epoch"], 3) if bc["listeners"] else None,   # real-time position
+                "bitrate": ACTIVE_BITRATE, "lead": round(LEAD, 1)}
 
 
 # ----------------------------------------------------------------------------- API
@@ -762,7 +976,7 @@ def stream_view(listener=None):
 def track_view(j):
     return {"id": j["id"], "title": j["title"], "style": j["style"], "lyrics": j.get("lyrics", ""), "mode": j["mode"],
             "seconds": j.get("seconds"), "station": j.get("station"), "critic": j.get("critic"), "feedback": j.get("radio_feedback"),
-            "played_at": j.get("played_at"), "audio": f"/files/{j['id']}/song.mp3",
+            "played_at": j.get("played_at"), "audio": f"/files/{j['id']}/song.mp3", "in_playlist": bool(j.get("playlist_at")),
             "station_name": stations[j["station"]]["name"] if j.get("station") in stations else None}
 
 
@@ -771,7 +985,7 @@ def rerun_library():
         aired = [j for j in app.jobs.values() if j.get("source") == "radio" and j["status"] == "done" and j.get("played_at")
                  and j.get("radio_feedback") not in ("skip", "dislike")]
     return {"id": RERUNS, "songs": len(aired), "stations": len({j.get("station") for j in aired}),
-            "favorites": sum(1 for j in aired if j.get("radio_feedback") == "keep")}
+            "favorites": sum(1 for j in aired if loved(j))}
 
 
 def api_state(listener=None):
@@ -801,14 +1015,15 @@ def _filler(sid):
     with app.lock:
         mine = [j for j in app.jobs.values() if j.get("source") == "radio" and j.get("station") == sid and j["status"] == "done"
                 and (app.DATA / j["id"] / "song.mp3").is_file()]
+    sung = {j.get("batch") for j in mine if j.get("radio_status") in ("approved", "played")}   # songs whose best take airs
     runners = [j for j in mine if j.get("radio_status") == "rejected" and not j.get("played_at") and (j.get("critic") or {}).get("sane")
-               and now - j.get("finished", 0) < 12 * 3600]
+               and now - j.get("finished", 0) < 12 * 3600 and j.get("batch") not in sung]   # a spare take is no new song
     if runners:
         return max(runners, key=lambda j: j["critic"]["score"]), "runner-up"
     reruns = [j for j in mine if j.get("radio_status") == "played" and now - (j.get("played_at") or 0) > 45 * 60
               and j.get("radio_feedback") not in ("skip", "dislike")]
     if reruns:
-        reruns.sort(key=lambda j: (j.get("radio_feedback") == "keep", (j.get("critic") or {}).get("score", 0)), reverse=True)
+        reruns.sort(key=lambda j: (loved(j), (j.get("critic") or {}).get("score", 0)), reverse=True)
         return random.choice(reruns[:5]), "rerun"
     return None, None
 
@@ -827,7 +1042,7 @@ def _rerun_pick():
     if not fresh:                                   # small library: the least recently aired third
         fresh = sorted(pool, key=lambda j: j["played_at"])[:max(1, len(pool) // 3)]
     last = (bc["aired"][-1] if bc["aired"] else {}).get("station")
-    w = [(3.0 if j.get("radio_feedback") == "keep" else 1.0) * (0.5 + max(0.0, (j.get("critic") or {}).get("score", 0.7)))
+    w = [(3.0 if loved(j) else 1.0) * (0.5 + max(0.0, (j.get("critic") or {}).get("score", 0.7)))
          * (0.4 if j.get("station") == last else 1.0) for j in fresh]
     return random.choices(fresh, weights=w)[0]
 
@@ -949,6 +1164,129 @@ def start_analysis(sid):
     return {"ok": True}
 
 
+# ----------------------------------------------------------------------------- playlist + listen history
+
+def loved(j):
+    """Thumbs up or saved to the playlist: such songs return more often in reruns and as filler."""
+    return j.get("radio_feedback") == "keep" or bool(j.get("playlist_at"))
+
+
+def playlist():
+    """Songs saved with +, any station, most recently added first."""
+    with app.lock:
+        saved = [j for j in app.jobs.values() if j.get("source") == "radio" and j.get("playlist_at")]
+    return [track_view(j) | {"added_at": j["playlist_at"]} for j in sorted(saved, key=lambda j: -j["playlist_at"])]
+
+
+def set_playlist(track_id, on):
+    with app.lock:
+        j = app.jobs.get(track_id)
+        if not j or j.get("source") != "radio":
+            raise app.BadRequest("No such radio track")
+        j["playlist_at"] = time.time() if on else None
+        app.save_job(j)
+    return {"ok": True, "in_playlist": on}
+
+
+LISTENED_KEEP = 3000                    # history entries kept on disk
+
+
+def _listened_path():
+    p = RADIO / "listened.jsonl"
+    if not p.exists():                  # first run: seed from what already aired (one entry per song, its last airing)
+        with app.lock:
+            aired = sorted((j for j in app.jobs.values() if j.get("source") == "radio" and j.get("played_at")),
+                           key=lambda j: j["played_at"])
+        p.write_text("".join(json.dumps({"t": j["played_at"], "track": j["id"], "station": j.get("station")}) + "\n" for j in aired))
+    return p
+
+
+def log_listen(entry):
+    try:
+        p = _listened_path()
+        with listen_lock:
+            with p.open("a") as f:
+                f.write(json.dumps({"t": round(time.time(), 1), "track": entry["id"], "station": state.get("station"),
+                                    "airing": entry.get("airing")}) + "\n")
+            if p.stat().st_size > 400_000:          # trim now and then
+                lines = p.read_text().splitlines()[-LISTENED_KEEP:]
+                p.write_text("\n".join(lines) + "\n")
+    except Exception:
+        app.log("radio listen-history error:", traceback.format_exc())
+
+
+def listened(limit=100):
+    """What was played to listeners, newest first, across every station (reruns included)."""
+    with listen_lock:
+        lines = _listened_path().read_text().splitlines()[-limit:]
+    out = []
+    for line in reversed(lines):
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        with app.lock:
+            j = app.jobs.get(e["track"])
+        if j:
+            out.append(track_view(j) | {"listened_at": e["t"], "airing": e.get("airing"), "via_reruns": e.get("station") == RERUNS})
+    return out
+
+
+# ----------------------------------------------------------------------------- settings helpers
+
+def gpu_memory():
+    """GPU memory in use / total, for the sidebar meter (NVIDIA only; empty elsewhere)."""
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.used,memory.total", "--format=csv,noheader,nounits"],
+                             capture_output=True, text=True, timeout=5).stdout.strip().splitlines()[0]
+        name, used, total = [x.strip() for x in out.split(",")]
+        return {"name": name, "used_mb": int(used), "total_mb": int(total)}
+    except Exception:
+        return {}
+
+def writer_models():
+    """Models each configured songwriter server offers (OpenAI /models), for the settings dialog's pickers."""
+    out = {}
+    for base in dict.fromkeys(u for u, _, _ in app.LYRICS_LLMS):
+        try:
+            with urllib.request.urlopen(base.rstrip("/") + "/models", timeout=2) as r:
+                out[base] = sorted(m["id"] for m in json.loads(r.read()).get("data", []))
+        except Exception:
+            out[base] = []
+    return out
+
+
+def update_station(sid, body):
+    s = stations.get(sid)
+    if not s:
+        raise app.BadRequest("No such station")
+    upd = {}
+    if "name" in body:
+        upd["name"] = app.clean_text(body.get("name"), "Station name", 60, required=True)
+    if "description" in body:
+        upd["description"] = app.clean_text(body.get("description"), "Description", 2000, required=(s["kind"] == "text"))
+    if "vocals" in body:
+        if body["vocals"] not in ("vocals", "instrumental", "mix"):
+            raise app.BadRequest("vocals must be vocals, instrumental or mix")
+        upd["vocals"] = body["vocals"]
+    if "language" in body:
+        upd["language"] = app.clean_text(body.get("language"), "Language", 40)
+    if "theme" in body:
+        upd["theme"] = app.clean_text(body.get("theme"), "Lyrics theme", 1000)
+    with lock:
+        if upd.get("description", s["description"]) != s["description"] and s["kind"] == "text":
+            s["scores"] = []            # the critic scores against the description: a new one starts a new scale
+        s.update(upd)
+        save_station(s)
+    return s
+
+
+def clear_history():
+    with listen_lock:
+        _listened_path().write_text("")
+    return {"ok": True}
+
+
 def handle(h, method, path):
     """Route /api/radio/* requests. Returns True if handled."""
     q = {}
@@ -957,6 +1295,32 @@ def handle(h, method, path):
     try:
         if method == "GET" and path == "/api/radio/favorites":
             return h.send(200, {"tracks": favorites()}) or True
+        if method == "GET" and path == "/api/radio/playlist":
+            return h.send(200, {"tracks": playlist()}) or True
+        if method == "POST" and path == "/api/radio/playlist":
+            b = h.body(); return h.send(200, set_playlist(b.get("track", ""), bool(b.get("on")))) or True
+        if method == "GET" and path == "/api/radio/ping":
+            return h.send(200, {"t": time.time()}) or True
+        if method == "GET" and path == "/api/radio/speedtest":
+            n = max(1, min(int(q.get("mb") or 2), 20)) * 2**20
+            return h.send(200, _noise(n), "application/octet-stream") or True
+        if method == "GET" and path == "/api/radio/listeners":
+            return h.send(200, {"listeners": listeners_view(q.get("me"))}) or True
+        if method == "GET" and path == "/api/radio/gpu":
+            return h.send(200, gpu_memory()) or True
+        if method == "GET" and path == "/api/radio/settings":
+            import settings
+            return h.send(200, settings.view() | {"models": writer_models()}) or True
+        if method == "PUT" and path == "/api/radio/settings":
+            import settings
+            return h.send(200, settings.update(h.body()) | {"models": writer_models()}) or True
+        if method == "POST" and path == "/api/radio/history/clear":
+            return h.send(200, clear_history()) or True
+        m = re.fullmatch(r"/api/radio/stations/([\w]+)", path)
+        if method == "PUT" and m:
+            return h.send(200, {"station": update_station(m.group(1), h.body())}) or True
+        if method == "GET" and path == "/api/radio/listened":
+            return h.send(200, {"tracks": listened(min(500, int(q.get("limit") or 100)))}) or True
         if method == "GET" and path == "/api/radio/state":
             return h.send(200, api_state(q.get("listener"))) or True
         if method == "POST" and path == "/api/radio/skip":

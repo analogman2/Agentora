@@ -29,6 +29,10 @@ MAX_QUEUED = 24
 # paused while the studio holds the GPUs, so add a second server on another machine as the fallback.
 LYRICS_LLMS = [tuple(x.split("|")) for x in os.environ.get(
     "STUDIO_LYRICS_LLMS", "http://localhost:8000/v1|qwen38|local LLM").split(",") if x.strip()]
+# extra JSON fields for every songwriter/lyrics request, e.g. '{"reasoning_effort": "none"}' to stop Ollama models thinking
+LLM_EXTRA = json.loads(os.environ.get("STUDIO_LLM_EXTRA") or "{}")
+# seconds to wait for one song spec; a CPU-only songwriter answers requests one at a time
+LLM_TIMEOUT = int(os.environ.get("STUDIO_LLM_TIMEOUT", "180"))
 TOKENS_PER_AUDIO_SECOND = 25          # YuE2 semantic tokens per second of audio
 GPU_STATE = DATA.parent / "gpu.json"  # remembers whether we paused the LLM (survives restarts)
 FILES = {"audio.flac": ("song/audio.flac", "audio/flac"), "song.mp3": ("song.mp3", "audio/mpeg"),
@@ -53,7 +57,25 @@ def sh(*cmd, timeout=180):
         return f"error: {e}"
 
 
+def unload_ollama_gpu_models():
+    """Ollama models sitting on the graphics card (e.g. the Hermes assistant's) would leave YuE2 short of memory:
+    unload them first. CPU-only models such as the songwriter are left alone."""
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:11434/api/ps", timeout=5) as r:
+            loaded = json.loads(r.read()).get("models", [])
+        for m in loaded:
+            if m.get("size_vram"):
+                log("unloading", m["name"], "from the GPU for YuE2")
+                urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:11434/api/generate",
+                                       json.dumps({"model": m["name"], "keep_alive": 0}).encode(),
+                                       {"Content-Type": "application/json"}), timeout=30).read()
+    except Exception as e:
+        log("couldn't check Ollama's GPU models:", e)
+
+
 def llm_active():
+    if not LLM_UNIT:                     # STUDIO_LLM_UNIT="" -> no LLM service to pause (it shares the GPU)
+        return False
     return sh("systemctl", "is-active", LLM_UNIT) in ("active", "activating")
 
 
@@ -210,7 +232,12 @@ def new_jobs(body, extra=None):
 # ----------------------------------------------------------------------------- GPU worker
 
 def gpu_free_mib(index):
-    """Used VRAM in MiB on one card, via xpu-smi (the parent process never initialises the GPU)."""
+    """Used VRAM in MiB on one card, via xpu-smi or nvidia-smi (the parent process never initialises the GPU)."""
+    if DEVICE.startswith("cuda"):
+        try:
+            return int(sh("nvidia-smi", "-i", str(index), "--query-gpu=memory.used", "--format=csv,noheader,nounits", timeout=20))
+        except Exception:
+            return None
     try:
         j = json.loads(sh("xpu-smi", "stats", "-d", str(index), "-j", timeout=20))
         return j["memory"]["used_mib"]["tile_0"]["current"]
@@ -540,6 +567,7 @@ class Worker(threading.Thread):
             log("stopping", LLM_UNIT)
             sh("sudo", "systemctl", "stop", LLM_UNIT)
             self.paused_llm = True; write_gpu_state(True)
+        unload_ollama_gpu_models()
         self.set_gpu("switching", "Waiting for GPU memory…")
         for sl in self.slots:
             self.wait_vram(sl.index, 16 * 1024, 120, "the LLM to free GPU memory")
@@ -563,10 +591,11 @@ class Worker(threading.Thread):
         for sl in self.slots:
             sl.stop(); sl.disabled = False; sl.restarts = []; sl.fails = 0
         for sl in self.slots:
-            self.wait_vram(sl.index, 1024, 60, "the YuE2 process to free GPU memory")
+            # on a shared CUDA card the songwriter LLM stays resident, so "freed" means below ~12 GB (desktop + songwriter)
+            self.wait_vram(sl.index, 12 * 1024 if DEVICE.startswith("cuda") else 1024, 60, "the YuE2 process to free GPU memory")
         with lock:
             gpu["release_requested"] = gpu["release_on_idle"] = False; gpu["idle_since"] = None
-        if not llm_active():
+        if LLM_UNIT and not llm_active():
             log("starting", LLM_UNIT)
             sh("sudo", "systemctl", "start", LLM_UNIT)
         self.paused_llm = False; write_gpu_state(False)
@@ -691,7 +720,7 @@ def stream_lyrics(handler, body):
     req = urllib.request.Request(base + "/chat/completions", json.dumps({
         "model": model, "stream": True, "temperature": temperature, "top_p": 0.95, "max_tokens": 1600,
         "chat_template_kwargs": {"enable_thinking": False},
-        "messages": [{"role": "system", "content": LYRICS_SYSTEM}, {"role": "user", "content": prompt}]}).encode(),
+        "messages": [{"role": "system", "content": LYRICS_SYSTEM}, {"role": "user", "content": prompt}], **LLM_EXTRA}).encode(),
         {"Content-Type": "application/json"})
     handler.send_response(200)
     handler.send_header("Content-Type", "text/event-stream"); handler.send_header("Cache-Control", "no-store")
@@ -757,12 +786,27 @@ class Handler(BaseHTTPRequestHandler):
     def send(self, code, body, ctype="application/json", extra=None):
         b = (json.dumps(body) if ctype == "application/json" else body)
         b = b.encode() if isinstance(b, str) else b
+        extra = dict(extra or {})
         self.send_response(code)
         self.send_header("Content-Type", ctype); self.send_header("Content-Length", str(len(b)))
-        self.send_header("Cache-Control", "no-store")
-        for k, v in (extra or {}).items():
+        self.send_header("Cache-Control", extra.pop("Cache-Control", "no-store"))
+        for k, v in extra.items():
             self.send_header(k, v)
         self.end_headers(); self.wfile.write(b)
+
+    @staticmethod
+    def etag(f):
+        st = f.stat()
+        return f'"{st.st_mtime_ns:x}-{st.st_size:x}"'
+
+    def not_modified(self, tag, cache):
+        """Answer 304 when the browser already has this exact version."""
+        if tag not in (self.headers.get("If-None-Match") or ""):
+            return False
+        self.send_response(304)
+        self.send_header("ETag", tag); self.send_header("Cache-Control", cache)
+        self.end_headers()
+        return True
 
     def body(self):
         n = int(self.headers.get("Content-Length") or 0)
@@ -779,10 +823,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0]
-        if path in ("/", "/index.html"):
-            return self.send(200, (HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
-        if path in ("/radio", "/radio.html"):
-            return self.send(200, (HERE / "radio.html").read_bytes(), "text/html; charset=utf-8")
+        if path in ("/", "/index.html", "/radio", "/radio.html", "/radio/classic"):
+            f = HERE / ("radio-classic.html" if path == "/radio/classic" else "radio.html" if path.startswith("/radio") else "index.html")
+            tag = self.etag(f)                      # revalidate every time: unchanged pages cost a tiny 304
+            if self.not_modified(tag, "no-cache"):
+                return
+            return self.send(200, f.read_bytes(), "text/html; charset=utf-8", {"ETag": tag, "Cache-Control": "no-cache"})
         if path == "/favicon.ico" or path.startswith("/icons/"):
             name = "studio-32.png" if path == "/favicon.ico" else path.rsplit("/", 1)[1]
             f = HERE / "icons" / name
@@ -791,7 +837,7 @@ class Handler(BaseHTTPRequestHandler):
             body = f.read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "image/svg+xml" if name.endswith(".svg") else "image/png")
-            self.send_header("Content-Length", str(len(body))); self.send_header("Cache-Control", "public, max-age=86400")
+            self.send_header("Content-Length", str(len(body))); self.send_header("Cache-Control", "public, max-age=604800")
             self.end_headers(); self.wfile.write(body)
             return
         if path in ("/radio/stream.mp3", "/radio/stream", "/stream.mp3"):
@@ -800,6 +846,10 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/radio/"):
             import radio
             if radio.handle(self, "GET", path):
+                return
+        if path.startswith("/api/assistant/"):
+            import assistant
+            if assistant.handle(self, "GET", path):
                 return
         if path == "/api/state":
             return self.send(200, state())
@@ -834,9 +884,12 @@ class Handler(BaseHTTPRequestHandler):
         if not str(f).startswith(str(root) + os.sep) or not f.is_file():
             return self.send(404, {"error": "file not found"})
         size = f.stat().st_size
+        tag, cache = self.etag(f), "private, max-age=604800"      # a finished song never changes
+        if self.not_modified(tag, cache):
+            return
         safe = re.sub(r"[^\w.-]+", "-", job.get("title") or jid).strip("-")[:60] or jid
         ext = name.rsplit(".", 1)[1]
-        extra = {"Accept-Ranges": "bytes"}
+        extra = {"Accept-Ranges": "bytes", "ETag": tag, "Cache-Control": cache}
         if "download=1" in self.path:
             extra["Content-Disposition"] = f'attachment; filename="{safe}-take{job.get("take", 1)}.{ext}"'
         rng = re.fullmatch(r"bytes=(\d*)-(\d*)", self.headers.get("Range", ""))
@@ -857,6 +910,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.split("?")[0]
+        if path.startswith("/api/assistant/"):
+            import assistant
+            try:
+                if assistant.handle(self, "POST", path):
+                    return
+            except json.JSONDecodeError:
+                return self.send(400, {"error": "Invalid JSON"})
         if path.startswith("/api/radio/"):
             import radio
             if radio.handle(self, "POST", path):
@@ -922,4 +982,4 @@ if __name__ == "__main__":
     radio.init(sys.modules["__main__"])
     Worker().start()
     log(f"Music Studio on :{PORT}, data {DATA}, devices {DEVICES}, returns GPUs after {RETURN_MINUTES} min idle")
-    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    ThreadingHTTPServer((os.environ.get("STUDIO_HOST", "127.0.0.1"), PORT), Handler).serve_forever()

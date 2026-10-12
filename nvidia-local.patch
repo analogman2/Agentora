@@ -1,0 +1,47 @@
+diff --git a/studio/app.py b/studio/app.py
+index cb1fb0b..37cd904 100644
+--- a/studio/app.py
++++ b/studio/app.py
+@@ -54,6 +54,8 @@ def sh(*cmd, timeout=180):
+ 
+ 
+ def llm_active():
++    if not LLM_UNIT:                     # STUDIO_LLM_UNIT="" -> no LLM service to pause (it shares the GPU)
++        return False
+     return sh("systemctl", "is-active", LLM_UNIT) in ("active", "activating")
+ 
+ 
+@@ -210,7 +212,12 @@ def new_jobs(body, extra=None):
+ # ----------------------------------------------------------------------------- GPU worker
+ 
+ def gpu_free_mib(index):
+-    """Used VRAM in MiB on one card, via xpu-smi (the parent process never initialises the GPU)."""
++    """Used VRAM in MiB on one card, via xpu-smi or nvidia-smi (the parent process never initialises the GPU)."""
++    if DEVICE.startswith("cuda"):
++        try:
++            return int(sh("nvidia-smi", "-i", str(index), "--query-gpu=memory.used", "--format=csv,noheader,nounits", timeout=20))
++        except Exception:
++            return None
+     try:
+         j = json.loads(sh("xpu-smi", "stats", "-d", str(index), "-j", timeout=20))
+         return j["memory"]["used_mib"]["tile_0"]["current"]
+@@ -563,10 +570,11 @@ class Worker(threading.Thread):
+         for sl in self.slots:
+             sl.stop(); sl.disabled = False; sl.restarts = []; sl.fails = 0
+         for sl in self.slots:
+-            self.wait_vram(sl.index, 1024, 60, "the YuE2 process to free GPU memory")
++            # on a shared CUDA card the songwriter LLM stays resident, so "freed" means below ~12 GB (desktop + songwriter)
++            self.wait_vram(sl.index, 12 * 1024 if DEVICE.startswith("cuda") else 1024, 60, "the YuE2 process to free GPU memory")
+         with lock:
+             gpu["release_requested"] = gpu["release_on_idle"] = False; gpu["idle_since"] = None
+-        if not llm_active():
++        if LLM_UNIT and not llm_active():
+             log("starting", LLM_UNIT)
+             sh("sudo", "systemctl", "start", LLM_UNIT)
+         self.paused_llm = False; write_gpu_state(False)
+@@ -922,4 +930,4 @@ if __name__ == "__main__":
+     radio.init(sys.modules["__main__"])
+     Worker().start()
+     log(f"Music Studio on :{PORT}, data {DATA}, devices {DEVICES}, returns GPUs after {RETURN_MINUTES} min idle")
+-    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
++    ThreadingHTTPServer((os.environ.get("STUDIO_HOST", "127.0.0.1"), PORT), Handler).serve_forever()
