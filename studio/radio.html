@@ -199,7 +199,7 @@ pre.ly { white-space: pre-wrap; font: 14px/1.7 system-ui, sans-serif; margin: 10
 .side .meter { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin: 8px 0 4px; }
 .side .meter i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s; }
 .side .links { display: flex; flex-direction: column; gap: 6px; }
-.asst { position: fixed; right: 16px; bottom: 16px; width: 400px; max-width: calc(100vw - 32px); height: min(620px, calc(100vh - 32px));
+.asst { position: fixed; right: 16px; bottom: 16px; width: 600px; max-width: calc(100vw - 32px); height: min(620px, calc(100vh - 32px));
         z-index: 45; background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow);
         display: flex; flex-direction: column; overflow: hidden; }
 .asst[hidden] { display: none; }
@@ -212,10 +212,13 @@ pre.ly { white-space: pre-wrap; font: 14px/1.7 system-ui, sans-serif; margin: 10
 .asst .m.ai code { background: var(--line); padding: 0 4px; border-radius: 4px; font-size: 13px; }
 .asst .m.err { align-self: stretch; background: transparent; border: 1px solid var(--red, #d33); color: var(--red, #d33); }
 .asst .tools { font-size: 12px; color: var(--muted); margin: 0 0 4px; }
-.asst .af { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); align-items: flex-end; }
-.asst .af textarea { flex: 1; resize: vertical; min-height: 40px; max-height: 40vh; font: inherit; font-size: 14px; padding: 8px 10px;
-                     border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text); }
+.asst .af { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
+.asst .af .ia { position: relative; flex: 1; }
+.asst .af textarea { width: 100%; resize: none; min-height: 44px; max-height: 40vh; font: inherit; font-size: 14px; padding: 8px 42px 8px 10px;
+                    border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text); display: block; }
+.asst .af .ia button { position: absolute; right: 6px; bottom: 6px; font-size: 13px; padding: 4px 12px; }
 .asst .af.login { flex-direction: column; align-items: stretch; }
+.asst .af.login .ia button { position: static; }
 .asst .af[hidden] { display: none; }
 .asst .af.login input { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--text); }
 .asst .typing::after { content: "▍"; animation: blink 1s steps(2) infinite; }
@@ -362,7 +365,8 @@ textarea { resize: vertical; max-height: 85vh; }
       <div class="small muted" id="vramText">memory —</div><div class="small muted">Memory counts everything on the card: radio, image studio and chat models.</div></section>
     <section class="card"><h3>Assistant</h3>
       <div class="small muted" style="margin-bottom:8px">Hermes, the local AI agent: ask it to change stations, rate songs, make pictures and videos, or check on this machine.</div>
-      <button class="btn" id="asstOpen">💬 Open assistant</button></section>
+      <div class="links"><button class="btn" id="asstOpen">💬 Open assistant</button>
+      <a class="btn" id="hermesDash" href="#" target="_blank" rel="noopener" title="Hermes settings, sessions, skills, tools and full chat (Studio admins)">☤ Hermes dashboard</a></div></section>
     <section class="card"><h3>Studios</h3><div class="links">
       <a class="btn" href="/">🎵 Music Studio</a>
       <a class="btn" id="imgStudio" href="#">🖼 Image &amp; Video Studio</a>
@@ -378,8 +382,10 @@ textarea { resize: vertical; max-height: 85vh; }
     <button class="x" id="asstClose" title="Close" aria-label="Close the assistant">✕</button></div>
   <div class="ab" id="asstLog" aria-live="polite"></div>
   <form class="af" id="asstForm" autocomplete="off">
-    <textarea id="asstIn" rows="2" placeholder="Ask Hermes… e.g. “switch to Neon Nights” or “make a picture of a rainy city at night”" aria-label="Message to the assistant"></textarea>
-    <button class="btn primary" id="asstSend" type="submit">Send</button></form>
+    <div class="ia">
+      <textarea id="asstIn" rows="2" placeholder="Ask Hermes… e.g. “switch to Neon Nights” or “make a picture of a rainy city at night”" aria-label="Message to the assistant"></textarea>
+      <button class="btn primary" id="asstSend" type="submit">Send</button>
+    </div></form>
   <form class="af login" id="asstLogin" hidden>
     <p class="small" style="margin:0 0 8px">The assistant can run commands on this computer, so it needs a <b>Studio admin</b> sign-in.</p>
     <input id="asstUser" autocomplete="username" placeholder="Studio username" aria-label="Studio username">
@@ -853,6 +859,7 @@ $("pinBtn").onclick = () => setSide(true, !side.pinned);
 document.addEventListener("keydown", e => { if (e.key === "Escape" && side.open && !(side.pinned && wide()) && !$("dlg").open) setSide(false); });
 window.matchMedia("(min-width: 1100px)").addEventListener("change", renderSide);
 $("imgStudio").href = `${location.protocol}//${location.hostname}:7870/`;
+$("hermesDash").href = `${location.protocol}//${location.hostname}:7880/`;
 $("copyStream").onclick = async () => {
   const url = new URL("/radio/stream.mp3", location.href).href;
   try { await navigator.clipboard.writeText(url); $("copyStream").textContent = "Copied ✓"; }
