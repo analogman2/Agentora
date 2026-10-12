@@ -199,6 +199,10 @@ pre.ly { white-space: pre-wrap; font: 14px/1.7 system-ui, sans-serif; margin: 10
 .side .meter { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin: 8px 0 4px; }
 .side .meter i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s; }
 .side .links { display: flex; flex-direction: column; gap: 6px; }
+.prio { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.prio button { font-size: 13px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+.prio button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+#prioNote { margin-top: 6px; }
 .asst { position: fixed; right: 16px; bottom: 16px; width: 600px; max-width: calc(100vw - 32px); height: min(620px, calc(100vh - 32px));
         z-index: 45; background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow);
         display: flex; flex-direction: column; overflow: hidden; }
@@ -362,7 +366,10 @@ textarea { resize: vertical; max-height: 85vh; }
     <section class="card"><h3>GPU</h3>
       <div id="gpuChip">…</div>
       <div class="meter" aria-hidden="true"><i id="vramBar"></i></div>
-      <div class="small muted" id="vramText">memory —</div><div class="small muted">Memory counts everything on the card: radio, image studio and chat models.</div></section>
+      <div class="small muted" id="vramText">memory —</div><div class="small muted">Memory counts everything on the card: radio, image studio and chat models.</div>
+      <div class="small" style="margin:10px 0 4px;font-weight:600" id="prioLbl">Priority</div>
+      <div class="prio" id="prio" role="group" aria-labelledby="prioLbl"></div>
+      <div class="small muted" id="prioNote"></div></section>
     <section class="card"><h3>Assistant</h3>
       <div class="small muted" style="margin-bottom:8px">Hermes, the local AI agent: ask it to change stations, rate songs, make pictures and videos, or check on this machine.</div>
       <div class="links"><button class="btn" id="asstOpen">💬 Open assistant</button>
@@ -658,7 +665,7 @@ function renderSideRadio() {
   $("radioState").innerHTML = !R.on ? "Off — nothing is being made." : `On · <b>${esc(st ? st.name : "?")}</b>${st && st.ready != null && st.id !== RERUNS ? ` · ${st.ready} song${st.ready === 1 ? "" : "s"} ready` : ""}`;
   $("powerBtn").textContent = R.on ? "Turn radio off" : "Turn radio on";
   $("gpuChip").textContent = g.owner === "studio" ? (busy ? `Radio: recording a song${dead ? ` (${dead} card faulted)` : ""}` : "Radio: music model loaded, idle")
-    : g.owner === "llm" ? "Radio: GPU lent to the LLM" : g.owner === "switching" ? g.detail : "Radio: not using the GPU";
+    : g.owner === "llm" ? "Radio: GPU lent to the LLM" : g.owner === "switching" || g.owner === "waiting" ? g.detail : "Radio: not using the GPU";
 }
 $("powerBtn").onclick = async () => {
   const on = !R.on;
@@ -1188,6 +1195,26 @@ $("asstForm").onsubmit = async (e) => {
     A.busy = false; $("asstSend").disabled = false; asstSave(); asstDraw();
   }
 };
+
+// ---------- GPU priority (shared with the Image & Video Studio)
+const PRIO = [["shared", "Shared"], ["studio", "Image studio"], ["radio", "Radio"], ["assistant", "Assistant"]];
+const PRIO_HELP = {
+  shared: "Everyone takes turns. The radio makes room before recording a song.",
+  studio: "Pictures and videos come first: the radio pauses new songs while the studio works (what's already made keeps playing).",
+  radio: "The radio comes first: the studio won't switch it off, and ComfyUI is cleared when the radio records.",
+  assistant: "Hermes comes first: its model stays loaded, and the radio waits while it's in use."};
+let prioNow = null;
+function drawPrio(d) {
+  prioNow = d.priority;
+  $("prio").innerHTML = PRIO.map(([k, l]) => `<button type="button" data-prio="${k}" aria-pressed="${k === prioNow}" title="${esc(PRIO_HELP[k])}">${l}</button>`).join("");
+  $("prioNote").textContent = (d.waiting ? d.waiting + ". " : "") + PRIO_HELP[prioNow];
+  $("prio").querySelectorAll("[data-prio]").forEach(b => b.onclick = async () => {
+    try { drawPrio(await api("/api/gpu/priority", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({priority: b.dataset.prio})})); }
+    catch (e) { $("prioNote").textContent = e.message; }
+  });
+}
+async function loadPrio() { try { drawPrio(await api("/api/gpu/priority")); } catch (e) {} }
+loadPrio(); setInterval(() => { if (!document.hidden) loadPrio(); }, 15000);
 </script>
 </body>
 </html>

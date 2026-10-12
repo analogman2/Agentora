@@ -57,9 +57,89 @@ def sh(*cmd, timeout=180):
         return f"error: {e}"
 
 
+# ---- GPU priority, shared with the Image & Video Studio: which AI tool gets the graphics card first
+PRIORITY_FILE = Path.home() / ".config" / "ai-gpu-priority.json"
+PRIORITIES = {"shared": "Shared — take turns", "studio": "Image & Video Studio", "radio": "Radio", "assistant": "Assistant (Hermes)"}
+_prio = {"t": 0, "v": "shared"}
+
+
+def gpu_priority():
+    if time.time() - _prio["t"] > 2:
+        try:
+            v = json.loads(PRIORITY_FILE.read_text()).get("priority")
+            _prio["v"] = v if v in PRIORITIES else "shared"
+        except (OSError, ValueError):
+            _prio["v"] = "shared"
+        _prio["t"] = time.time()
+    return _prio["v"]
+
+
+def set_gpu_priority(v):
+    if v not in PRIORITIES:
+        raise BadRequest("priority must be one of: " + ", ".join(PRIORITIES))
+    PRIORITY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = PRIORITY_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"priority": v, "set": time.time()}))
+    tmp.replace(PRIORITY_FILE)
+    _prio.update(t=time.time(), v=v)
+    return {"priority": v, "choices": PRIORITIES}
+
+
+def _get_json(url, timeout=3):
+    with urllib.request.urlopen(url, timeout=timeout) as r:
+        return json.loads(r.read())
+
+
+def radio_writer_models():
+    """The radio's own songwriter models (settings keep LYRICS_LLMS current); these never count as the assistant."""
+    names = {m for _, m, _ in LYRICS_LLMS if m}
+    return names | {m + ":latest" for m in names if ":" not in m}       # Ollama reports untagged names as :latest
+
+
+def assistant_on_gpu():
+    """Ollama models on the graphics card that aren't the radio's own songwriters (e.g. the Hermes assistant's)."""
+    try:
+        own = radio_writer_models()
+        return [m["name"] for m in _get_json("http://127.0.0.1:11434/api/ps").get("models", []) if m.get("size_vram") and m["name"] not in own]
+    except Exception:
+        return []
+
+
+def comfy_busy():
+    try:
+        q = _get_json("http://127.0.0.1:8188/queue")
+        return bool(q.get("queue_running") or q.get("queue_pending"))
+    except Exception:
+        return False
+
+
+def gpu_yield_reason():
+    """Why the radio should not take the GPU right now under the chosen priority, or None."""
+    p = gpu_priority()
+    if p == "studio" and comfy_busy():
+        return "Waiting: the Image & Video Studio has GPU priority and is making something"
+    if p == "assistant" and assistant_on_gpu():
+        return "Waiting: the assistant has GPU priority and its model is loaded"
+    return None
+
+
+def free_comfy_if_idle():
+    """Radio priority: ComfyUI keeps models on the card after a job; ask it to let go when it isn't working."""
+    if comfy_busy():
+        return
+    try:
+        urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:8188/free", json.dumps({"unload_models": True, "free_memory": True}).encode(),
+                                                      {"Content-Type": "application/json"}), timeout=10).read()
+        log("asked ComfyUI to unload its models (radio has GPU priority)")
+    except Exception as e:
+        log("couldn't ask ComfyUI to free memory:", e)
+
+
 def unload_ollama_gpu_models():
     """Ollama models sitting on the graphics card (e.g. the Hermes assistant's) would leave YuE2 short of memory:
-    unload them first. CPU-only models such as the songwriter are left alone."""
+    unload them first. CPU-only models such as the songwriter are left alone. Not when the assistant has priority."""
+    if gpu_priority() == "assistant":
+        return
     try:
         with urllib.request.urlopen("http://127.0.0.1:11434/api/ps", timeout=5) as r:
             loaded = json.loads(r.read()).get("models", [])
@@ -456,6 +536,17 @@ class Worker(threading.Thread):
     def step(self):
         pend = self.pending()
         busy = any(sl.job for sl in self.slots)
+        wait = gpu_yield_reason() if pend or self.holding() else None   # another tool has GPU priority right now
+        if wait:
+            if self.holding() and not busy:
+                log(wait.lower() + ": giving the GPU back")
+                self.release()
+            if not self.holding():
+                self.set_gpu("waiting", wait)
+                time.sleep(2)
+                return
+            self.pump()                           # finish the song in progress, start nothing new
+            return
         if pend and not self.holding():
             self.acquire()
         if pend and self.holding():
@@ -568,6 +659,8 @@ class Worker(threading.Thread):
             sh("sudo", "systemctl", "stop", LLM_UNIT)
             self.paused_llm = True; write_gpu_state(True)
         unload_ollama_gpu_models()
+        if gpu_priority() == "radio":
+            free_comfy_if_idle()
         self.set_gpu("switching", "Waiting for GPU memory…")
         for sl in self.slots:
             self.wait_vram(sl.index, 16 * 1024, 120, "the LLM to free GPU memory")
@@ -851,6 +944,8 @@ class Handler(BaseHTTPRequestHandler):
             import assistant
             if assistant.handle(self, "GET", path):
                 return
+        if path == "/api/gpu/priority":
+            return self.send(200, {"priority": gpu_priority(), "choices": PRIORITIES, "waiting": gpu["detail"] if gpu["owner"] == "waiting" else None})
         if path == "/api/state":
             return self.send(200, state())
         if path == "/api/health":
@@ -937,6 +1032,8 @@ class Handler(BaseHTTPRequestHandler):
                             job["_cancel"] = True; job["stage"] = "Cancelling…"
                     self.send(200, {"ok": True})
                 return
+            if path == "/api/gpu/priority":
+                return self.send(200, set_gpu_priority(self.body().get("priority")))
             if path == "/api/gpu/release":
                 import radio
                 if radio.generating():
