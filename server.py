@@ -667,6 +667,43 @@ PROMPT_GUIDE = {
 }
 
 
+SHARED = HERE / "shared"
+
+
+async def shared_file(request):
+    """The look and script shared by every app (switcher, now-playing bar); the radio serves the same files."""
+    name = request.match_info["name"]
+    if name not in ("b70.css", "b70.js"):
+        raise web.HTTPNotFound()
+    return web.FileResponse(SHARED / name, headers={"Cache-Control": "no-cache"})
+
+
+async def nowplaying(request):
+    """What's on the radio, for the now-playing bar on the Studio's pages."""
+    try:
+        async with http.get(RADIO + "/api/radio/state", timeout=aiohttp.ClientTimeout(total=3)) as r:
+            d = await r.json()
+    except Exception:
+        raise web.HTTPServiceUnavailable(text="The radio isn't answering")
+    sv = d.get("stream") or {}
+    aired = [a for a in sv.get("aired", []) if a.get("start_pos") is not None and a["start_pos"] <= (sv.get("pos") or 0)]
+    a = aired[-1] if aired and aired[-1].get("id") else None
+    st = next((x for x in d.get("stations", []) if x["id"] == d.get("station")), None)
+    return web.json_response({"on": d.get("on"), "now": a and {"id": a["id"], "title": a.get("title"), "cover": a.get("cover"), "feedback": a.get("feedback")},
+                              "station": st and {"id": st["id"], "name": st["name"], "art": st.get("art")}})
+
+
+async def nowplaying_action(request):
+    """👍 / skip from the now-playing bar, passed on to the radio (which has no sign-in of its own)."""
+    action = request.match_info["action"]
+    if action not in ("feedback", "skip"):
+        raise web.HTTPNotFound()
+    b = await request.json()
+    body = {"track": str(b.get("track") or "")[:64], "kind": b.get("kind") if b.get("kind") in ("keep", "clear", "skip") else "skip"}
+    async with http.post(f"{RADIO}/api/radio/{action}", json=body, timeout=aiohttp.ClientTimeout(total=5)) as r:
+        return web.json_response(await r.json(content_type=None), status=r.status)
+
+
 async def home_page(request):
     return web.FileResponse(HERE / "home.html", headers={"Cache-Control": "no-cache"})
 
@@ -932,7 +969,7 @@ async def guard(request, handler):
         origin = request.headers.get("Origin")
         if origin and origin.split("://", 1)[-1] != request.host:      # another website trying to act as the user
             raise web.HTTPForbidden(text="Cross-site request refused")
-    if request.path not in PUBLIC_PATHS and not request["user"]:
+    if request.path not in PUBLIC_PATHS and not request.path.startswith(("/b70/", "/api/nowplaying")) and not request["user"]:
         raise web.HTTPUnauthorized(text="Please sign in")
     try:
         return await handler(request)
@@ -1521,6 +1558,9 @@ def main():
     app.router.add_get("/api/gpu-priority", get_priority)
     app.router.add_post("/api/prompt/improve", improve_prompt)
     app.router.add_get("/home", home_page)
+    app.router.add_get("/b70/{name}", shared_file)
+    app.router.add_get("/api/nowplaying", nowplaying)
+    app.router.add_post("/api/nowplaying/{action}", nowplaying_action)
     app.router.add_get("/api/home", home_summary)
     app.router.add_get("/api/disk", disk_usage)
     app.router.add_post("/api/models/rating", models_rate)
