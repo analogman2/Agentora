@@ -1332,7 +1332,7 @@ function updateMk() {
   const s = stOf(view.id); if (!s) return;
   const mine = (R.making || []).filter(m => m.station === s.id);
   const parts = [];
-  if (s.asked) parts.push(`✍ writing ${s.asked === 1 ? "a song" : s.asked + " songs"} (on the GPU, a few seconds)`);
+  if (s.asked) parts.push(`✍ writing ${s.asked === 1 ? "a song" : s.asked + " songs"} (the songwriter drafts and edits it: a few minutes)`);
   for (const m of mine) parts.push(`${m.status === "running" ? "🎙 recording" : "⏳ waiting to record"} “${esc(m.title)}”${m.stage ? " · " + esc(m.stage) : ""}${m.requested ? "" : " (radio queue)"}`);
   el.innerHTML = parts.length ? parts.join("<br>") : (s.ready ? `${s.ready} song${s.ready === 1 ? "" : "s"} ready to play` : "");
 }

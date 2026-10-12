@@ -649,7 +649,7 @@ def produce(sid, on_request=False):
         ready = len(station_tracks(sid, ("approved",)))
         short = not busy and not ready and writing.get(sid, 0) <= 1 and not on_request
         takes = TAKES if ready >= 2 else 1      # spool running low: one take, so the broadcast never runs dry
-        spec = write_spec(s, short=short, fast=on_request)   # someone is waiting: write it on the GPU
+        spec = write_spec(s, short=short)              # quality over speed: the big songwriter + editor, requests too
         if not on_request and (not state["on"] or state["station"] != sid):
             app.log("radio: discarding a spec written after the radio was switched off / retuned")
             return
