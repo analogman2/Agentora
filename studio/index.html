@@ -57,6 +57,20 @@ input:focus, textarea:focus, select:focus { outline: 2px solid color-mix(in srgb
 .btn:disabled { opacity: .55; cursor: default; }
 .btn.danger { color: var(--bad); }
 .linkbtn { font: inherit; font-size: 13px; background: none; border: 0; color: var(--accent); cursor: pointer; padding: 0; }
+/* Easy mode hides the fine controls; ✏️ rewrite panel */
+body.easy .adv-only { display: none !important; }
+.toprow { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+.rw { border: 1px solid var(--accent); border-radius: 12px; padding: 12px 14px; margin-bottom: 16px; background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
+.rw .rwhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rw .rwhead b { flex: 1 1 200px; }
+.rw audio { height: 32px; max-width: 100%; }
+.rw .ideas { display: grid; gap: 8px; margin: 10px 0; }
+.rw .idea { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
+.rw .idea div { flex: 1; min-width: 0; }
+.rw .idea .what { font-size: 12px; color: var(--muted); }
+.rw .idea.done { opacity: .6; }
+.rw .ask { display: flex; gap: 8px; flex-wrap: wrap; }
+.rw .ask input { flex: 1 1 240px; }
 details.adv { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
 details.adv > summary { cursor: pointer; font-weight: 600; font-size: 14px; color: var(--muted); }
 .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 4px 14px; }
@@ -109,9 +123,25 @@ dialog pre { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(
   <div class="layout">
     <!-- ======================= CREATE ======================= -->
     <section class="panel" id="create">
-      <div class="seg" role="group" aria-label="What to make">
-        <button type="button" data-mode="song" aria-pressed="true">🎤 Song with vocals</button>
-        <button type="button" data-mode="instrumental" aria-pressed="false">🎹 Instrumental</button>
+      <div class="rw" id="rw" hidden>
+        <div class="rwhead"><b>✏️ Rewriting “<span id="rwTitle"></span>”</b>
+          <audio id="rwAudio" controls preload="none" title="The original"></audio>
+          <button class="linkbtn" type="button" id="rwClose" title="Put back what was in the form before">Stop rewriting</button></div>
+        <p class="small muted" style="margin:6px 0 0">Everything from the original is filled in below. Apply an idea or say what to change, then press <b>Create song</b>.</p>
+        <div class="ideas" id="rwIdeas"></div>
+        <div class="ask"><input type="text" id="rwAsk" placeholder="What should change? e.g. a catchier chorus, slower and sadder, about leaving home">
+          <button class="btn accent" type="button" id="rwGo">Change it</button></div>
+        <div class="small muted" id="rwStatus" role="status" style="margin-top:6px"></div>
+      </div>
+      <div class="toprow">
+        <div class="seg" role="group" aria-label="What to make">
+          <button type="button" data-mode="song" aria-pressed="true">🎤 Song with vocals</button>
+          <button type="button" data-mode="instrumental" aria-pressed="false">🎹 Instrumental</button>
+        </div>
+        <div class="seg" role="group" aria-label="How many controls to show">
+          <button type="button" data-ui="easy" aria-pressed="true" title="Just style, lyrics and Create">Easy</button>
+          <button type="button" data-ui="advanced" aria-pressed="false" title="Every control: tempo, writer options, seeds, sampling, scores">Advanced</button>
+        </div>
       </div>
 
       <label class="f" for="style">Style <span class="hint">— genre, mood, voice, instruments, language, tempo</span></label>
@@ -119,8 +149,8 @@ dialog pre { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(
         <select id="preset" aria-label="Style presets"><option value="">Start from a preset…</option></select>
       </div>
       <textarea id="style" rows="3" placeholder="e.g. English, warm piano pop, expressive female voice, acoustic piano, light drums, 88 BPM"></textarea>
-      <div id="chips"></div>
-      <div class="chipgroup"><span>Tempo</span>
+      <div id="chips" class="adv-only"></div>
+      <div class="chipgroup adv-only"><span>Tempo</span>
         <span class="range" style="display:inline-flex;width:calc(100% - 90px)"><input type="range" id="bpm" min="0" max="180" step="2" value="0" aria-label="Tempo"><output id="bpmOut">auto</output></span>
       </div>
 
@@ -128,12 +158,12 @@ dialog pre { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(
         <label class="f" for="lyrics"><span id="lyricsLabel">Lyrics</span> <span class="hint" id="lyricsHint">— use section tags; one line per sung phrase</span></label>
         <div class="row" id="writerBtns" style="margin:2px 0 6px">
           <span style="flex:0 0 auto"><button class="btn small accent" type="button" id="openWriter">✨ Write lyrics for me</button>
-          <button class="btn small" type="button" id="polish" title="Keep your words; fix section tags, line breaks and repeated choruses">Polish my lyrics</button></span>
+          <button class="btn small adv-only" type="button" id="polish" title="Keep your words; fix section tags, line breaks and repeated choruses">Polish my lyrics</button></span>
         </div>
         <div class="writer" id="writer" hidden>
           <label class="f" for="idea" style="margin-top:0">What's the song about?</label>
           <textarea id="idea" rows="2" placeholder="e.g. a summer road trip with old friends, windows down, not wanting it to end"></textarea>
-          <div class="grid2">
+          <div class="grid2 adv-only">
             <div><label class="f small" for="wStructure">Structure</label>
               <select id="wStructure">
                 <option value="Verse, Chorus, Verse, Chorus, Bridge, Chorus">Verse · Chorus · Verse · Chorus · Bridge · Chorus</option>
@@ -154,8 +184,8 @@ dialog pre { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(
             <div><label class="f small" for="wTemp">Creativity</label>
               <div class="range"><input type="range" id="wTemp" min="0.4" max="1.3" step="0.05" value="0.85"><output id="wTempOut">0.85</output></div></div>
           </div>
-          <label class="f small" for="wExtra">Anything else? <span class="hint">(optional)</span></label>
-          <input type="text" id="wExtra" placeholder="e.g. mention the ocean, keep it hopeful, a call-and-response chorus">
+          <label class="f small adv-only" for="wExtra">Anything else? <span class="hint">(optional)</span></label>
+          <input type="text" class="adv-only" id="wExtra" placeholder="e.g. mention the ocean, keep it hopeful, a call-and-response chorus">
           <div class="wbar">
             <button class="btn primary" type="button" id="wGo" style="font-size:15px;padding:8px 16px">Write lyrics</button>
             <button class="btn small" type="button" id="wClose">Close</button>
@@ -170,7 +200,7 @@ dialog pre { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(
             <button class="btn small" type="button" id="wRewrite">Rewrite</button>
           </div>
         </div>
-        <div class="chips" id="tags"></div>
+        <div class="chips adv-only" id="tags"></div>
         <textarea id="lyrics" class="lyrics" placeholder="[Verse]&#10;Neon fades along the lane&#10;Footsteps keep the time of rain&#10;&#10;[Chorus]&#10;Let the day come into view&#10;Every road begins with you"></textarea>
         <div class="row small muted" style="justify-content:space-between;margin-top:4px">
           <span id="lyricStats"></span>
@@ -180,10 +210,10 @@ dialog pre { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(
 
       <div class="row" style="margin-top:10px">
         <div><label class="f" for="title">Title <span class="hint">(optional)</span></label><input type="text" id="title" maxlength="120"></div>
-        <div><label class="f" for="author">Your name <span class="hint">(optional)</span></label><input type="text" id="author" maxlength="60"></div>
+        <div class="adv-only"><label class="f" for="author">Your name <span class="hint">(optional)</span></label><input type="text" id="author" maxlength="60"></div>
       </div>
 
-      <details class="adv" id="adv">
+      <details class="adv adv-only" id="adv">
         <summary>Advanced options</summary>
         <div class="grid2">
           <div><label class="f" for="cot">Planning <span class="hint">how the music is composed</span></label>
@@ -382,6 +412,7 @@ async function submit() {
     cfg_scale: +$("cfg").value, ode_steps: +$("steps").value, abc: $("abc").value,
     abc_sampling: samplingOverrides("abc"), semantic_sampling: samplingOverrides("semantic"),
   };
+  if (rw.id) body.rewrite_of = rw.id;
   if (!body.style.trim()) return ($("formErr").textContent = "Add a style first — pick a preset or a few chips.");
   if (mode === "song" && !body.lyrics.trim()) return ($("formErr").textContent = "Add some lyrics (or switch to Instrumental).");
   $("go").disabled = true;
@@ -391,6 +422,7 @@ async function submit() {
     if (!r.ok) throw new Error(j.error || "Something went wrong");
     const mine = store.get("mine", []); store.set("mine", mine.concat(j.ids).slice(-500));
     $("formErr").textContent = ""; tick();
+    if (rw.id) { endRewrite(false); $("eta").textContent = "✏️ Your rewrite is recording — it shows up under Now making."; }
   } catch (e) { $("formErr").textContent = e.message; }
   finally { $("go").disabled = false; }
 }
@@ -440,6 +472,7 @@ function renderLibrary(st) {
         ${files.has("song.mp3") ? `<a class="btn small" href="/files/${id}/song.mp3?download=1">⬇ MP3</a>` : ""}
         ${files.has("audio.flac") ? `<a class="btn small" href="/files/${id}/audio.flac?download=1">⬇ FLAC</a>` : ""}
         <button class="btn small" data-act="details" data-id="${id}">Details</button>
+        <button class="btn small accent" data-act="rewrite" data-id="${id}" title="Improve this song: its settings and lyrics load into the form, with AI suggestions">✏️ Rewrite</button>
         <button class="btn small" data-act="reuse" data-id="${id}" title="Load these settings into the form">Reuse</button>
         <button class="btn small" data-act="take" data-id="${id}" title="Same settings, new seed">New take</button>
         ${files.has("score.abc") ? `<button class="btn small" data-act="edit" data-id="${id}" title="Edit the melody/chords and render again">Edit score</button>` : ""}
@@ -479,6 +512,7 @@ function openDialog(title, html) { $("dlgTitle").textContent = title; $("dlgBody
 async function act(kind, id) {
   if (kind === "cancel") { await fetch(`/api/jobs/${id}/cancel`, {method: "POST"}); return tick(); }
   if (kind === "delete") { if (!confirm("Delete this song for everyone?")) return; await fetch(`/api/jobs/${id}`, {method: "DELETE"}); libSig = ""; return tick(); }
+  if (kind === "rewrite") return startRewrite(id);
   const j = await getJob(id);
   if (kind === "reuse") return fillFrom(j);
   if (kind === "take") { fillFrom(j, {newSeed: true}); return submit(); }
@@ -515,8 +549,9 @@ function writerBody(action, extra = {}) {
     structure, length: $("wLength").value, rhyme: $("wRhyme").value, pov: $("wPov").value, extra: $("wExtra").value,
     temperature: +$("wTemp").value }, extra);
 }
-async function streamLyrics(body, label) {
-  if (writerBusy) return; writerBusy = true;
+async function streamLyrics(body, label, opts = {}) {
+  if (writerBusy) { if (opts.apply) throw new Error("The lyrics writer is still busy — try again in a moment."); return; }
+  writerBusy = true;
   $("writer").hidden = false; $("wPreview").hidden = false; $("wPreview").textContent = ""; $("wResultBar").hidden = true;
   $("wStatus").textContent = label + "…"; $("wStatus").style.color = "";
   for (const id of ["wGo", "wAgain", "wRewrite", "polish", "wUse", "wAppend"]) $(id).disabled = true;
@@ -539,10 +574,11 @@ async function streamLyrics(body, label) {
           $("wPreview").textContent = (ev.title ? `Title: ${ev.title}\n\n` : "") + ev.lyrics;
           $("wStatus").textContent = `Written by ${ev.source} in ${ev.seconds}s`;
           $("wResultBar").hidden = false;
+          if (opts.apply) { useLyrics(false); $("writer").hidden = true; }
         }
       }
     }
-  } catch (e) { $("wStatus").textContent = e.message; $("wStatus").style.color = "var(--bad)"; }
+  } catch (e) { $("wStatus").textContent = e.message; $("wStatus").style.color = "var(--bad)"; if (opts.apply) throw e; }
   finally { writerBusy = false; for (const id of ["wGo", "wAgain", "wRewrite", "polish", "wUse", "wAppend"]) $(id).disabled = false; }
 }
 function useLyrics(append) {
@@ -571,6 +607,90 @@ $("wUse").onclick = () => useLyrics(false);
 $("wAppend").onclick = () => useLyrics(true);
 $("idea").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) $("wGo").click(); });
 
+// ---------------- ✏️ rewrite a song: load it, then AI ideas apply with one click (lyrics rewrite and/or a new style line)
+const rw = {id: null, undo: []};
+async function startRewrite(id) {
+  let j; try { j = await getJob(id); if (!j || j.error) throw new Error((j && j.error) || "Song not found"); }
+  catch (e) { $("formErr").textContent = "Couldn't open that song: " + e.message; return; }
+  if (!store.get("rwBackup", null)) store.set("rwBackup", store.get("form", null) || {});   // "Stop rewriting" puts the form back (also after a reload)
+  rw.id = id; rw.undo = []; rw.title = j.title || "Untitled";
+  fillFrom(j, {newSeed: true});
+  $("title").value = rw.title.replace(/ \(rewrite( \d+)?\)$/, "") + " (rewrite)"; saveForm();
+  $("rwTitle").textContent = rw.title; $("rwAudio").src = `/files/${encodeURIComponent(id)}/song.mp3`;
+  $("rw").hidden = false; $("rwStatus").textContent = ""; $("rwAsk").value = "";
+  $("create").scrollIntoView({behavior: "smooth"});
+  loadIdeas();
+}
+function endRewrite(restore) {
+  const backup = store.get("rwBackup", null);
+  if (restore && backup && Object.keys(backup).length) { loadForm(backup); saveForm(); }
+  store.set("rwBackup", null); rw.id = null; $("rw").hidden = true; $("rwAudio").removeAttribute("src");
+  if (location.hash.startsWith("#rewrite=")) history.replaceState(null, "", location.pathname);
+}
+async function suggest(ask) {
+  const r = await fetch("/api/rewrite/suggest", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({id: rw.id, ask})});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || "No suggestions right now");
+  return d;
+}
+async function loadIdeas() {
+  const id = rw.id;
+  $("rwIdeas").innerHTML = `<div class="small muted">✨ Listening to the song and thinking of improvements…</div>`;
+  try {
+    const d = await suggest("");
+    if (rw.id !== id) return;
+    rw.ideas = d.suggestions;
+    $("rwIdeas").innerHTML = d.suggestions.map((x, i) => `<div class="idea" data-i="${i}"><div><b>${esc(x.title)}</b> <span class="small muted">${esc(x.why)}</span>
+        <div class="what">${x.lyrics ? "✍ Lyrics: " + esc(x.lyrics) : ""}${x.lyrics && x.style ? " · " : ""}${x.style ? "🎸 Sound: " + esc(x.style) : ""}</div></div>
+        <button class="btn small accent" type="button" data-rw-apply="${i}">Apply</button></div>`).join("")
+      + `<div class="small muted">Ideas by ${esc(d.source)} · <button class="linkbtn" type="button" id="rwMore">Other ideas</button></div>`;
+    $("rwMore").onclick = loadIdeas;
+  } catch (e) { if (rw.id === id) $("rwIdeas").innerHTML = `<div class="small muted">${esc(e.message)} <button class="linkbtn" type="button" id="rwMore">Try again</button></div>`, $("rwMore").onclick = loadIdeas; }
+}
+async function applyIdea(x, card) {
+  const btn = card && card.querySelector("button"); if (btn) btn.disabled = true;
+  rw.undo.push({style: $("style").value, lyrics: $("lyrics").value, title: $("title").value});
+  try {
+    if (x.style) { $("style").value = x.style; syncChips(); saveForm(); }
+    if (x.lyrics && mode === "song" && $("lyrics").value.trim()) {
+      $("rwStatus").textContent = "✍ Rewriting the lyrics…";
+      const title = $("title").value;
+      await streamLyrics(writerBody("rewrite", {lyrics: $("lyrics").value, feedback: x.lyrics, fast: true, temperature: 0.6}), "Rewriting", {apply: true});
+      $("title").value = title; saveForm();                  // keep "(rewrite)" in the title
+    }
+    $("rwStatus").innerHTML = `✓ Applied “${esc(x.title)}” — check the lyrics and style below, then press <b>Create song</b>. <button class="linkbtn" type="button" id="rwUndo">Undo</button>`;
+    $("rwUndo").onclick = undoIdea;
+    if (card) card.classList.add("done"), btn && (btn.textContent = "✓ Applied");
+  } catch (e) { rw.undo.pop(); $("rwStatus").textContent = e.message; if (btn) btn.disabled = false; }
+}
+function undoIdea() {
+  const u = rw.undo.pop(); if (!u) return;
+  $("style").value = u.style; $("lyrics").value = u.lyrics; $("title").value = u.title; syncChips(); lyricStats(); saveForm();
+  $("rwStatus").textContent = rw.undo.length ? "Undone. Undo again for the change before." : "Back to the original.";
+  document.querySelectorAll(".rw .idea.done").forEach(c => { if (!rw.undo.length) { c.classList.remove("done"); const b = c.querySelector("button"); b.disabled = false; b.textContent = "Apply"; } });
+}
+$("rwIdeas").addEventListener("click", (e) => { const b = e.target.closest("[data-rw-apply]"); if (b) applyIdea(rw.ideas[+b.dataset.rwApply], b.closest(".idea")); });
+$("rwGo").onclick = async () => {
+  const ask = $("rwAsk").value.trim(); if (!ask) return $("rwAsk").focus();
+  $("rwGo").disabled = true; $("rwStatus").textContent = "✨ Working out the change…";
+  try { const d = await suggest(ask); await applyIdea(d.suggestions[0], null); $("rwAsk").value = ""; }
+  catch (e) { $("rwStatus").textContent = e.message; }
+  finally { $("rwGo").disabled = false; }
+};
+$("rwAsk").addEventListener("keydown", (e) => { if (e.key === "Enter") $("rwGo").click(); });
+$("rwClose").onclick = () => endRewrite(true);
+function rewriteFromHash() { const m = location.hash.match(/^#rewrite=([\w-]+)/); if (m) startRewrite(m[1]); }
+window.addEventListener("hashchange", rewriteFromHash);
+
+// Easy / Advanced: how many controls the form shows (remembered on this browser)
+function setUi(ui) {
+  document.body.classList.toggle("easy", ui === "easy");
+  document.querySelectorAll("[data-ui]").forEach(b => b.setAttribute("aria-pressed", b.dataset.ui === ui));
+  store.set("ui", ui);
+}
+document.querySelectorAll("[data-ui]").forEach(b => b.onclick = () => setUi(b.dataset.ui));
+setUi(store.get("ui", "easy"));
+
 // ---------------- events
 buildForm();
 document.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => setMode(b.dataset.mode));
@@ -598,6 +718,7 @@ loadForm(store.get("form", null)); if (!store.get("form", null)) { setMode("song
 if (!$("author").value) $("author").value = store.get("author", "");
 $("author").addEventListener("change", () => store.set("author", $("author").value));
 tick(); setInterval(tick, 2000);
+rewriteFromHash();
 
 </script>
 <script src="/b70/b70.js" defer></script>

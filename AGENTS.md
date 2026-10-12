@@ -13,6 +13,7 @@ http://127.0.0.1:7860 (radio at /radio, classic deck at /radio/classic, music st
 - `studio/art.py`: cover art via ComfyUI (Z-Image), drawn between songs only; scenes are name-free.
 - Lyrics: `SPEC_SYSTEM` brief + `STORY_SEEDS` + `edit_lyrics` editor pass; the GPU lyricist (`qwen3.6-agent`, shared with Hermes's AGI;
   27B) fills each station's lyric bank when the card is free (`bank_loop`); taste notes from thumbs (`update_taste`).
+- ✏️ Rewrite: a song page (radio) or library row (Music Studio) opens `/#rewrite=<id>`; the form is filled from the song and `/api/rewrite/suggest` (GPU-first) gives ideas / turns a request into a lyrics instruction + style line. Easy/Advanced mode hides `.adv-only` controls.
 - `studio/settings.py`: every radio/audio setting with ranges (served at /api/radio/settings).
 - `studio/assistant.py`: the radio's Assistant panel, relaying chat to Hermes (http://127.0.0.1:8642) for signed-in
   Studio admins only.

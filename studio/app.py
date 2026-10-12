@@ -349,7 +349,9 @@ def validate(body):
 
 def new_jobs(body, extra=None):
     base, takes = validate(body)
-    extra = extra or {}
+    extra = dict(extra or {})
+    if body.get("rewrite_of") in jobs:                 # ✏️ a rewrite of another song: remember which one
+        extra["rewrite_of"] = body["rewrite_of"]
     with lock:
         queued = sum(1 for j in jobs.values() if j["status"] in ("queued", "running") and j.get("source") != "radio")
         if not extra.get("source") and queued + takes > MAX_QUEUED:
@@ -931,8 +933,9 @@ def normalize_lyrics(text):
     return title, lyrics
 
 
-def pick_llm():
-    for base, model, label in LYRICS_LLMS:
+def pick_llm(prefer_gpu=False):
+    """The first reachable lyrics writer; prefer_gpu: the GPU ones first (quick, targeted edits)."""
+    for base, model, label in sorted(LYRICS_LLMS, key=lambda c: "gpu" not in c[2].lower()) if prefer_gpu else LYRICS_LLMS:
         try:
             with urllib.request.urlopen(base.rstrip("/") + "/models", timeout=2) as r:
                 if r.status == 200:
@@ -944,11 +947,12 @@ def pick_llm():
 
 def stream_lyrics(handler, body):
     prompt = lyrics_prompt(body)            # validates before we commit to a stream
-    llm = pick_llm()
+    llm = pick_llm(prefer_gpu=bool(body.get("fast")))
     if llm is None:
         return handler.send(503, {"error": "No lyrics writer is reachable right now. b70's LLM is paused while the studio "
                                            "holds the GPUs, and the backup server did not answer."})
     base, model, label = llm
+    llm_used(model)
     try:
         temperature = min(1.5, max(0.2, float(body.get("temperature", 0.85))))
     except Exception:
@@ -987,6 +991,74 @@ def stream_lyrics(handler, body):
             emit({"error": f"The lyrics writer failed: {type(e).__name__}: {e}"[:300]})
         except Exception:
             pass
+
+
+# ----------------------------------------------------------------------------- ✏️ rewrite a song: AI suggestions
+REWRITE_SYSTEM = """You are a record producer helping someone improve a song made by an AI music model (YuE2), which sings
+the lyrics in the style given as comma-separated tags. Be specific to THIS song: name the lines, sections or sounds you mean.
+Reply with JSON only, no other text:
+{"suggestions": [{"title": "at most 6 words", "why": "one short sentence", "lyrics": "", "style": ""}]}
+"lyrics": ONE short instruction (under 30 words) telling a lyricist what to change, e.g. "Make the chorus hook shorter and
+repeat it; replace 'traffic lights' in the bridge with a concrete memory of the two friends". Never write the new lyrics here.
+Leave it empty when the idea is about the sound.
+"style": only for ideas about the sound (genre, voice, instruments, mood, tempo): the complete new style line in the same form
+as the current one: language first, then genre, vocal, instruments, mood, tempo, e.g.
+"English, warm piano pop, expressive female vocal, acoustic piano, light drums, 88 BPM". Leave it empty for lyric ideas."""
+
+
+def rewrite_suggestions(jid, ask=""):
+    """Ideas for rewriting one song (3-4, each changing the lyrics or the style), or with ask: that one request as edits."""
+    import radio
+    with lock:
+        j = dict(jobs.get(jid) or {})
+    if not j:
+        raise BadRequest("No such song")
+    ctx = [f"Title: {j.get('title')}", f"Style: {j.get('style')}",
+           "Lyrics:\n" + ((j.get("lyrics") or "").strip()[:6000] or "(instrumental)")]
+    fb = {"keep": "The listener gave it a thumbs up.", "dislike": "The listener gave it a thumbs down.",
+          "skip": "The listener skipped it."}.get(j.get("radio_feedback"))
+    if fb:
+        ctx.append(fb)
+    c = j.get("critic") or {}
+    if c.get("score") is not None:
+        ctx.append(f"Automatic quality score {c['score']:.2f}" + (f" (this station's bar is {c['bar']:.2f})." if c.get("bar") else "."))
+    st = radio.stations.get(j.get("station"))
+    if st:
+        ctx.append(f"Made for the radio station \"{st['name']}\": {(st.get('description') or '')[:400]}")
+        if st.get("taste"):
+            ctx.append("What this listener likes (learned from their thumbs):\n" + st["taste"][:800])
+    ask = clean_text(ask, "Request", 500)
+    ctx.append(f"The listener asks for this change: {ask}\nReturn exactly ONE suggestion that does ALL of it. Whatever the request "
+               "says about the sound (tempo, mood, voice, instruments, genre) goes in a new style line, e.g. slower = a lower BPM and "
+               "a calmer feel; whatever it says about the words or story goes in the lyrics instruction. Fill both when it asks for both."
+               if ask else "Suggest 3 or 4 different improvements a listener would notice; each changes the "
+               "lyrics OR the style, not both.")
+    for base, model, label in radio.gpu_first(radio.llm_candidates()):
+        try:
+            llm_used(model)
+            body = {"model": model, "temperature": 0.6 if ask else 0.8, "max_tokens": 1000, "response_format": {"type": "json_object"},
+                    "chat_template_kwargs": {"enable_thinking": False},
+                    "messages": [{"role": "system", "content": REWRITE_SYSTEM}, {"role": "user", "content": "\n\n".join(ctx)}], **LLM_EXTRA}
+            r = json.loads(urllib.request.urlopen(urllib.request.Request(base + "/chat/completions", json.dumps(body).encode(),
+                           {"Content-Type": "application/json"}), timeout=180).read())
+            text = r["choices"][0]["message"]["content"]
+            data = json.loads(text[text.find("{"):text.rfind("}") + 1])
+            out = []
+            for x in data.get("suggestions") or []:
+                if str(x.get("lyrics") or "").count("\n") > 1 or len(str(x.get("lyrics") or "")) > 400:
+                    continue                           # wrote new lyrics instead of saying what to change
+                x = {k: re.sub(r"\s+", " ", str(x.get(k) or "")).strip() for k in ("title", "why", "lyrics", "style")}
+                if x["style"].lower() == (j.get("style") or "").strip().lower():
+                    x["style"] = ""                    # "changed" the style to what it already is
+                x = {"title": x["title"][:60], "why": x["why"][:240], "lyrics": x["lyrics"][:400], "style": x["style"][:400]}
+                if x["title"] and (x["lyrics"] or x["style"]):
+                    out.append(x)
+            if out:
+                log(f"rewrite ideas for {jid} via {label}: {len(out)}")
+                return {"suggestions": out[:1] if ask else out[:4], "source": label}
+        except Exception as e:
+            log(f"rewrite ideas via {label} failed: {e}")
+    raise BadRequest("The AI couldn't come up with suggestions right now — try again in a minute.")
 
 
 # ----------------------------------------------------------------------------- HTTP
@@ -1172,6 +1244,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, {"ids": new_jobs(self.body())})
             if path == "/api/lyrics":
                 return stream_lyrics(self, self.body())
+            if path == "/api/rewrite/suggest":
+                b = self.body()
+                return self.send(200, rewrite_suggestions(str(b.get("id") or ""), b.get("ask") or ""))
             m = re.fullmatch(r"/api/jobs/([\w-]+)/cancel", path)
             if m:
                 job = self.job_or_404(m.group(1))

@@ -883,6 +883,7 @@ async function songView(id) {
         <button class="pill ${t.feedback === "keep" ? "primary" : ""}" data-act="song-fb" data-kind="${t.feedback === "keep" ? "clear" : "keep"}" title="Make more like this" aria-pressed="${t.feedback === "keep"}">👍</button>
         <button class="pill ${t.feedback === "dislike" ? "primary" : ""}" data-act="song-fb" data-kind="${t.feedback === "dislike" ? "clear" : "dislike"}" title="Fewer like this" aria-pressed="${t.feedback === "dislike"}">👎</button>
         <button class="pill ${t.in_playlist ? "primary" : ""}" data-act="song-plus" data-on="${t.in_playlist ? 1 : 0}">${t.in_playlist ? "✓ In my playlist" : "+ Playlist"}</button>
+        <a class="pill" href="/#rewrite=${esc(t.id)}" data-act="song-rewrite" data-id="${esc(t.id)}" title="Improve this song in the Music Studio: everything is filled in and the AI suggests changes">✏️ Rewrite</a>
         ${st ? `<button class="pill" data-act="song-more" data-station="${esc(st.id)}" title="Write and record a new song in the spirit of this one">🎵 More like this</button>` : ""}
         <button class="pill" data-act="song-art" title="Draw a new cover">🎨 New cover</button>
         <a class="pill" href="${esc(t.audio)}?download=1">⤓ Download</a>
@@ -1064,6 +1065,7 @@ $("page").addEventListener("click", async (e) => {
   if (act === "song-art") { post("/api/radio/art", {track: view.id}).then(() => toast("Drawing a new cover — it appears in a minute or two.")).catch(e => toast(e.message)); return; }
   if (act === "song-more") { post(`/api/radio/stations/${encodeURIComponent(a.dataset.station)}/song`, {like: view.id}).then(() => toast("Writing a new song in the spirit of this one — it's recorded next.")).catch(e => toast(e.message)); return; }
   if (act === "song-play") return preview(a.dataset.audio, null);
+  if (act === "song-rewrite") { if (window.b70Open) { e.preventDefault(); b70Open("music", "#rewrite=" + a.dataset.id); } return; }
   if (act === "make-song") {
     a.disabled = true;
     post(`/api/radio/stations/${encodeURIComponent(view.id)}/song`).then(() => { hint("Writing a new song for this station — it's recorded next, ahead of everything else."); refresh().then(updateMk); })
