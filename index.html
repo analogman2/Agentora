@@ -103,6 +103,11 @@ textarea:focus, input:focus { border-color: var(--accent); }
 .req .ok { color: #2f9e5c; } .req .need { color: #c27c0e; } .req .bad { color: var(--err); }
 .req input { margin-top: 6px; font-size: 13px; padding: 6px 8px; }
 .req .sugg { display: block; font-size: 12px; margin-top: 4px; }
+.prio { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.prio button { font-size: 13px; padding: 6px 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+.prio button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.prio button:disabled { cursor: default; }
+.prio button:disabled:not([aria-pressed="true"]) { opacity: .6; }
 #engine { width: 100%; }
 #engineNote { margin-top: 4px; min-height: 0; }
 #engineNote:empty { display: none; }
@@ -422,6 +427,9 @@ body.view-workflows .wflist span { padding: 0; }
     <section class="scard"><h3>GPU</h3>
       <div id="gpuWho" class="small">…</div>
       <div class="smeter" aria-hidden="true"><i id="gpuBar"></i></div><div class="small" id="gpuText">memory —</div>
+      <div class="small" style="margin:10px 0 4px;font-weight:600" id="prioLbl">Priority</div>
+      <div class="prio" id="prio" role="group" aria-labelledby="prioLbl"></div>
+      <div class="small" id="prioNote" style="margin:6px 0 8px"></div>
       <div class="links"><button class="btn" id="freeBtn2" title="Switches the radio off and unloads chat models">Free the GPU</button></div></section>
     <section class="scard"><h3>Studios</h3><div class="links">
       <a class="btn" id="lnRadio" href="#">📻 Radio</a><a class="btn" id="lnMusic" href="#">🎵 Music Studio</a>
@@ -1708,7 +1716,7 @@ $("#authForm").onsubmit = async (e) => {
   $("#aGo").disabled = false;
 };
 function signedIn(user) {
-  ME = user; $("#auth").classList.remove("show");
+  ME = user; $("#auth").classList.remove("show"); loadPrio();
   $("#lnHermes").hidden = user.role !== "admin";
   $("#userName").textContent = user.name; $("#userWho").textContent = `Signed in as ${user.name}${user.role === "admin" ? " · admin" : ""}`;
   $("#mUsers").hidden = user.role !== "admin";
@@ -1903,6 +1911,25 @@ _fetch("/api/session").then(r => r.json()).then(d => d.user ? signedIn(d.user) :
   // Init: hide panel
   if (asst) asst.hidden = true;
 })();
+
+// ---------- GPU priority (shared with the radio): which AI tool gets the graphics card first. Admins choose.
+const PRIO = [["shared", "Shared"], ["studio", "Image studio"], ["radio", "Radio"], ["assistant", "Assistant"]];
+const PRIO_HELP = {
+  shared: "Everyone takes turns. The radio makes room before recording a song.",
+  studio: "Pictures and videos come first: the radio pauses new songs while the studio works and chat models are unloaded before each job.",
+  radio: "The radio comes first: creating here won't switch it off, so jobs can be slower while it records.",
+  assistant: "Hermes comes first: its model stays loaded, and the radio waits while it's in use. Jobs here can be slower."};
+function drawPrio(v) {
+  const admin = ME && ME.role === "admin";
+  $("#prio").innerHTML = PRIO.map(([k, l]) => `<button type="button" data-prio="${k}" aria-pressed="${k === v}" ${admin ? "" : "disabled"} title="${escapeHtml(PRIO_HELP[k])}">${l}</button>`).join("");
+  $("#prioNote").textContent = PRIO_HELP[v] + (admin ? "" : " Only an admin can change this.");
+  $("#prio").querySelectorAll("[data-prio]").forEach(b => b.onclick = async () => {
+    const r = await fetch("/api/gpu-priority", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({priority: b.dataset.prio})});
+    if (r.ok) drawPrio((await r.json()).priority); else $("#prioNote").textContent = await r.text();
+  });
+}
+async function loadPrio() { if (!ME) return; try { const r = await fetch("/api/gpu-priority"); if (r.ok) drawPrio((await r.json()).priority); } catch {} }
+setInterval(() => { if (!document.hidden) loadPrio(); }, 15000);
 </script>
 </body>
 </html>

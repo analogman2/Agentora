@@ -427,8 +427,7 @@ async def generate(request):
         raise web.HTTPBadRequest(text="Write a prompt first")
     count = max(1, min(int(body.get("count") or 1), 8 if kind == "image" else 4))
     loras = check_loras(body.get("loras"))
-    if S["auto_free_gpu"]:
-        await free_gpu(request)
+    await prepare_gpu()
     fixed_seed = body.get("seed")
     created = []
     for n in range(count):
@@ -552,24 +551,66 @@ async def delete(request):
     return web.json_response({"ok": True})
 
 
-async def free_gpu(request):
-    """Ask the music radio to give the GPU back and unload Ollama chat models (they reload on next use)."""
+async def _free(release_radio=True, unload_llm=True):
     done = []
+    if release_radio:
+        try:
+            async with http.post(RADIO + "/api/gpu/release", timeout=aiohttp.ClientTimeout(total=5)) as r:
+                d = await r.json()
+                done.append("Radio: " + (d.get("message") or "released"))
+        except Exception:
+            pass
+    if unload_llm:
+        try:
+            async with http.get(OLLAMA + "/api/ps", timeout=aiohttp.ClientTimeout(total=2)) as r:
+                models = [m["name"] for m in (await r.json()).get("models", []) if m.get("size_vram")]
+            for m in models:
+                await http.post(OLLAMA + "/api/generate", json={"model": m, "keep_alive": 0})
+                done.append(f"Unloaded {m}")
+        except Exception:
+            pass
+    return done
+
+
+async def free_gpu(request):
+    """The Free the GPU button: ask the music radio to give the GPU back and unload Ollama chat models (they reload on next use)."""
+    return web.json_response({"ok": True, "done": await _free()})
+
+
+# GPU priority, shared with the radio (it reads the same file): which AI tool gets the graphics card first
+PRIORITY_FILE = Path.home() / ".config" / "ai-gpu-priority.json"
+PRIORITIES = {"shared": "Shared — take turns", "studio": "Image & Video Studio", "radio": "Radio", "assistant": "Assistant (Hermes)"}
+
+
+def gpu_priority():
     try:
-        async with http.post(RADIO + "/api/gpu/release", timeout=aiohttp.ClientTimeout(total=5)) as r:
-            d = await r.json()
-            done.append("Radio: " + (d.get("message") or "released"))
-    except Exception:
-        pass
-    try:
-        async with http.get(OLLAMA + "/api/ps", timeout=aiohttp.ClientTimeout(total=2)) as r:
-            models = [m["name"] for m in (await r.json()).get("models", [])]
-        for m in models:
-            await http.post(OLLAMA + "/api/generate", json={"model": m, "keep_alive": 0})
-            done.append(f"Unloaded {m}")
-    except Exception:
-        pass
-    return web.json_response({"ok": True, "done": done})
+        v = json.loads(PRIORITY_FILE.read_text()).get("priority")
+    except (OSError, ValueError):
+        v = None
+    return v if v in PRIORITIES else "shared"
+
+
+async def prepare_gpu():
+    """Before a job: make room according to the GPU priority (and the older "free automatically" setting)."""
+    p, auto = gpu_priority(), S["auto_free_gpu"]
+    await _free(release_radio=p == "studio" or (auto and p not in ("radio",)),
+                unload_llm=p in ("studio", "radio") or (auto and p != "assistant"))
+
+
+async def get_priority(request):
+    return web.json_response({"priority": gpu_priority(), "choices": PRIORITIES})
+
+
+async def set_priority(request):
+    require_admin(request)
+    v = (await request.json()).get("priority")
+    if v not in PRIORITIES:
+        raise web.HTTPBadRequest(text="priority must be one of: " + ", ".join(PRIORITIES))
+    PRIORITY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = PRIORITY_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"priority": v, "set": time.time()}))
+    tmp.replace(PRIORITY_FILE)
+    return web.json_response({"priority": v, "choices": PRIORITIES})
 
 
 async def on_startup(app):
@@ -1112,8 +1153,7 @@ async def wf_run(request):
             W.inject_loras(W.build_prompt(a, values, images), loras)
         except W.WorkflowError as e:
             raise web.HTTPBadRequest(text=str(e))
-    if S["auto_free_gpu"]:
-        await free_gpu(request)
+    await prepare_gpu()
     count = max(1, min(int(body.get("count") or 1), 8))
     kinds = {f["id"]: f["type"] for f in a["fields"]}     # what they typed is remembered for next time
     keep = {k: {"value": v.get("value"), **({"random": bool(v["random"])} if "random" in v else {})}
@@ -1258,6 +1298,8 @@ def main():
     app.router.add_post("/api/workflows/{id}/run", wf_run)
     app.router.add_put("/api/workflows/{id}/values", wf_save_values)
     app.router.add_get("/api/loras", list_loras)
+    app.router.add_get("/api/gpu-priority", get_priority)
+    app.router.add_post("/api/gpu-priority", set_priority)
     app.router.add_post("/api/workflows/install-many", wf_install_many)
     app.router.add_get("/api/installs", install_list)
     app.router.add_get("/api/installs/{id}", install_status)
