@@ -647,8 +647,19 @@ $("bUp").onclick = async () => {
   current.feedback = kind === "keep" ? "keep" : null; renderBar(); if (view.tab === "now") renderView();
   toast(kind === "keep" ? "👍 Got it — more songs like this one." : "Thumbs up removed.");
 };
-$("bDown").onclick = () => { post("/api/radio/skip", {track: current ? current.id : null, kind: "dislike"}).catch(e => toast(e.message)); toast("👎 Noted — fewer like this. Skipping…"); };
-$("bSkip").onclick = () => { post("/api/radio/skip", {track: current ? current.id : null}).catch(e => toast(e.message)); toast("Skipping for everyone listening…"); };
+// A skip makes the server drop the buffered old song ("cut"); reconnecting then starts right on the next song.
+let myCut;
+function followCut(cut) {
+  if (cut == null) return;
+  if (myCut !== undefined && cut !== myCut && wantPlay && lid) connect();
+  myCut = cut;
+}
+async function skipNow(kind) {
+  try { const r = await post("/api/radio/skip", {track: current ? current.id : null, kind}); followCut(r.cut); }
+  catch (e) { toast(e.message); }
+}
+$("bDown").onclick = () => { toast("👎 Noted — fewer like this. Skipping…"); skipNow("dislike"); };
+$("bSkip").onclick = () => { toast("Skipping for everyone listening…"); skipNow("skip"); };
 function setAddKey(on) {
   $("bAdd").classList.toggle("inlist", on); $("bAdd").setAttribute("aria-pressed", on);
   $("bAdd").title = on ? "In your playlist — press to remove" : "Add to my playlist";
@@ -700,6 +711,7 @@ async function refresh() {
     else if (!selected && R.station) selected = R.station;
     if (prevOn && !R.on && lid) { wantPlay = false; disconnect(); toast("The radio was switched off."); }
     prevOn = R.on;
+    if (R.stream) followCut(R.stream.cut);            // someone else skipped, or the station changed
     const n = R.stream ? R.stream.listeners : 0;
     $("lisN").textContent = n; $("lisChip").textContent = n === 1 ? "person listening now" : "listening now";
     $("sideBadge").textContent = `📡 ${n}`; $("sideBadge").classList.toggle("live", n > 0);

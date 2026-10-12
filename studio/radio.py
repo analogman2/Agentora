@@ -1094,7 +1094,8 @@ def audio_filters(seconds):
         f.append(f"afade=t=out:st={seconds - FADE_OUT:.2f}:d={FADE_OUT:g}")
     return ["-af", ",".join(f)] if f else []
 bc = {"listeners": {}, "buf": bytearray(), "bytes": 0, "epoch": 0.0, "now": None, "aired": [],
-      "skip": threading.Event(), "wake": threading.Event(), "silence": b"", "last": 0.0}
+      "skip": threading.Event(), "wake": threading.Event(), "silence": b"", "last": 0.0,
+      "cut": 0, "cut_next": False}         # cut: bumped when a skip/retune drops the buffered old song (players reconnect)
 bc_lock = threading.Lock()
 listen_lock = threading.Lock()
 
@@ -1140,6 +1141,10 @@ def _play_track(t):
     proc = subprocess.Popen(["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(src), *audio_filters(t.get("seconds")),
                              *ENCODE], stdout=subprocess.PIPE, stdin=subprocess.DEVNULL)
     bc["skip"].clear()
+    if bc["cut_next"]:                     # skipped or retuned: drop the old song's buffered audio and refill LEAD at once,
+        with bc_lock:                      # so players that reconnect start right on this song with a full cushion
+            bc["buf"].clear(); bc["epoch"] = time.time() - bc["bytes"] / BPS
+            bc["cut"] += 1; bc["cut_next"] = False
     _air(t | {"duration": t.get("seconds")})
     app.log("radio on air:", t["title"], f"({len(bc['listeners'])} listening)")
     checked, start, pending = 0.0, bc["bytes"], b""
@@ -1156,6 +1161,7 @@ def _play_track(t):
                 continue
             _broadcast(pending[:n]); pending = pending[n:]
             if bc["skip"].is_set() or not state["on"]:
+                bc["cut_next"] = state["on"]
                 break
             if not bc["listeners"]:                # everyone left: stop airing to nobody
                 if (bc["bytes"] - start) / BPS < 30:     # barely started -> put it back on the spool for later
@@ -1167,6 +1173,7 @@ def _play_track(t):
             if time.time() - checked > 1:          # retuned to another station: cut over once it has a song ready
                 checked = time.time()
                 if t.get("station") != state["station"] and station_tracks(state["station"]):
+                    bc["cut_next"] = True
                     break
     finally:
         proc.kill(); proc.wait()
@@ -1249,7 +1256,7 @@ def playout_loop():
             if t:
                 _play_track(t)
                 for _ in range(round(GAP / 1.152)):       # a little silence between songs
-                    if not bc["listeners"]:
+                    if not bc["listeners"] or bc["cut_next"]:     # skipped: straight to the next song
                         break
                     for i in range(0, len(bc["silence"]), 8 * FRAME):
                         _broadcast(bc["silence"][i:i + 8 * FRAME])
@@ -1352,10 +1359,22 @@ def skip(track_id, kind="skip"):
     """Skip (or NOPE) the song on air - for everyone, it's one broadcast."""
     if track_id:
         feedback(track_id, kind)
-    now = bc["now"]
+    now, cut = bc["now"], bc["cut"]
+    if now and track_id and now["id"] != track_id and now.get("start_pos") is not None:
+        # the listener still hears the song before (the stream runs LEAD ahead) and the next one is already on air:
+        # drop the old song's tail from the buffer, so a reconnecting player starts on the current song
+        with bc_lock:
+            keep = round((bc["bytes"] / BPS - now["start_pos"]) * BPS / FRAME) * FRAME
+            if 0 < keep < len(bc["buf"]):
+                del bc["buf"][:len(bc["buf"]) - keep]
+                bc["cut"] += 1
+        return {"ok": True, "cut": bc["cut"]}
     if now and (not track_id or now["id"] == track_id):
         bc["skip"].set()
-    return {"ok": True}
+        t0 = time.time()
+        while bc["cut"] == cut and time.time() - t0 < 8:      # the next song is on air: players can reconnect to it now
+            time.sleep(0.1)
+    return {"ok": True, "cut": bc["cut"]}
 
 
 def stream_view(listener=None):
@@ -1364,7 +1383,7 @@ def stream_view(listener=None):
         return {"pos": round(bc["bytes"] / BPS, 3), "listeners": len(bc["listeners"]), "aired": bc["aired"],
                 "now": bc["now"], "p0": li["p0"] if li else None, "url": "/radio/stream.mp3",
                 "clock": round(time.time() - bc["epoch"], 3) if bc["listeners"] else None,   # real-time position
-                "bitrate": ACTIVE_BITRATE, "lead": round(LEAD, 1)}
+                "bitrate": ACTIVE_BITRATE, "lead": round(LEAD, 1), "cut": bc["cut"]}
 
 
 # ----------------------------------------------------------------------------- API
