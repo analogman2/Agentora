@@ -317,6 +317,29 @@ def find_installed(name, folder=None):
     return None
 
 
+_PRECISION = re.compile(r"^(?:(?:fp|bf)\d+|(?:nv|mx)fp\d+|int\d+|e\dm\d(?:fn)?|q\d+|iq\d+|scaled|awq|gptq|convrot|mixed|quant(?:ized)?|pruned|safetensors|gguf)$")
+
+
+def model_core(name):
+    """A model's identity without precision / packaging tags: 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors' and
+    'qwen3vl_32b_minimax_h3_int8_convrot.safetensors' both -> ('32b','h3','minimax','qwen3vl')."""
+    toks = [t for t in re.split(r"[_\-. ]+", Path(name).stem.lower()) if t]
+    quantized = any(re.fullmatch(r"i?q\d+", t) for t in toks)
+    core = [t for t in toks if not _PRECISION.match(t) and not (quantized and t in ("k", "m", "s", "l", "xs", "xl", "0", "1"))]
+    return tuple(sorted(core))
+
+
+def similar_option(name, opts):
+    """An installed file the same loader can open that is the same model in another precision, or None."""
+    core = model_core(name)
+    if len(core) < 2 and len("".join(core)) < 6:            # too little left to be sure it's the same model
+        return None
+    hits = [o for o in opts if model_core(o) == core and Path(_norm(o)).name != Path(_norm(name)).name]
+    # prefer formats this RTX 4090 runs natively: NVFP4 / MXFP formats are made for RTX 50-series cards
+    blackwell = lambda o: any(re.fullmatch(r"(?:nv|mx)fp\d+", t) for t in re.split(r"[_\-. ]+", Path(o).stem.lower()))
+    return sorted(hits, key=lambda o: (blackwell(o), len(o), o))[0] if hits else None
+
+
 async def analyze(recipe, comfy):
     """What this workflow needs and what's missing; also the fields a person can change."""
     info = await object_info(comfy)
@@ -352,6 +375,10 @@ async def analyze(recipe, comfy):
                     installed = next((o for o in opts if Path(_norm(o)).name == Path(norm).name), None)
             folder = (hints.get(Path(norm).name) or {}).get("folder") or _guess_folder(cls, key)
             on_disk = None if installed else find_installed(norm, folder)
+            similar = similar_option(norm, opts) if opts and not installed and not on_disk else None
+            substitute = similar if similar and Path(norm).name not in (recipe.get("exact_models") or []) else None
+            if substitute:                                # same model in another precision is already here: use it
+                installed = substitute
             if (Path(norm).name, folder) in seen:
                 continue
             seen.add((Path(norm).name, folder))
@@ -359,7 +386,7 @@ async def analyze(recipe, comfy):
             elsewhere = on_disk if on_disk and opts is not None else None
             models.append({"name": Path(norm).name, "value": value, "node": nid, "path": list(path), "class": cls, "folder": folder,
                            "installed": bool(installed) if opts is not None else bool(on_disk), "use": installed,
-                           "elsewhere": elsewhere, "lora": folder == "loras"})
+                           "elsewhere": elsewhere, "lora": folder == "loras", "substitute": substitute, "similar": similar})
     for nid, node in prompt.items():                            # textual inversions: "embedding:name"
         for _, text in _walk_strings(node.get("inputs", {})):
             for e in re.findall(r"embedding:([\w\-. ]+)", text):

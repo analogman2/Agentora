@@ -270,6 +270,10 @@ input[type=text] { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1
 .side .big { font-size: 22px; font-weight: 700; line-height: 1.2; }
 .side .smeter { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin: 8px 0 4px; }
 .side .smeter i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s; }
+.side .smeter i.warn { background: #d99a1e; } .side .smeter i.full { background: var(--err); }
+.diskparts { list-style: none; margin: 6px 0 0; padding: 0; font-size: 12px; color: var(--muted); }
+.diskparts li { display: flex; justify-content: space-between; gap: 8px; padding: 1px 0; }
+.diskparts li b { font-weight: 500; color: var(--text); white-space: nowrap; }
 .side .links { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .side .links .btn { text-align: left; }
 .side .small { font-size: 13px; color: var(--muted); }
@@ -431,6 +435,10 @@ body.view-workflows .wflist span { padding: 0; }
       <div class="prio" id="prio" role="group" aria-labelledby="prioLbl"></div>
       <div class="small" id="prioNote" style="margin:6px 0 8px"></div>
       <div class="links"><button class="btn" id="freeBtn2" title="Switches the radio off and unloads chat models">Free the GPU</button></div></section>
+    <section class="scard"><h3>Disk</h3>
+      <div class="smeter" role="meter" aria-label="Disk space used" aria-valuemin="0" aria-valuemax="100" id="diskMeter"><i id="diskBar"></i></div>
+      <div class="small" id="diskText">—</div>
+      <ul class="diskparts" id="diskParts"></ul></section>
     <section class="scard"><h3>Studios</h3><div class="links">
       <a class="btn" id="lnRadio" href="#">📻 Radio</a><a class="btn" id="lnMusic" href="#">🎵 Music Studio</a>
       <a class="btn" id="lnHermes" href="#" target="_blank" rel="noopener" hidden title="Settings, sessions, skills, tools and chat for the Hermes AI agent (admins)">☤ Hermes dashboard</a>
@@ -1301,14 +1309,17 @@ function renderWorkflow() {
   const models = p.models.map(m => {
     const src = m.source;
     let status;
-    if (m.installed) status = `<span class="ok">✓ installed</span> · ${escapeHtml(m.folder)}`;
+    if (m.installed && m.substitute) status = `<span class="ok">✓ using your ${escapeHtml(m.substitute)}</span> · the same model in another precision, so nothing to download`
+      + (admin ? ` · <a href="#" data-exact="${escapeHtml(m.name)}">download the exact file instead</a>` : "");
+    else if (m.installed) status = `<span class="ok">✓ installed</span> · ${escapeHtml(m.folder)}`;
     else if (src) status = `<span class="need">⤓ will download</span> ${src.size ? gb(src.size) : ""} · ${escapeHtml(src.source)}${src.page ? ` · <a href="${escapeHtml(src.page)}" target="_blank" rel="noopener">page</a>` : ""}${src.note ? `<br><span class="need">${escapeHtml(src.note)}</span>` : ""}` +
       (admin ? (wf.links[m.name] ? linkBox(m) : ` · <a href="#" data-relink="${escapeHtml(m.name)}">use a different link</a>`) : "");
     else status = `<span class="bad">✗ not found automatically</span> · goes in ${escapeHtml(m.folder)}` +
       (admin ? linkBox(m) +
         (m.suggestions && m.suggestions.length ? `<span class="sugg">Possible matches — check before using: ${m.suggestions.map(s => `<a href="${escapeHtml(s.page)}" target="_blank" rel="noopener">${escapeHtml(s.title)}</a> (${escapeHtml(s.file || "")}${s.size ? ", " + gb(s.size) : ""}) <a href="#" data-use="${escapeHtml(m.name)}" data-url="${escapeHtml(s.url)}">use</a>`).join(" · ")}</span>` : "") : "");
+    const alt = !m.installed && m.similar && admin ? `<div class="st">You have ${escapeHtml(m.similar)}, the same model in another precision · <a href="#" data-inexact="${escapeHtml(m.name)}">use it instead</a></div>` : "";
     const skipped = !m.installed && m.refused && m.refused.length ? `<div class="st">Skipped copies you can't download: ${m.refused.map(escapeHtml).join(", ")}</div>` : "";
-    return `<li><div class="nm">${m.lora ? "LoRA · " : ""}${escapeHtml(m.name)}</div><div class="st">${status}</div>${skipped}</li>`;
+    return `<li><div class="nm">${m.lora ? "LoRA · " : ""}${escapeHtml(m.name)}</div><div class="st">${status}</div>${alt}${skipped}</li>`;
   }).join("");
   const packs = p.packs.map(k => `<li><div class="nm">${escapeHtml(k.title)}${k.author ? ` <span class="st">by ${escapeHtml(k.author)}</span>` : ""}</div>
       <div class="st"><span class="need">⤓ node pack${k.manager ? " · via ComfyUI-Manager" : ""}</span> · <a href="${escapeHtml(k.repo)}" target="_blank" rel="noopener">${escapeHtml(k.repo.replace("https://github.com/", ""))}</a> · provides ${k.provides.length} node${k.provides.length === 1 ? "" : "s"}${k.found_by ? " · " + escapeHtml(k.found_by) : ""}${k.listed ? "" : " · <span class='bad'>not in a registry</span>"}</div>
@@ -1350,6 +1361,12 @@ function renderWorkflow() {
   $("#wfRecheck").onclick = () => openWorkflow(w.id, true);
   $("#wfDel").onclick = async () => { if (!confirm(`Remove “${w.name}” from your workflows? Pictures you made with it stay.`)) return; await fetch(`/api/workflows/${w.id}`, {method: "DELETE"}); wf.cur = null; $("#wfDetail").innerHTML = ""; loadWorkflows(); };
   $("#wfDetail").querySelectorAll("[data-link]").forEach(i => i.oninput = () => { wf.links[i.dataset.link] = i.value.trim(); });
+  $("#wfDetail").querySelectorAll("[data-exact],[data-inexact]").forEach(a => a.onclick = async (e) => {
+    e.preventDefault();
+    const name = a.dataset.exact || a.dataset.inexact;
+    await fetch(`/api/workflows/${w.id}/exact`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify({name, exact: !!a.dataset.exact})});
+    delete cwf.cards[w.id]; openWorkflow(w.id, true);
+  });
   $("#wfDetail").querySelectorAll("[data-relink]").forEach(a => a.onclick = (e) => {
     e.preventDefault();
     a.insertAdjacentHTML("afterend", linkBox({name: a.dataset.relink}));
@@ -1716,7 +1733,7 @@ $("#authForm").onsubmit = async (e) => {
   $("#aGo").disabled = false;
 };
 function signedIn(user) {
-  ME = user; $("#auth").classList.remove("show"); loadPrio();
+  ME = user; $("#auth").classList.remove("show"); loadPrio(); loadDisk();
   $("#lnHermes").hidden = user.role !== "admin";
   $("#userName").textContent = user.name; $("#userWho").textContent = `Signed in as ${user.name}${user.role === "admin" ? " · admin" : ""}`;
   $("#mUsers").hidden = user.role !== "admin";
@@ -1930,6 +1947,22 @@ function drawPrio(v) {
 }
 async function loadPrio() { if (!ME) return; try { const r = await fetch("/api/gpu-priority"); if (r.ok) drawPrio((await r.json()).priority); } catch {} }
 setInterval(() => { if (!document.hidden) loadPrio(); }, 15000);
+
+// ---------- disk usage (side panel)
+const diskSize = (n) => n >= 2 ** 40 ? (n / 2 ** 40).toFixed(2) + " TB" : n >= 2 ** 30 ? (n / 2 ** 30).toFixed(n >= 100 * 2 ** 30 ? 0 : 1) + " GB" : Math.round(n / 2 ** 20) + " MB";
+async function loadDisk() {
+  if (!ME) return;
+  try {
+    const r = await fetch("/api/disk"); if (!r.ok) return;
+    const d = await r.json(), pct = 100 * d.used / d.total;
+    const bar = $("#diskBar"); bar.style.width = pct.toFixed(1) + "%"; bar.className = d.free < 15 * 2 ** 30 ? "full" : pct > 85 ? "warn" : "";
+    $("#diskMeter").setAttribute("aria-valuenow", Math.round(pct));
+    $("#diskText").innerHTML = `${diskSize(d.free)} free of ${diskSize(d.total)}` + (d.free < 15 * 2 ** 30 ? ` · <span style="color:var(--err)">almost full: big downloads will be refused</span>` : "");
+    $("#diskParts").innerHTML = d.parts.filter(p => p.bytes > 0).sort((a, b) => b.bytes - a.bytes).map(p => `<li><span>${escapeHtml(p.label)}</span><b>${diskSize(p.bytes)}</b></li>`).join("")
+      + (d.partial_downloads > 2 ** 28 ? `<li><span>Unfinished downloads</span><b>${diskSize(d.partial_downloads)}</b></li>` : "");
+  } catch {}
+}
+setInterval(() => { if (!document.hidden) loadDisk(); }, 60000);
 </script>
 </body>
 </html>

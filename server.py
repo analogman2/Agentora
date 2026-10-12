@@ -404,6 +404,19 @@ async def list_loras(request):
                                         for n in sorted(lora_files(), key=str.lower)]})
 
 
+async def wf_exact(request):
+    """Admins: for one model, download the exact file instead of using a similar one that's installed (or go back)."""
+    require_admin(request)
+    r = my_recipe(request)
+    b = await request.json()
+    name = str(b.get("name") or "")[:300]
+    exact = set(r.get("exact_models") or [])
+    exact.add(name) if b.get("exact") else exact.discard(name)
+    r["exact_models"] = sorted(exact)
+    save_recipe(r); plans.pop(r["id"], None)
+    return web.json_response({"ok": True})
+
+
 async def wf_save_values(request):
     """Remember the settings someone typed into a workflow (prompt, seeds, strengths...) for next time."""
     r = my_recipe(request)
@@ -595,6 +608,47 @@ async def prepare_gpu():
     p, auto = gpu_priority(), S["auto_free_gpu"]
     await _free(release_radio=p == "studio" or (auto and p not in ("radio",)),
                 unload_llm=p in ("studio", "radio") or (auto and p != "assistant"))
+
+
+# ---------- disk usage for the side panel
+DISK_PARTS = [("ComfyUI models", Path.home() / "ComfyUI" / "models"), ("Chat models (Ollama)", Path("/usr/share/ollama/.ollama/models")),
+              ("Creations", Path.home() / "ComfyUI" / "output"), ("Radio songs", Path.home() / "yue2-xpu-radio" / "library")]
+_disk = {"t": 0, "parts": None, "busy": False}
+
+
+def _tree_bytes(root):
+    """Bytes actually used under a folder (symlinked model copies cost nothing, so they aren't followed)."""
+    total, stack = 0, [root]
+    while stack:
+        try:
+            with os.scandir(stack.pop()) as it:
+                for e in it:
+                    try:
+                        if e.is_dir(follow_symlinks=False):
+                            stack.append(e.path)
+                        elif e.is_file(follow_symlinks=False):
+                            total += e.stat(follow_symlinks=False).st_blocks * 512
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+    return total
+
+
+async def disk_usage(request):
+    """The disk the models live on: total / used / free, plus what the big folders take (measured every few minutes)."""
+    du = shutil.disk_usage(W.MODELS)
+    if (_disk["parts"] is None or time.time() - _disk["t"] > 300) and not _disk["busy"]:
+        _disk["busy"] = True
+        try:
+            loop = asyncio.get_running_loop()
+            sizes = await asyncio.gather(*(loop.run_in_executor(None, _tree_bytes, d) for _, d in DISK_PARTS))
+            _disk.update(t=time.time(), parts=[{"label": l, "bytes": b} for (l, d), b in zip(DISK_PARTS, sizes) if d.exists()])
+        finally:
+            _disk["busy"] = False
+    partial = sum(f.stat().st_size for f in W.MODELS.rglob("*.part")) if W.MODELS.exists() else 0
+    return web.json_response({"total": du.total, "used": du.used, "free": du.free, "parts": _disk["parts"] or [],
+                              "partial_downloads": partial, "measured": _disk["t"]})
 
 
 async def get_priority(request):
@@ -1297,8 +1351,10 @@ def main():
     app.router.add_post("/api/workflows/{id}/install", wf_install)
     app.router.add_post("/api/workflows/{id}/run", wf_run)
     app.router.add_put("/api/workflows/{id}/values", wf_save_values)
+    app.router.add_put("/api/workflows/{id}/exact", wf_exact)
     app.router.add_get("/api/loras", list_loras)
     app.router.add_get("/api/gpu-priority", get_priority)
+    app.router.add_get("/api/disk", disk_usage)
     app.router.add_post("/api/gpu-priority", set_priority)
     app.router.add_post("/api/workflows/install-many", wf_install_many)
     app.router.add_get("/api/installs", install_list)
