@@ -14,6 +14,8 @@ A web front end over ComfyUI for pictures and videos, with user accounts. Served
 - `auth.py`: accounts (scrypt hashes), sessions, lockout.
 - `hermes_gate.py`: unit `hermes-gate` on :7880, lets only signed-in Studio admins through to the Hermes web dashboard
   (unit `hermes-dashboard`, 127.0.0.1:9119), WebSockets included.
+- `home.html`: the /home page (status of every app; public summary from /api/home).
+- `ratings.py`: PG-13 ratings for content models (non-admins only see PG-13 LoRAs/workflows/models).
 - `index.html`: the whole front end (one file: CSS tokens on :root with a dark-mode block, then markup, then one script).
   `$` is `document.querySelector` here. Use `escapeHtml` for anything user- or web-supplied.
 - Data (never commit, never print): `settings.json` (holds API keys), `users.json`, `sessions.json`, `agent.token`,
