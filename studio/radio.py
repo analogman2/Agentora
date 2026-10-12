@@ -307,7 +307,32 @@ Reply with a single JSON object and nothing else:
 - style: one line for a music model: language, genre/subgenre, vocal type (or 'instrumental, no vocals'), 3-5 instruments, mood, and tempo as 'NN BPM'. Example: "English, dreamy synth-pop, airy female vocal, analog synth pads, arpeggiated bass, gated drums, nostalgic, 108 BPM"
 - lyrics (when not instrumental): sections tagged [Verse] [Pre-Chorus] [Chorus] [Bridge] [Outro] on their own lines, one sung phrase per line, chorus repeated word for word. Only sung words. Size it for about 2.5-3 minutes: 24-34 sung lines in total (e.g. Verse 6, Chorus 4, Verse 6, Chorus 4, Bridge 4, Chorus 4), and always finish with a short [Outro] of 2-3 lines so the song comes to a real ending.
 - lyrics (instrumental): only section tags, e.g. "[Intro]\\n\\n[Verse]\\n\\n[Chorus]\\n\\n[Verse]\\n\\n[Chorus]\\n\\n[Outro]".
-- Stay inside the station's sound, but vary subgenre, tempo, key feel, instrumentation, topic and title from song to song so the station never sounds repetitive."""
+- Stay inside the station's sound, but vary subgenre, tempo, key feel, instrumentation, topic and title from song to song so the station never sounds repetitive.
+LYRIC CRAFT (this matters most - write like a real working songwriter, not a greeting card):
+- Every song is about ONE concrete situation: a specific person, a place, a moment, something that happened. Show it with physical
+  details - named objects, places, times, small actions, things said out loud - instead of naming feelings ("I'm so lost" is weak;
+  "your coat's still on the hook by the door" is strong). Each verse adds NEW details and moves the story forward.
+- The chorus is a short, singable hook (2-4 lines) that contains the title and could be shouted along to. Keep one point of view and tense.
+- Rhyme naturally: mix perfect and slant rhymes; never bend a line just to rhyme, never use filler words to fit the meter.
+- Lines a singer can breathe: about 6-10 syllables, plain spoken words, no tongue-twisters, no stacked adjectives.
+- Avoid stock imagery and clichés: shadows, darkness, fire/flames/ignite, rise/rising, break free, chains, scars, broken pieces,
+  demons, ghosts, echoes, whispers, neon, hollow, the void, storms and thunder as metaphors, ashes, phoenix, wings, "stand tall",
+  "hold on", "let go", "light the way", "heart of gold", "against the tide". If one slips in, replace it with something specific.
+- Titles: concrete and particular ("Laundromat on 9th", "Two Coffees, One Spoon"), not abstract ("Echoes of the Soul")."""
+
+
+STORY_SEEDS = [
+    "someone driving home at dawn after a night shift, noticing small things on the road", "two old friends meeting again at a wedding",
+    "a kid's first summer job at a seaside snack bar", "packing up a parent's house after they move into care",
+    "a late-night conversation in a 24-hour diner", "a band's van breaking down in a small town", "learning to cook a grandmother's recipe",
+    "a lighthouse keeper's last week before automation", "a long-distance couple on a bad phone line", "a street musician and one regular listener",
+    "moving into a first apartment with one chair and a mattress", "the last day before a best friend leaves for another country",
+    "a farmer watching the sky before harvest", "a nurse's walk home after a hard shift", "fixing an old car with a brother",
+    "a small-town Friday night football game", "a power cut that brings neighbours outside", "finding an old letter in a second-hand book",
+    "a waitress who remembers every regular's order", "a road trip with a broken radio", "a dog waiting at the window every evening",
+    "teaching a kid to ride a bike in an empty parking lot", "a stranger's kindness at a bus station", "the first warm day of spring in the city",
+    "a boxer's early-morning training run", "two people falling for each other in a hardware store", "a retired dancer watching a rehearsal",
+    "a fisherman's boat coming in late", "a teenage garage band's first real gig", "a wedding ring lost and found in the sand"]
 
 
 VARIATIONS = [
@@ -436,6 +461,9 @@ def write_spec(s, short=False, fast=False):
         u.append(f"LYRICS THEME for every song on this station (keep the station's musical sound; this is about the words, "
                  f"title and mood): {s['theme']}")
     u.append("This song must be INSTRUMENTAL." if want_inst else "This song has vocals.")
+    if not want_inst:                                     # a concrete starting point, so songs aren't all the same anthem
+        u.append("Story idea for THIS song (adapt it to the station's world and lyrics theme, or invent something just as "
+                 "specific): " + random.choice(STORY_SEEDS) + ".")
     if short:
         u.append("Make this one SHORT - it opens the broadcast: [Verse] of 4 lines, [Chorus] of 4 lines, [Outro] of 2 lines (10 sung lines total).")
     if recent:
@@ -482,12 +510,64 @@ def write_spec(s, short=False, fast=False):
                 u.append(f"IMPORTANT: your title '{title}' repeats words from recent titles. Write a NEW song with a "
                          "completely different title and topic.")
                 raise ValueError(f"title '{title}' repeats recent titles; asking again")
+            if not inst and lyrics.strip() and "gpu" not in label.lower():   # editor pass (the small GPU model edits badly: skip)
+                lyrics, title = edit_lyrics(s, title, style, lyrics, base, model, label)
             return {"title": title[:80], "style": style, "instrumental": inst, "lyrics": lyrics if not inst else "", "writer": label}
         except Exception as e:
             app.log(f"radio: spec writer {label} failed ({e}); trying the next one")
     words = s["description"] or profile_text(s)
     return {"title": f"{s['name']} #{s['stats']['generated'] + 1}", "style": "Instrumental, " + words[:300] + ", no vocals",
             "instrumental": True, "lyrics": "", "writer": "fallback"}
+
+
+CLICHES = ["shadow", "darkness", "the dark", "fire", "flame", "ignite", "we rise", "i rise", "rising up", "break free", "breaking free",
+           "chains", "scars", "broken pieces", "demons", "ghost", "echo", "whisper", "neon", "hollow", "the void", "ashes", "phoenix",
+           "wings", "stand tall", "hold on", "let go", "light the way", "heart of gold", "against the tide", "into the night",
+           "tears like rain", "set me free", "burning bright", "lost in the", "thunder", "the storm"]
+
+
+def cliche_hits(lyrics):
+    low = lyrics.lower()
+    return [c for c in CLICHES if re.search(r"\b" + re.escape(c), low)]
+
+
+EDIT_SYSTEM = """You are a demanding lyric editor. You get a draft song. First think briefly about its weakest lines: clichés and
+stock images, vague abstract lines that name feelings instead of showing details, forced or filler rhymes, lines too long to sing,
+a chorus hook that isn't memorable or doesn't contain the title, verses that repeat instead of moving the story on.
+Then rewrite the lyrics fixing all of that. Keep the same section tags and order, keep about the same number of lines,
+keep the chorus identical every time it appears, keep the language, and keep everything that already works.
+Reply with JSON only: {"notes": "one short line on what you changed", "title": "...", "lyrics": "..."}"""
+
+
+def edit_lyrics(s, title, style, lyrics, base, model, label):
+    """One editor pass (two if clichés survive): sharper images, natural rhymes, a real hook. The draft is kept on failure."""
+    best = (lyrics, title)
+    for round_ in range(2):
+        hits = cliche_hits(best[0])
+        if round_ and len(hits) < 3:
+            break
+        ask = (f"Station: {s['name']} — {s.get('description') or ''}\nStyle: {style}\nTitle: {best[1]}\n"
+               + (f"These words are clichés here, replace every one of them with something specific: {', '.join(hits)}\n" if hits else "")
+               + f"\nDRAFT LYRICS:\n{best[0]}")
+        try:
+            body = {"model": model, "temperature": 0.7, "top_p": 0.95, "max_tokens": 2200, "chat_template_kwargs": {"enable_thinking": False},
+                    "messages": [{"role": "system", "content": EDIT_SYSTEM}, {"role": "user", "content": ask}], **app.LLM_EXTRA}
+            r = json.loads(urllib.request.urlopen(urllib.request.Request(base + "/chat/completions", json.dumps(body).encode(),
+                           {"Content-Type": "application/json"}), timeout=app.LLM_TIMEOUT).read())
+            out = parse_json_reply(r["choices"][0]["message"]["content"])
+            _, new = app.normalize_lyrics(str(out.get("lyrics", "")))
+            tags = lambda t: re.findall(r"^\[[^\]]+\]", t, re.M)
+            if not new.strip() or tags(new) != tags(best[0]) or len(new.splitlines()) < 0.6 * len(best[0].splitlines()):
+                raise ValueError("the edit changed the song's shape")
+            if len(cliche_hits(new)) > len(hits):
+                raise ValueError("the edit added clichés")
+            new_title = str(out.get("title") or best[1]).strip()[:80]
+            app.log(f"radio: lyric edit ({label}) {best[1]!r}: {len(hits)} -> {len(cliche_hits(new))} clichés; {str(out.get('notes', ''))[:120]}")
+            best = (new, new_title)
+        except Exception as e:
+            app.log(f"radio: lyric edit skipped ({e})")
+            break
+    return best
 
 
 # ----------------------------------------------------------------------------- spool

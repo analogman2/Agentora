@@ -818,6 +818,8 @@ def normalize_lyrics(text):
                 out.append("")
             out.append(f"[{name}]")
             continue
+        if re.fullmatch(r"[\[【(（][^\]】)）]{1,60}[\]】)）]", line):   # a made-up tag ("[Guitar Solo / Synth Build]"): never sing it
+            continue
         line = re.sub(r"^\s*[-*•]\s+", "", line)
         line = re.sub(r"\s*\((?:x\d+|repeat|×\d+)\)\s*$", "", line, flags=re.I)
         out.append(line)
