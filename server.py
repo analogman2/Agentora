@@ -704,10 +704,10 @@ async def nowplaying_action(request):
         return web.json_response(await r.json(content_type=None), status=r.status)
 
 
-# ---------- the assistant's internet access (Hermes's web search + browser tools on the chat connection)
+# ---------- the assistant's internet access (Hermes's web search on the chat connection)
 HERMES_BIN = str(Path.home() / ".local" / "bin" / "hermes")
-NET_TOOLSETS = ("web", "browser")
-OFFLINE_ALSO = ("terminal", "code_execution")          # shell commands and scripts could reach the internet too: off with it
+NET_TOOLSETS = ("web",)
+OFFLINE_ALSO = ("terminal",)          # shell commands and scripts could reach the internet too: off with it
 
 
 async def _hermes_toolsets():
@@ -719,7 +719,7 @@ async def _hermes_toolsets():
 
 
 async def assistant_internet(request):
-    """Admins: is the assistant allowed on the internet (web search, reading pages, its own browser)? POST {on} to change it.
+    """Admins: is the assistant allowed on the internet (web search and reading pages)? POST {on} to change it.
     Hermes reads its tool settings on every request, so this applies from the next message, in every app's chat panel."""
     require_admin(request)
     if request.method == "POST":
