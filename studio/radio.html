@@ -339,7 +339,7 @@ textarea { resize: vertical; max-height: 85vh; }
 
 <nav class="nav"><div class="nav-in">
   <a class="brand" href="#now">∞ b70 <span>radio</span></a>
-  <div class="apps" role="navigation" aria-label="Switch app"><a href="#" data-app="radio" class="on" aria-current="page" title="Radio (Alt+1)"><b aria-hidden="true">📻</b><span>Radio</span></a><a href="#" data-app="studio" class=""  title="Image & Video (Alt+2)"><b aria-hidden="true">🖼</b><span>Image &amp; Video</span></a><a href="#" data-app="music" class=""  title="Music (Alt+3)"><b aria-hidden="true">🎵</b><span>Music</span></a></div>
+  <div class="apps" role="navigation" aria-label="Switch app"><a href="#" data-app="home" title="Home (Alt+0)"><b aria-hidden="true">🏠</b><span>Home</span></a><a href="#" data-app="radio" class="on" aria-current="page" title="Radio (Alt+1)"><b aria-hidden="true">📻</b><span>Radio</span></a><a href="#" data-app="studio" class=""  title="Image & Video (Alt+2)"><b aria-hidden="true">🖼</b><span>Image &amp; Video</span></a><a href="#" data-app="music" class=""  title="Music (Alt+3)"><b aria-hidden="true">🎵</b><span>Music</span></a></div>
   <div class="tabs" role="tablist">
     <a href="#now" data-tab="now">Now Playing</a>
     <a href="#collection" data-tab="collection">My Collection</a>
@@ -1367,7 +1367,7 @@ async function loadDisk() {
 loadDisk(); setInterval(() => { if (!document.hidden) loadDisk(); }, 60000);
 
 // ---------- app switcher: one browser tab per app; switching jumps to that tab without reloading it (the radio keeps playing)
-const B70_APPS = {radio: ":7860/radio", studio: ":7870/", music: ":7860/"}, B70_THIS = "radio";
+const B70_APPS = {home: ":7870/home", radio: ":7860/radio", studio: ":7870/", music: ":7860/"}, B70_THIS = "radio";
 if (!window.name || window.name.startsWith("b70-")) window.name = "b70-" + B70_THIS;
 function b70Open(key) {
   if (key === B70_THIS) return;
@@ -1380,7 +1380,7 @@ function b70Open(key) {
   w.focus();
 }
 document.querySelectorAll("[data-app]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); b70Open(a.dataset.app); }));
-document.addEventListener("keydown", e => { if (e.altKey && !e.ctrlKey && !e.metaKey && ["1", "2", "3"].includes(e.key)) { e.preventDefault(); b70Open(["radio", "studio", "music"][+e.key - 1]); } });
+document.addEventListener("keydown", e => { if (e.altKey && !e.ctrlKey && !e.metaKey && ["0", "1", "2", "3"].includes(e.key)) { e.preventDefault(); b70Open(["home", "radio", "studio", "music"][+e.key]); } });
 
 // ---------- "Create a song now": progress for the station page (writing -> recording -> ready)
 function updateMk() {

@@ -104,7 +104,7 @@ dialog pre { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(
 <div class="wrap">
   <header>
     <h1>🎵 b70 Music Studio</h1>
-  <div class="apps" role="navigation" aria-label="Switch app"><a href="#" data-app="radio" class=""  title="Radio (Alt+1)"><b aria-hidden="true">📻</b><span>Radio</span></a><a href="#" data-app="studio" class=""  title="Image & Video (Alt+2)"><b aria-hidden="true">🖼</b><span>Image &amp; Video</span></a><a href="#" data-app="music" class="on" aria-current="page" title="Music (Alt+3)"><b aria-hidden="true">🎵</b><span>Music</span></a></div>
+  <div class="apps" role="navigation" aria-label="Switch app"><a href="#" data-app="home" title="Home (Alt+0)"><b aria-hidden="true">🏠</b><span>Home</span></a><a href="#" data-app="radio" class=""  title="Radio (Alt+1)"><b aria-hidden="true">📻</b><span>Radio</span></a><a href="#" data-app="studio" class=""  title="Image & Video (Alt+2)"><b aria-hidden="true">🖼</b><span>Image &amp; Video</span></a><a href="#" data-app="music" class="on" aria-current="page" title="Music (Alt+3)"><b aria-hidden="true">🎵</b><span>Music</span></a></div>
     <span class="muted small">YuE2 · lyrics + style → full song with vocals, 48 kHz stereo</span>
     <span class="gpubar" style="margin-left:auto">
       <span class="badge" id="gpu"><span class="dot"></span><span>…</span></span>
@@ -606,7 +606,7 @@ $("author").addEventListener("change", () => store.set("author", $("author").val
 tick(); setInterval(tick, 2000);
 
 // ---------- app switcher: one browser tab per app; switching jumps to that tab without reloading it (the radio keeps playing)
-const B70_APPS = {radio: ":7860/radio", studio: ":7870/", music: ":7860/"}, B70_THIS = "music";
+const B70_APPS = {home: ":7870/home", radio: ":7860/radio", studio: ":7870/", music: ":7860/"}, B70_THIS = "music";
 if (!window.name || window.name.startsWith("b70-")) window.name = "b70-" + B70_THIS;
 function b70Open(key) {
   if (key === B70_THIS) return;
@@ -619,7 +619,7 @@ function b70Open(key) {
   w.focus();
 }
 document.querySelectorAll("[data-app]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); b70Open(a.dataset.app); }));
-document.addEventListener("keydown", e => { if (e.altKey && !e.ctrlKey && !e.metaKey && ["1", "2", "3"].includes(e.key)) { e.preventDefault(); b70Open(["radio", "studio", "music"][+e.key - 1]); } });
+document.addEventListener("keydown", e => { if (e.altKey && !e.ctrlKey && !e.metaKey && ["0", "1", "2", "3"].includes(e.key)) { e.preventDefault(); b70Open(["home", "radio", "studio", "music"][+e.key]); } });
 </script>
 </body>
 </html>
