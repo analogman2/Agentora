@@ -368,6 +368,55 @@ def source_for_video(src, me):
     return name, aspect
 
 
+def lora_files():
+    root = W.MODELS / "loras"
+    return {str(f.relative_to(root)) for f in root.rglob("*") if f.is_file() and f.suffix.lower() in (".safetensors", ".pt", ".ckpt", ".bin")} if root.exists() else set()
+
+
+def check_loras(raw):
+    """[{"name", "strength"}] from the Create panel: installed files only, at most 6, strengths -4..4."""
+    if not raw:
+        return []
+    if not isinstance(raw, list) or len(raw) > 6:
+        raise web.HTTPBadRequest(text="Up to 6 LoRAs")
+    have, out = lora_files(), []
+    for l in raw:
+        name = str((l or {}).get("name") or "")
+        if name not in have:
+            raise web.HTTPBadRequest(text=f"LoRA not installed: {name or '(none chosen)'}")
+        try:
+            strength = float(l.get("strength", 1))
+        except (TypeError, ValueError):
+            raise web.HTTPBadRequest(text=f"Strength for {name} must be a number")
+        if not -4 <= strength <= 4:
+            raise web.HTTPBadRequest(text=f"Strength for {name} must be between -4 and 4")
+        out.append({"name": name, "strength": round(strength, 3)})
+    return out
+
+
+async def list_loras(request):
+    """Installed LoRAs with what the Models page knows about them (base model, trigger words)."""
+    items = await asyncio.get_running_loop().run_in_executor(None, M.installed)
+    by = {m["file"]: m for m in items if m["folder"] == "loras"}
+    return web.json_response({"loras": [{"name": n, "title": ((by.get(n) or {}).get("meta") or {}).get("model"),
+                                         "base": ((by.get(n) or {}).get("meta") or {}).get("base"),
+                                         "words": (((by.get(n) or {}).get("meta") or {}).get("trained_words") or [])[:8]}
+                                        for n in sorted(lora_files(), key=str.lower)]})
+
+
+async def wf_save_values(request):
+    """Remember the settings someone typed into a workflow (prompt, seeds, strengths...) for next time."""
+    r = my_recipe(request)
+    vals = (await request.json()).get("values") or {}
+    if not isinstance(vals, dict) or len(json.dumps(vals)) > 200_000:
+        raise web.HTTPBadRequest(text="Too much to save")
+    clean = {k: {"value": v.get("value"), **({"random": bool(v["random"])} if "random" in v else {})}
+             for k, v in vals.items() if re.fullmatch(r"[\w.:-]{1,80}", str(k)) and isinstance(v, dict)}
+    r["saved_values"] = {**(r.get("saved_values") or {}), **clean}
+    save_recipe(r)
+    return web.json_response({"ok": True})
+
+
 async def generate(request):
     body = await request.json()
     kind = body.get("kind")
@@ -377,6 +426,7 @@ async def generate(request):
     if not prompt:
         raise web.HTTPBadRequest(text="Write a prompt first")
     count = max(1, min(int(body.get("count") or 1), 8 if kind == "image" else 4))
+    loras = check_loras(body.get("loras"))
     if S["auto_free_gpu"]:
         await free_gpu(request)
     fixed_seed = body.get("seed")
@@ -399,6 +449,8 @@ async def generate(request):
             wf = video_workflow(prompt, w, h, seconds * int(S["video_fps"]) + 1, seed, start)
             params["seconds"] = seconds
         params.update(aspect=aspect, width=w, height=h)
+        if loras:
+            W.inject_loras(wf, loras); params["loras"] = loras
         keys = (("image_steps", "image_shift", "image_sampler", "image_scheduler", "image_megapixels") if kind == "image" else
                 ("video_steps", "video_cfg", "video_shift", "video_sampler", "video_fps", "video_resolution", "video_negative"))
         params["settings"] = {k: S[k] for k in keys}        # so "Load settings" can show what it was made with
@@ -828,6 +880,7 @@ def my_recipe(request):
 
 def recipe_card(r, plan=None):
     out = {k: r.get(k) for k in ("id", "name", "kind", "thumb", "created", "source")}
+    out["saved"] = r.get("saved_values") or {}
     if plan:
         out["plan"] = {k: plan.get(k) for k in ("kind", "missing_nodes", "models", "packs", "unknown_nodes", "core_nodes", "fields", "notes", "ready",
                                                 "download_bytes", "free_bytes")}
@@ -1049,14 +1102,26 @@ async def wf_run(request):
     for f in a["fields"]:
         if f["type"] in ("image", "video") and f["id"] not in images:
             raise web.HTTPBadRequest(text=f"Choose a picture for “{f['label']}” first")
+    loras = check_loras(body.get("loras"))
+    values = body.get("values") or {}
+    if loras:                                             # fail before freeing the GPU if they can't be added
+        try:
+            W.inject_loras(W.build_prompt(a, values, images), loras)
+        except W.WorkflowError as e:
+            raise web.HTTPBadRequest(text=str(e))
     if S["auto_free_gpu"]:
         await free_gpu(request)
     count = max(1, min(int(body.get("count") or 1), 8))
-    values = body.get("values") or {}
+    kinds = {f["id"]: f["type"] for f in a["fields"]}     # what they typed is remembered for next time
+    keep = {k: {"value": v.get("value"), **({"random": bool(v["random"])} if "random" in v else {})}
+            for k, v in values.items() if kinds.get(k) in ("text", "int", "float", "seed") and isinstance(v, dict)}
+    if keep:
+        r["saved_values"] = {**(r.get("saved_values") or {}), **keep}
+        save_recipe(r)
     val = lambda key: next((((values.get(f["id"]) or {}).get("value", f["value"])) for f in a["fields"] if f["key"] == key), None)
     created = []
     for _ in range(count):
-        wf = W.build_prompt(a, values, images)
+        wf = W.inject_loras(W.build_prompt(a, values, images), loras)
         async with http.post(COMFY + "/prompt", json={"prompt": wf, "client_id": CLIENT_ID}) as resp:
             res = await resp.json()
         if resp.status != 200 or "prompt_id" not in res:
@@ -1070,7 +1135,7 @@ async def wf_run(request):
                "params": {"seed": seed, "width": int(w or 1024), "height": int(h or 1024), "aspect": "", "workflow": r["name"], "recipe": r["id"],
                           # the values actually used (seeds resolved), so "Load settings" can put them back
                           "values": {f["id"]: wf[f["node"]]["inputs"].get(f["key"]) for f in a["fields"] if f["type"] in ("text", "int", "float", "seed")},
-                          "images": images},
+                          "images": images, **({"loras": loras} if loras else {})},
                "prompt_id": res["prompt_id"], "status": "queued", "created": time.time(), "outputs": []}
         if a["kind"] == "video":
             job["params"]["seconds"] = ""
@@ -1188,6 +1253,8 @@ def main():
     app.router.add_delete("/api/workflows/{id}", wf_delete)
     app.router.add_post("/api/workflows/{id}/install", wf_install)
     app.router.add_post("/api/workflows/{id}/run", wf_run)
+    app.router.add_put("/api/workflows/{id}/values", wf_save_values)
+    app.router.add_get("/api/loras", list_loras)
     app.router.add_post("/api/workflows/install-many", wf_install_many)
     app.router.add_get("/api/installs", install_list)
     app.router.add_get("/api/installs/{id}", install_status)

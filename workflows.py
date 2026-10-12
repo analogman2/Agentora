@@ -910,6 +910,8 @@ async def _download(step, url, dest):
                                    if "huggingface.co" in url else "it may need an API key in Settings, or the model is early-access"))
         if r.status not in (200, 206):
             raise WorkflowError(f"Download failed: HTTP {r.status}")
+        if "text/html" in r.headers.get("Content-Type", ""):      # a web page, not a model: never save it under the model's name
+            raise WorkflowError(f"{urlparse(url).hostname} sent a web page instead of the file — the link is a page, or the site wants a login")
         if r.status == 200:
             have = 0
         total = have + int(r.headers.get("Content-Length") or 0)
@@ -1125,3 +1127,32 @@ def build_prompt(analysis, values, images, owner_prefix="genstudio/wf"):
         elif n.get("class_type") == "VHS_VideoCombine":
             n["inputs"].update(filename_prefix=owner_prefix, save_output=True)
     return p
+
+
+# ---------------------------------------------------------------- extra LoRAs (Create panel)
+
+MODEL_LOADERS = ("UNETLoader", "CheckpointLoaderSimple", "UnetLoaderGGUF", "CheckpointLoader", "ImageOnlyCheckpointLoader",
+                 "DiffusionModelLoaderKJ", "UNETLoaderNF4", "CheckpointLoaderNF4")
+
+
+def inject_loras(prompt, loras):
+    """Chain LoraLoaderModelOnly nodes right after the graph's diffusion-model loader and point everything that used
+    the model at the end of the chain. Only for graphs with one model loader (two-model graphs like Wan 2.2 14B would
+    need the LoRA matched to each model)."""
+    if not loras:
+        return prompt
+    loaders = [nid for nid, n in prompt.items() if n.get("class_type") in MODEL_LOADERS]
+    if len(loaders) != 1:
+        raise WorkflowError("This workflow loads " + (f"{len(loaders)} models" if loaders else "its model in a way the studio doesn't recognise")
+                            + ", so extra LoRAs can't be added to it. Use its own LoRA strength settings instead.")
+    src = [loaders[0], 0]
+    users = [(n, k) for nid, n in prompt.items() for k, v in n.get("inputs", {}).items() if v == src]
+    prev = src
+    for i, l in enumerate(loras):
+        nid = f"gs_lora_{i}"
+        prompt[nid] = {"class_type": "LoraLoaderModelOnly", "_meta": {"title": "LoRA (Create panel)"},
+                       "inputs": {"model": prev, "lora_name": l["name"], "strength_model": l["strength"]}}
+        prev = [nid, 0]
+    for n, k in users:
+        n["inputs"][k] = prev
+    return prompt

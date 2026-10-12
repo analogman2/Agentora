@@ -103,6 +103,13 @@ textarea:focus, input:focus { border-color: var(--accent); }
 .req .ok { color: #2f9e5c; } .req .need { color: #c27c0e; } .req .bad { color: var(--err); }
 .req input { margin-top: 6px; font-size: 13px; padding: 6px 8px; }
 .req .sugg { display: block; font-size: 12px; margin-top: 4px; }
+#engine { width: 100%; }
+#engineNote { margin-top: 4px; min-height: 0; }
+#engineNote:empty { display: none; }
+.lrow { display: grid; grid-template-columns: minmax(0, 1fr) 76px auto; gap: 6px; align-items: center; margin: 6px 0; }
+.lrow select, .lrow input { min-width: 0; }
+.lrow .words { grid-column: 1 / -1; font-size: 12px; color: var(--muted); margin-top: -2px; }
+#loraBox summary .muted { font-weight: 400; }
 .picgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; padding-bottom: 16px; }
 .picgrid button { padding: 0; border: 2px solid transparent; border-radius: 10px; background: var(--panel-2); aspect-ratio: 1; overflow: hidden; cursor: pointer; }
 .picgrid button:hover, .picgrid button:focus-visible { border-color: var(--accent); }
@@ -459,6 +466,9 @@ body.view-workflows .wflist span { padding: 0; }
       </div>
 
       <div id="basicPanel">
+      <label class="lbl" for="engine">Model</label>
+      <select id="engine" aria-describedby="engineNote"></select>
+      <div class="hint" id="engineNote"></div>
       <label class="lbl" for="prompt">Describe it</label>
       <textarea id="prompt" placeholder="A red fox sitting in fresh snow at golden hour, photorealistic"></textarea>
 
@@ -475,13 +485,21 @@ body.view-workflows .wflist span { padding: 0; }
         <div class="chips" id="seconds"></div>
       </div>
 
-      <label class="lbl">Shape</label>
+      <div id="cwfBox" hidden></div>
+      <label class="lbl" id="aspectLbl">Shape</label>
       <div class="chips" id="aspect"></div>
 
       <div id="imageOnly">
         <label class="lbl">How many</label>
         <div class="chips" id="count"></div>
       </div>
+
+      <details id="loraBox">
+        <summary>LoRAs <span class="muted" id="loraCount"></span></summary>
+        <div id="loraRows"></div>
+        <button class="btn" id="loraAdd" type="button">+ Add LoRA</button>
+        <div class="hint" id="loraHint"></div>
+      </details>
 
       <details>
         <summary>Advanced</summary>
@@ -572,14 +590,17 @@ const OPTIONS = {
   image: { aspect: ["1:1", "3:2", "2:3", "16:9", "9:16"] },
   video: { aspect: ["16:9", "9:16", "1:1"] },
 };
-const ui = { kind: "image", aspect: { image: "1:1", video: "16:9" }, count: 1, seconds: 5, source: null };
+const ui = { kind: "image", aspect: { image: "1:1", video: "16:9" }, count: 1, seconds: 5, source: null,
+             engine: { image: "builtin", video: "builtin" }, loras: { image: [], video: [] }, wfImages: {}, builtinPrompt: "" };
 const cards = new Map();
 let jobsById = {}, lbJob = null, pollTimer = null;
 
 function saved() { try { return JSON.parse(localStorage.getItem("genstudio") || "{}"); } catch { return {}; } }
-function remember() { try { localStorage.setItem("genstudio", JSON.stringify({ kind: ui.kind, aspect: ui.aspect, count: ui.count, seconds: ui.seconds, prompt: $("#prompt").value })); } catch {} }
-Object.assign(ui, (({ kind, aspect, count, seconds }) => ({ ...(kind && { kind }), ...(aspect && { aspect }), ...(count && { count }), ...(seconds && { seconds }) }))(saved()));
-$("#prompt").value = saved().prompt || "";
+function remember() { try { localStorage.setItem("genstudio", JSON.stringify({ kind: ui.kind, aspect: ui.aspect, count: ui.count, seconds: ui.seconds, engine: ui.engine, loras: ui.loras,
+  prompt: cwfActive() ? ui.builtinPrompt : $("#prompt").value })); } catch {} }
+Object.assign(ui, (({ kind, aspect, count, seconds, engine, loras }) => ({ ...(kind && { kind }), ...(aspect && { aspect }), ...(count && { count }), ...(seconds && { seconds }),
+  ...(engine && { engine }), ...(loras && { loras }) }))(saved()));
+$("#prompt").value = ui.builtinPrompt = saved().prompt || "";
 
 function chips(el, values, current, fmt, onPick, disabled) {
   el.innerHTML = "";
@@ -599,8 +620,12 @@ function render() {
   $("#basicPanel").hidden = wfMode; $("#wfPanel").hidden = !wfMode;
   if (wfMode) { if (!wf.loaded && ME) loadWorkflows(); return; }
   const video = ui.kind === "video";
-  $("#videoOnly").hidden = !video;
-  $("#imageOnly").hidden = video;
+  renderEngine(); renderLoras();
+  const wfOn = cwfActive();
+  $("#videoOnly").hidden = !video || wfOn;
+  $("#imageOnly").hidden = video && !wfOn;
+  $("#aspectLbl").hidden = $("#aspect").hidden = wfOn;
+  $("#cwfBox").hidden = !wfOn;
   chips($("#aspect"), OPTIONS[ui.kind].aspect, video && ui.source ? null : ui.aspect[ui.kind], null,
         v => ui.aspect[ui.kind] = v, video && ui.source);
   chips($("#count"), [1, 2, 4], ui.count, null, v => ui.count = v);
@@ -613,6 +638,7 @@ function render() {
   $("#prompt").placeholder = video
     ? (ui.source ? "What happens? e.g. the fox turns its head and snow starts falling" : "A red fox trotting through snow at golden hour, the camera tracking alongside")
     : "A red fox sitting in fresh snow at golden hour, photorealistic";
+  if (wfOn) { $("#estimate").textContent = ""; return; }
   const v = SET ? SET.values : {video_steps: 30, video_fps: "24", video_resolution: "720p", image_steps: 8, image_megapixels: "1"};
   const vidMin = ui.seconds * (v.video_steps / 30) * (+v.video_fps / 24) * (v.video_resolution === "480p" ? 0.45 : 1);
   const imgSec = 10 * (v.image_steps / 8) * (+v.image_megapixels);
@@ -622,7 +648,7 @@ function render() {
 }
 
 document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => { ui.kind = b.dataset.kind; render(); remember(); });
-$("#prompt").addEventListener("input", remember);
+$("#prompt").addEventListener("input", () => { if (!cwfActive()) ui.builtinPrompt = $("#prompt").value; remember(); });
 $("#prompt").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) create(); });
 $("#uploadBtn").onclick = () => pickPicture(src => { ui.source = src; render(); }, () => $("#file").click());
 $("#clearSource").onclick = () => { ui.source = null; render(); };
@@ -640,10 +666,156 @@ $("#file").onchange = async () => {
   $("#file").value = ""; render();
 };
 
+// ---------- Create panel: model picker (built-in or one of your imported workflows) and extra LoRAs
+const BUILTIN = { image: "Built-in · Z-Image Turbo", video: "Built-in · Wan 2.2 5B" };
+const cwf = { cards: {}, loading: {}, failed: {} };                  // workflow id -> details (fields, saved values, readiness)
+const cwfActive = () => ui.kind !== "workflow" && ui.engine[ui.kind] !== "builtin" && wf.list.some(x => x.id === ui.engine[ui.kind] && x.kind === ui.kind);
+const posField = (card) => card && card.plan && (card.plan.fields.find(f => f.type === "text" && f.label === "Prompt") || card.plan.fields.find(f => f.type === "text"));
+const savedVal = (card, f) => card.saved && card.saved[f.id] && card.saved[f.id].value != null ? card.saved[f.id].value : f.value;
+
+function renderEngine() {
+  if (!wf.loaded && ME && !cwf.listing) { cwf.listing = true; loadWorkflows().finally(() => { cwf.listing = false; }); }
+  const sel = $("#engine"), mine = wf.list.filter(x => x.kind === ui.kind);
+  if (ui.engine[ui.kind] !== "builtin" && wf.loaded && !mine.some(x => x.id === ui.engine[ui.kind])) ui.engine[ui.kind] = "builtin";
+  sel.innerHTML = `<option value="builtin">${BUILTIN[ui.kind]}</option>` + (mine.length ? `<optgroup label="Your workflows">${mine.map(x =>
+    `<option value="${x.id}">${escapeHtml(x.name.slice(0, 70))}${x.ready === false ? " (needs downloads)" : ""}</option>`).join("")}</optgroup>` : "");
+  sel.value = ui.engine[ui.kind];
+  const note = $("#engineNote");
+  if (!cwfActive()) { note.innerHTML = !wf.loaded ? "" : mine.length ? "" : `<span>Import ComfyUI workflows in the Workflows tab to use them here.</span>`; return; }
+  const card = cwf.cards[ui.engine[ui.kind]];
+  if (cwf.failed[ui.engine[ui.kind]]) { note.innerHTML = `<span class="err" style="display:inline">${escapeHtml(cwf.failed[ui.engine[ui.kind]])}</span> <a href="#" id="cwfRetry">Try again</a>`;
+    $("#cwfRetry").onclick = (e) => { e.preventDefault(); delete cwf.failed[ui.engine[ui.kind]]; render(); }; return; }
+  if (!card) { note.textContent = "⟳ Checking the workflow…"; loadCwf(ui.engine[ui.kind]); return; }
+  const p = card.plan;
+  note.innerHTML = (p.ready ? `<span style="color:#2f9e5c">Ready ✓</span>` : `<span class="err" style="display:inline">Needs downloads before it can run.</span>`) +
+    ` · <a href="#" id="cwfOpen">${p.ready ? "More settings" : "Open it"} in Workflows</a>` + (posField(card) ? "" : " · This workflow has no prompt box; your text is ignored.");
+  $("#cwfOpen").onclick = (e) => { e.preventDefault(); ui.kind = "workflow"; render(); remember(); openWorkflow(card.id); };
+  renderCwfInputs(card);
+}
+async function loadCwf(id, fresh) {
+  if (cwf.loading[id] && !fresh) return;
+  cwf.loading[id] = true;
+  try {
+    const r = await fetch(`/api/workflows/${id}`);
+    if (!r.ok) cwf.failed[id] = `Couldn't load the workflow: ${(await r.text()).slice(0, 160)}`;
+    if (r.ok) {
+      const card = await r.json(); cwf.cards[id] = card;
+      const pf = posField(card);
+      if (pf && ui.engine[card.plan.kind] === id && cwfActive()) $("#prompt").value = savedVal(card, pf);
+    }
+  } catch (e) { cwf.failed[id] = "Couldn't load the workflow: " + e.message;
+  } finally { cwf.loading[id] = false; }
+  render();
+}
+function renderCwfInputs(card) {
+  const box = $("#cwfBox"), pics = card.plan.fields.filter(f => f.type === "image");
+  box.innerHTML = pics.map(f => {
+    const cur = ui.wfImages[f.id];
+    return `<label class="lbl">${escapeHtml(f.label)}</label><div class="source"><img src="${cur ? escapeHtml(cur.url) : ""}" ${cur ? "" : "hidden"} alt="">
+      <div class="hint" style="flex:1">${cur ? "This picture is used." : "Choose the picture this workflow starts from."}</div><button class="btn" data-cwfpic="${escapeHtml(f.id)}">Choose picture</button></div>`;
+  }).join("");
+  box.querySelectorAll("[data-cwfpic]").forEach(b => b.onclick = () => pickPicture(src => { ui.wfImages[b.dataset.cwfpic] = src; render(); }, () => {
+    const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*";
+    inp.onchange = async () => {
+      const fd = new FormData(); fd.append("file", inp.files[0]); $("#err").textContent = "Uploading…";
+      const r = await fetch("/api/upload", {method: "POST", body: fd});
+      if (!r.ok) { $("#err").textContent = await r.text(); return; }
+      const d = await r.json(); $("#err").textContent = ""; ui.wfImages[b.dataset.cwfpic] = {upload: d.upload, url: d.url}; render();
+    };
+    inp.click();
+  }));
+}
+$("#engine").onchange = () => {
+  const was = cwfActive();
+  if (!was) ui.builtinPrompt = $("#prompt").value;
+  ui.engine[ui.kind] = $("#engine").value;
+  if (cwfActive()) { const card = cwf.cards[ui.engine[ui.kind]], pf = posField(card); if (pf) $("#prompt").value = savedVal(card, pf); }
+  else $("#prompt").value = ui.builtinPrompt;
+  render(); remember();
+};
+let cwfSaveT = 0;
+$("#prompt").addEventListener("input", () => {             // a workflow's prompt is saved with that workflow
+  if (!cwfActive()) return;
+  const card = cwf.cards[ui.engine[ui.kind]], pf = posField(card); if (!pf) return;
+  card.saved = {...(card.saved || {}), [pf.id]: {value: $("#prompt").value}};
+  clearTimeout(cwfSaveT);
+  cwfSaveT = setTimeout(() => saveWorkflowValues(card.id, {[pf.id]: {value: $("#prompt").value}}), 700);
+});
+async function saveWorkflowValues(id, values) {
+  try { await fetch(`/api/workflows/${id}/values`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify({values})}); } catch {}
+  if (wf.cur && wf.cur.id === id) wf.cur.saved = {...(wf.cur.saved || {}), ...values};
+  if (cwf.cards[id]) cwf.cards[id].saved = {...(cwf.cards[id].saved || {}), ...values};
+}
+async function createWithWorkflow(prompt, loras) {
+  const card = cwf.cards[ui.engine[ui.kind]];
+  if (!card) { $("#err").textContent = "Still checking the workflow — try again in a moment."; return; }
+  if (!card.plan.ready) { $("#err").textContent = "This workflow needs downloads first: open it in Workflows."; return; }
+  const values = {};
+  for (const f of card.plan.fields) {                    // everything as last saved for this workflow, then this prompt
+    const sv = card.saved && card.saved[f.id];
+    if (sv && ["text", "int", "float", "seed"].includes(f.type)) values[f.id] = {...sv};
+  }
+  const pf = posField(card); if (pf) values[pf.id] = {value: prompt};
+  const seed = $("#seed").value.trim(), sf = card.plan.fields.find(f => f.type === "seed");
+  if (sf && /^-?\d+$/.test(seed)) values[sf.id] = {value: Number(seed), random: false};
+  const images = {};
+  for (const f of card.plan.fields.filter(f => f.type === "image")) {
+    const src = ui.wfImages[f.id];
+    if (!src) { $("#err").textContent = `Choose a picture for “${f.label}” first.`; return; }
+    images[f.id] = src.job ? {job: src.job, index: src.index || 0} : src.upload;
+  }
+  $("#go").disabled = true; $("#err").textContent = "";
+  try {
+    const r = await fetch(`/api/workflows/${card.id}/run`, {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({values, images, count: ui.count, loras})});
+    if (!r.ok) throw new Error(await r.text());
+    await poll();
+  } catch (e) { $("#err").textContent = e.message; }
+  $("#go").disabled = false;
+}
+
+let LORAS = null;
+async function loadLoras() {
+  if (LORAS) return;
+  LORAS = [];
+  try { const r = await fetch("/api/loras"); if (r.ok) LORAS = (await r.json()).loras; } catch {}
+  renderLoras();
+}
+function renderLoras() {
+  const list = ui.loras[ui.kind];
+  $("#loraCount").textContent = list.length ? `(${list.length})` : "";
+  if (LORAS === null) { if ($("#loraBox").open || list.length) loadLoras(); }
+  const opts = (cur) => `<option value="">Choose a LoRA…</option>` + (LORAS || []).map(l =>
+    `<option value="${escapeHtml(l.name)}" ${l.name === cur ? "selected" : ""}>${escapeHtml(l.name.replace(/\.safetensors$/, ""))}${l.base ? " · " + escapeHtml(l.base) : ""}</option>`).join("")
+    + (cur && LORAS && !LORAS.some(l => l.name === cur) ? `<option value="${escapeHtml(cur)}" selected>${escapeHtml(cur)} (not installed)</option>` : "");
+  $("#loraRows").innerHTML = list.map((l, i) => {
+    const info = (LORAS || []).find(x => x.name === l.name);
+    return `<div class="lrow"><select data-lname="${i}" aria-label="LoRA ${i + 1}">${opts(l.name)}</select>
+      <input type="number" data-lstr="${i}" value="${l.strength}" step="0.05" min="-4" max="4" aria-label="Strength for LoRA ${i + 1}" title="Strength">
+      <button class="btn" data-ldel="${i}" type="button" aria-label="Remove LoRA ${i + 1}">✕</button>
+      ${info && info.words && info.words.length ? `<div class="words">Trigger words: ${info.words.map(w => escapeHtml(w)).join(", ")} · <a href="#" data-lwords="${i}">add to prompt</a></div>` : ""}</div>`;
+  }).join("");
+  $("#loraHint").textContent = !list.length ? "Add a LoRA to steer the style or subject. Pick ones made for this model."
+    : cwfActive() ? "Added on top of the workflow's own LoRAs." : `Use LoRAs trained for ${ui.kind === "video" ? "Wan 2.2 5B" : "Z-Image"}; others usually do nothing or distort.`;
+  const save = () => { remember(); $("#loraCount").textContent = list.length ? `(${list.length})` : ""; };
+  $("#loraRows").querySelectorAll("[data-lname]").forEach(e => e.onchange = () => { list[+e.dataset.lname].name = e.value; renderLoras(); save(); });
+  $("#loraRows").querySelectorAll("[data-lstr]").forEach(e => e.oninput = () => { list[+e.dataset.lstr].strength = e.value; save(); });
+  $("#loraRows").querySelectorAll("[data-ldel]").forEach(e => e.onclick = () => { list.splice(+e.dataset.ldel, 1); renderLoras(); save(); });
+  $("#loraRows").querySelectorAll("[data-lwords]").forEach(a => a.onclick = (ev) => {
+    ev.preventDefault();
+    const words = (LORAS.find(x => x.name === list[+a.dataset.lwords].name) || {}).words || [];
+    const p = $("#prompt"); p.value = (p.value.trim() + (p.value.trim() ? ", " : "") + words.join(", ")); p.dispatchEvent(new Event("input"));
+  });
+}
+$("#loraAdd").onclick = () => { if (ui.loras[ui.kind].length >= 6) return; ui.loras[ui.kind].push({name: "", strength: 1}); loadLoras(); renderLoras(); remember(); };
+$("#loraBox").addEventListener("toggle", () => { if ($("#loraBox").open) loadLoras(); });
+
 async function create() {
   const prompt = $("#prompt").value.trim();
   if (!prompt) { $("#err").textContent = "Describe what you want first."; $("#prompt").focus(); return; }
-  const body = { kind: ui.kind, prompt, aspect: ui.aspect[ui.kind], seed: $("#seed").value.trim() || null };
+  const loras = ui.loras[ui.kind].filter(l => l.name).map(l => ({name: l.name, strength: Number(l.strength)}));
+  if (cwfActive()) return createWithWorkflow(prompt, loras);
+  const body = { kind: ui.kind, prompt, aspect: ui.aspect[ui.kind], seed: $("#seed").value.trim() || null, loras };
   if (ui.kind === "image") body.count = ui.count;
   else { body.seconds = ui.seconds; if (ui.source) body.source = ui.source.job ? { job: ui.source.job } : { upload: ui.source.upload }; }
   $("#go").disabled = true; $("#err").textContent = "";
@@ -819,6 +991,8 @@ async function loadSettings(j) {
   // made in the composer
   location.hash = "#create"; route();
   ui.kind = j.kind === "video" ? "video" : "image";
+  ui.engine[ui.kind] = "builtin"; ui.loras[ui.kind] = (p.loras || []).map(l => ({...l}));
+  if (p.loras && p.loras.length) { $("#loraBox").open = true; loadLoras(); }
   $("#prompt").value = j.prompt || ""; $("#prompt").dispatchEvent(new Event("input"));
   if (p.aspect && OPTIONS[ui.kind].aspect.includes(p.aspect)) ui.aspect[ui.kind] = p.aspect;
   if (ui.kind === "video") {
@@ -967,6 +1141,7 @@ async function loadWorkflows(selectId) {
   }
 }
 function renderWorkflowList() {
+  if (ui.kind !== "workflow") render();
   const sel = wf.selecting;
   $("#wfList").setAttribute("aria-multiselectable", sel ? "true" : "false");
   $("#wfList").innerHTML = wf.list.length ? wf.list.map(x => `<button data-wf="${x.id}" class="${!sel && wf.cur && wf.cur.id === x.id ? "on" : ""} ${sel && wf.picked.has(x.id) ? "sel" : ""}" title="${escapeHtml(x.name)}" ${sel ? `aria-pressed="${wf.picked.has(x.id)}"` : ""}>
@@ -1139,14 +1314,15 @@ function renderWorkflow() {
   const needs = p.models.filter(m => !m.installed).length + p.missing_nodes.length;
   const fieldsHtml = p.fields.map(f => {
     const id = "wff_" + f.id.replace(/\W/g, "_");
-    if (f.type === "text") return `<div><label class="lbl" for="${id}">${escapeHtml(f.label)}</label><textarea id="${id}" data-f="${escapeHtml(f.id)}" style="min-height:${f.label === "Prompt" ? 110 : 60}px">${escapeHtml(f.value)}</textarea></div>`;
+    if (f.type === "text") return `<div><label class="lbl" for="${id}">${escapeHtml(f.label)}</label><textarea id="${id}" data-f="${escapeHtml(f.id)}" style="min-height:${f.label === "Prompt" ? 110 : 60}px">${escapeHtml(savedVal(w, f))}</textarea></div>`;
     if (f.type === "image" || f.type === "video") return `<div><label class="lbl">${escapeHtml(f.label)}</label><div class="source"><img data-imgprev="${escapeHtml(f.id)}" hidden alt=""><div class="hint" style="flex:1">${f.type === "video" ? "Videos as input aren't supported yet" : "Choose the picture this workflow starts from."}</div>${f.type === "image" ? `<button class="btn" data-upimg="${escapeHtml(f.id)}">Choose</button>` : ""}</div></div>`;
     return null;
   }).filter(Boolean).join("");
   const nums = p.fields.filter(f => ["int", "float", "seed"].includes(f.type));
   const numHtml = nums.length ? `<label class="lbl">Settings</label><div class="fgrid">${nums.map(f => {
     const id = "wff_" + f.id.replace(/\W/g, "_");
-    return `<div><label for="${id}">${escapeHtml(f.label)}</label><input type="number" id="${id}" data-f="${escapeHtml(f.id)}" value="${f.value}" step="${f.type === "float" ? "any" : 1}" ${f.type === "seed" ? "disabled" : ""}>${f.type === "seed" ? `<label style="display:flex;gap:6px;align-items:center;margin-top:3px"><input type="checkbox" data-rand="${escapeHtml(f.id)}" checked style="width:auto;margin:0"> random each time</label>` : ""}</div>`;
+    const rnd = f.type === "seed" && !(w.saved && w.saved[f.id] && w.saved[f.id].random === false);
+    return `<div><label for="${id}">${escapeHtml(f.label)}</label><input type="number" id="${id}" data-f="${escapeHtml(f.id)}" value="${escapeHtml(String(savedVal(w, f)))}" step="${f.type === "float" ? "any" : 1}" ${rnd ? "disabled" : ""}>${f.type === "seed" ? `<label style="display:flex;gap:6px;align-items:center;margin-top:3px"><input type="checkbox" data-rand="${escapeHtml(f.id)}" ${rnd ? "checked" : ""} style="width:auto;margin:0"> random each time</label>` : ""}</div>`;
   }).join("")}</div>` : "";
   $("#wfDetail").innerHTML = `
     <div class="wfhead">${w.thumb ? `<img src="${w.thumb}" alt="">` : ""}${kindIcon(p.kind)}<div class="t"><b title="${escapeHtml(w.name)}">${escapeHtml(w.name)}</b><span class="hint">${p.kind === "video" ? "Makes videos" : "Makes pictures"} · ${p.ready ? `<span style="color:#2f9e5c">ready ✓</span>` : `${needs} thing${needs === 1 ? "" : "s"} missing`}</span></div>
@@ -1174,7 +1350,8 @@ function renderWorkflow() {
   });
   $("#wfDetail").querySelectorAll("[data-pack]").forEach(i => i.oninput = () => { (wf.extraPacks = wf.extraPacks || {})[i.dataset.pack] = i.value.trim(); });
   $("#wfDetail").querySelectorAll("[data-use]").forEach(a => a.onclick = (e) => { e.preventDefault(); wf.links[a.dataset.use] = a.dataset.url; const i = $("#wfDetail").querySelector(`[data-link="${CSS.escape(a.dataset.use)}"]`); if (i) i.value = a.dataset.url; });
-  $("#wfDetail").querySelectorAll("[data-rand]").forEach(c => c.onchange = () => { $("#wfDetail").querySelector(`input[type=number][data-f="${CSS.escape(c.dataset.rand)}"]`).disabled = c.checked; });
+  $("#wfDetail").querySelectorAll("[data-rand]").forEach(c => c.onchange = () => { $("#wfDetail").querySelector(`input[type=number][data-f="${CSS.escape(c.dataset.rand)}"]`).disabled = c.checked; queueWfSave(); });
+  $("#wfDetail").querySelectorAll("[data-f]").forEach(e => e.addEventListener("input", queueWfSave));
   $("#wfDetail").querySelectorAll("[data-upimg]").forEach(b => b.onclick = () => pickPicture(src => {
     wf.images[b.dataset.upimg] = {job: src.job, index: src.index};
     const im = $("#wfDetail").querySelector(`[data-imgprev="${CSS.escape(b.dataset.upimg)}"]`); im.src = src.url; im.hidden = false;
@@ -1216,10 +1393,20 @@ async function pollInstall() {
   if (wf.task.status === "running" || wf.task.status === "queued") setTimeout(pollInstall, 1500);
   else { wfSay(wf.task.status === "done" ? "Installed ✓" : "Some steps failed — see above. You can try again.", wf.task.status !== "done"); setTimeout(() => openWorkflow(wf.cur.id, true), 800); }
 }
-async function runWorkflow() {
+function wfValues() {
   const values = {};
   $("#wfDetail").querySelectorAll("[data-f]").forEach(e => { values[e.dataset.f] = {value: e.type === "number" ? Number(e.value) : e.value}; });
   $("#wfDetail").querySelectorAll("[data-rand]").forEach(c => { (values[c.dataset.rand] = values[c.dataset.rand] || {}).random = c.checked; });
+  return values;
+}
+let wfSaveT = 0;
+function queueWfSave() {                                 // what you type in a workflow is kept for next time
+  const id = wf.cur && wf.cur.id; if (!id) return;
+  clearTimeout(wfSaveT); wfSaveT = setTimeout(() => saveWorkflowValues(id, wfValues()), 700);
+}
+async function runWorkflow() {
+  clearTimeout(wfSaveT);
+  const values = wfValues();
   $("#wfGo").disabled = true; $("#wfErr").textContent = "";
   try {
     const r = await fetch(`/api/workflows/${wf.cur.id}/run`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({values, images: wf.images, count: wf.count || 1})});
