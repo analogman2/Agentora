@@ -1051,6 +1051,12 @@ class Handler(BaseHTTPRequestHandler):
             if self.not_modified(tag, "no-cache"):
                 return
             return self.send(200, f.read_bytes(), "text/html; charset=utf-8", {"ETag": tag, "Cache-Control": "no-cache"})
+        if path in ("/b70/b70.css", "/b70/b70.js"):             # the look shared with the other apps (kept with the Studio)
+            f = Path(os.environ.get("B70_SHARED", str(Path.home() / "genstudio" / "shared"))) / path.rsplit("/", 1)[1]
+            if not f.is_file():
+                return self.send(404, {"error": "shared file missing"})
+            return self.send(200, f.read_bytes(), "text/css; charset=utf-8" if f.suffix == ".css" else "text/javascript; charset=utf-8",
+                             {"Cache-Control": "no-cache"})
         if path == "/favicon.ico" or path.startswith("/icons/"):
             name = "studio-32.png" if path == "/favicon.ico" else path.rsplit("/", 1)[1]
             f = HERE / "icons" / name
