@@ -69,6 +69,8 @@ SCHEMA = [
      "Randomness of the melody/score the song is built on."),
     ("return_gpu_minutes", "GPU", "Give the GPU back after idle (minutes)", "float", 0, 240,
      "When the radio has nothing to make for this long, it unloads YuE2. 0 = keep it loaded until the radio is switched off."),
+    ("cover_art", "Art", "Cover art", "choice", ["stations and songs", "stations only", "off"], None,
+     "Pictures for stations and songs, drawn by the Image & Video Studio's picture model between songs (never while one is recording)."),
     ("history_keep", "History", "Listen-history entries kept", "int", 100, 20000,
      "Older entries are dropped."),
 ]
@@ -92,6 +94,7 @@ def current():
         "song_temperature": radio.SONG_SAMPLING.get("temperature", 1.0), "song_top_p": radio.SONG_SAMPLING.get("top_p", 0.95),
         "song_top_k": radio.SONG_SAMPLING.get("top_k", 100), "song_repetition_penalty": radio.SONG_SAMPLING.get("repetition_penalty", 1.2),
         "score_temperature": radio.SCORE_SAMPLING.get("temperature", 1.0),
+        "cover_art": __import__("art").MODE,
     }
 
 
@@ -118,6 +121,7 @@ def apply(v):
     app.LLM_TIMEOUT, app.LLM_EXTRA = v["llm_timeout"], v["llm_extra"]
     app.RETURN_MINUTES = v["return_gpu_minutes"]
     radio.LISTENED_KEEP = v["history_keep"]
+    __import__("art").MODE = v["cover_art"]
 
 
 def validate(key, raw):

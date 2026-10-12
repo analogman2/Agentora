@@ -35,7 +35,7 @@ LLM_EXTRA = json.loads(os.environ.get("STUDIO_LLM_EXTRA") or "{}")
 LLM_TIMEOUT = int(os.environ.get("STUDIO_LLM_TIMEOUT", "180"))
 TOKENS_PER_AUDIO_SECOND = 25          # YuE2 semantic tokens per second of audio
 GPU_STATE = DATA.parent / "gpu.json"  # remembers whether we paused the LLM (survives restarts)
-FILES = {"audio.flac": ("song/audio.flac", "audio/flac"), "song.mp3": ("song.mp3", "audio/mpeg"),
+FILES = {"audio.flac": ("song/audio.flac", "audio/flac"), "song.mp3": ("song.mp3", "audio/mpeg"), "cover.jpg": ("cover.jpg", "image/jpeg"),
          "score.abc": ("song/score.abc", "text/plain; charset=utf-8"),
          "source.abc": ("source.abc", "text/plain; charset=utf-8")}
 SAMPLING_KEYS = {"temperature": (float, 0.0, 5.0), "top_p": (float, 0.01, 1.0), "top_k": (int, 1, 1000),
@@ -581,6 +581,11 @@ class Worker(threading.Thread):
                 time.sleep(2)
                 return
             self.pump()                           # finish the song in progress, start nothing new
+            return
+        import art                                # cover art is drawn between songs, never while YuE2 records
+        if art.step(busy, bool(pend)):
+            self.pump()
+            time.sleep(0.5)
             return
         if pend and not self.holding():
             self.acquire()

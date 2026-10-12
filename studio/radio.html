@@ -480,7 +480,9 @@ function songArt(seed, baseHue) {
   const url = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
   artCache.set(key, url); return url;
 }
-function stationArt(st) {
+// drawn cover art when it exists (made by the Image & Video Studio's picture model), else the generated pattern
+const stationArt = (st) => st && st.art && st.id !== RERUNS ? `/api/radio/stations/${encodeURIComponent(st.id)}/art?v=${st.art}` : patternArt(st);
+function patternArt(st) {
   if (!st) return songArt("b70", 220);
   if (st.id === RERUNS) return songArt("reruns-mix", 350);
   const key = "st|" + st.id + st.name; if (artCache.has(key)) return artCache.get(key);
@@ -492,7 +494,7 @@ function stationArt(st) {
   artCache.set(key, url); return url;
 }
 const stOf = (id) => id === RERUNS ? rerunStation() : R && R.stations.find(s => s.id === id);
-const trackArt = (t) => t ? songArt(t.id, hueOf(stOf(t.station) || {id: t.station || "", name: t.station_name || ""})) : stationArt(stOf(selected));
+const trackArt = (t) => t ? (t.cover || songArt(t.id, hueOf(stOf(t.station) || {id: t.station || "", name: t.station_name || ""}))) : stationArt(stOf(selected));
 const trackHue = (t) => hueOf(stOf(t && t.station) || {id: (t && t.station) || "", name: (t && t.station_name) || ""});
 function rerunStation() {
   const r = (R && R.reruns) || {songs: 0, stations: 0, favorites: 0};
@@ -645,11 +647,12 @@ let msKey = null;
 function updateMediaSession() {
   if (!ms) return;
   ms.playbackState = !lid ? "none" : audio.paused ? "paused" : "playing";
-  const t = current, st = R && stOf(selected), key = [lid && "on", t && t.id, st && st.name].join("|");
+  const t = current, st = R && stOf(selected), key = [lid && "on", t && t.id, t && t.cover, st && st.name, st && st.art].join("|");
   if (key === msKey) return; msKey = key;
   if (!lid) { ms.metadata = null; return; }
   ms.metadata = new MediaMetadata({title: t ? t.title : "Next song on the way…", artist: (t && t.station_name) || (st && st.name) || "b70 radio",
-    album: "b70 radio", artwork: [{src: "/icons/radio-180.png", sizes: "180x180", type: "image/png"}]});
+    album: "b70 radio", artwork: t && t.cover ? [{src: location.origin + t.cover, sizes: "768x768", type: "image/jpeg"}]
+      : st && st.art ? [{src: location.origin + stationArt(st), sizes: "768x768", type: "image/jpeg"}] : [{src: "/icons/radio-180.png", sizes: "180x180", type: "image/png"}]});
 }
 if (ms) {
   const act = (a, f) => { try { ms.setActionHandler(a, f); } catch {} };
@@ -769,7 +772,8 @@ function nowView() {
       <div class="style">${t ? esc(t.style) : ""}</div>
       <div class="meta">${chips.map(c => `<span class="chip">${esc(c)}</span>`).join("")}</div>
       <div class="acts">${t ? `<button class="pill ${t.in_playlist ? "primary" : ""}" data-act="np-plus">${t.in_playlist ? "✓ In my playlist" : "+ Add to my playlist"}</button>
-        <a class="pill" href="${esc(t.audio)}?download=1">⤓ Download</a>` : ""}
+        <a class="pill" href="${esc(t.audio)}?download=1">⤓ Download</a>
+        <button class="pill" data-act="np-art" title="Draw a new cover for this song">🎨 New cover</button>` : ""}
         <a class="pill" href="#station/${esc(st ? st.id : "")}">Station details</a></div>
       ${t && t.lyrics ? `<details><summary>Lyrics</summary><pre class="ly">${esc(t.lyrics)}</pre></details>` : ""}
       <div class="status" id="npStatus"></div>
@@ -846,6 +850,7 @@ $("page").addEventListener("click", async (e) => {
   if (act === "new") return openNewStation();
   if (act === "plus") { try { await setPlaylist(row.dataset.id, a.dataset.on !== "1"); } catch (err) { toast(err.message); } return; }
   if (act === "np-plus") return $("bAdd").click();
+  if (act === "np-art" && current) { post("/api/radio/art", {track: current.id}).then(() => hint("Drawing a new cover — it appears in a minute or two (between songs).")).catch(e => hint(e.message)); return; }
   if (act === "preview" || act === "preview-feature") return preview(row ? row.dataset.audio : a.dataset.audio, row);
   if (act === "edit") return editStation(stOf(view.id));
   if (act === "delete") {
@@ -1048,7 +1053,9 @@ function editStation(s) {
     <label class="f" for="eL">Language <span>(blank = any)</span></label><input type="text" id="eL" value="${esc(s.language || "")}" maxlength="40">
     <label class="f" for="eT">Lyrics theme <span>(optional)</span></label><textarea id="eT" rows="2" maxlength="1000">${esc(s.theme || "")}</textarea>
     <p class="small muted">${s.kind === "text" ? "Changing the description restarts the station's quality scores, since the critic measures songs against it. " : ""}Songs already made keep their old style; new ones follow the changes.</p>
-    <div style="display:flex;gap:8px;align-items:center;margin-top:10px"><button class="btn primary" id="eSave">Save</button><button class="btn" id="eBack">Cancel</button><span class="small" id="eMsg"></span></div>`);
+    <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap"><button class="btn primary" id="eSave">Save</button><button class="btn" id="eBack">Cancel</button>
+      <button class="btn" id="eArt" type="button" title="Draw new station art from its description">🎨 New art</button><span class="small" id="eMsg"></span></div>`);
+  $("eArt").onclick = async () => { try { await post("/api/radio/art", {station: s.id}); $("eMsg").textContent = "Drawing new art — it appears in a minute or two (between songs)."; } catch (e) { $("eMsg").innerHTML = `<span class="err">${esc(e.message)}</span>`; } };
   wireAssist({name: "eN", desc: "eD", vocals: "eV", lang: "eL", theme: "eT"}, false);
   $("eBack").onclick = () => openStation(s.id);
   $("eSave").onclick = async () => {

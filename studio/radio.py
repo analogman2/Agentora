@@ -10,10 +10,12 @@ steers both the prompts and the critic.
 
 Everything runs on the CPU here (CLAP, librosa); the GPUs stay with YuE2.
 """
-import collections, json, os, queue, random, re, shutil, subprocess, threading, time, traceback, urllib.request, uuid
+import collections, json, os, queue, random, re, shutil, subprocess, sys, threading, time, traceback, urllib.request, uuid
 from pathlib import Path
 
 import numpy as np
+
+import art                          # cover art for stations and songs (drawn by ComfyUI between songs)
 
 app = None                          # the studio module, set by init()
 RADIO = None
@@ -73,6 +75,7 @@ FEMALE, MALE = ["a female singer", "a woman singing"], ["a male singer", "a man 
 def init(studio_module):
     global app, RADIO
     app = studio_module
+    art.init(sys.modules[__name__])
     RADIO = app.DATA.parent / "radio"
     (RADIO / "stations").mkdir(parents=True, exist_ok=True)
     try:
@@ -974,7 +977,8 @@ def stream_view(listener=None):
 # ----------------------------------------------------------------------------- API
 
 def track_view(j):
-    return {"id": j["id"], "title": j["title"], "style": j["style"], "lyrics": j.get("lyrics", ""), "mode": j["mode"],
+    cover = art.stamp(art.song_path(j["id"]))
+    return {"cover": f"/files/{j['id']}/cover.jpg?v={cover}" if cover else None, "id": j["id"], "title": j["title"], "style": j["style"], "lyrics": j.get("lyrics", ""), "mode": j["mode"],
             "seconds": j.get("seconds"), "station": j.get("station"), "critic": j.get("critic"), "feedback": j.get("radio_feedback"),
             "played_at": j.get("played_at"), "audio": f"/files/{j['id']}/song.mp3", "in_playlist": bool(j.get("playlist_at")),
             "station_name": stations[j["station"]]["name"] if j.get("station") in stations else None}
@@ -993,7 +997,7 @@ def api_state(listener=None):
         st = []
         for s in sorted(stations.values(), key=lambda s: s["created"]):
             st.append({k: s.get(k) for k in ("id", "name", "kind", "description", "vocals", "language", "theme", "stats", "analysis")} |
-                      {"ready": len(station_tracks(s["id"])), "inflight": inflight(s["id"]),
+                      {"art": art.stamp(art.station_path(s["id"])), "ready": len(station_tracks(s["id"])), "inflight": inflight(s["id"]),
                        "problem": (backoff[s["id"]]["reason"] + f" — retrying in {int(backoff[s['id']]['until'] - time.time())}s")
                                   if s["id"] in backoff and time.time() < backoff[s["id"]]["until"] else None,
                        "profile": {k: v for k, v in (s.get("profile") or {}).items() if k in ("tracks", "top", "bpm_median", "bpm_range", "keys", "vocal_share")} or None,
@@ -1274,6 +1278,8 @@ def update_station(sid, body):
     if "theme" in body:
         upd["theme"] = app.clean_text(body.get("theme"), "Lyrics theme", 1000)
     with lock:
+        if upd.get("description", s["description"]) != s["description"]:
+            art.station_path(sid).unlink(missing_ok=True)   # a new sound gets new art
         if upd.get("description", s["description"]) != s["description"] and s["kind"] == "text":
             s["scores"] = []            # the critic scores against the description: a new one starts a new scale
         s.update(upd)
@@ -1385,6 +1391,15 @@ def handle(h, method, path):
         m = re.fullmatch(r"/api/radio/stations/([\w]+)/history", path)
         if method == "GET" and m:
             return h.send(200, {"tracks": history(m.group(1))}) or True
+        m = re.fullmatch(r"/api/radio/stations/([\w]+)/art", path)
+        if method == "GET" and m:
+            f = art.station_path(m.group(1))
+            if not f.is_file():
+                return h.send(404, {"error": "No art yet"}) or True
+            return h.send(200, f.read_bytes(), "image/jpeg", {"Cache-Control": "private, max-age=604800"}) or True
+        if method == "POST" and path == "/api/radio/art":
+            b = h.body()
+            return h.send(200, art.request("station", b["station"]) if b.get("station") else art.request("song", str(b.get("track") or ""))) or True
         if method == "POST" and path == "/api/radio/stations/assist":
             return h.send(200, station_assist(h.body())) or True
         if method == "POST" and path == "/api/radio/stations":
