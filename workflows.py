@@ -477,29 +477,138 @@ def _queries(name):
 _trees = {}
 
 
-async def _hf_find(query, name, max_repos=10):
+async def _hf_tree(repo):
+    if repo not in _trees:
+        _trees[repo] = await _json_get(f"https://huggingface.co/api/models/{repo}/tree/main?recursive=true", _hf_headers(), timeout=40) or []
+    return _trees[repo]
+
+
+async def _hf_find(query, name, max_repos=10, refused=None):
     repos = await _json_get(f"https://huggingface.co/api/models?search={quote(query)}&limit=20&sort=downloads", _hf_headers()) or []
     repos = sorted(repos, key=lambda r: (not r["id"].startswith("Comfy-Org/"), -r.get("downloads", 0)))[:max_repos]
     for r in repos:
-        if r["id"] not in _trees:
-            _trees[r["id"]] = await _json_get(f"https://huggingface.co/api/models/{r['id']}/tree/main?recursive=true", _hf_headers(), timeout=40) or []
-        for f in _trees[r["id"]]:
+        for f in await _hf_tree(r["id"]):
             if isinstance(f, dict) and f.get("type") == "file" and Path(f["path"]).name == name:
-                return {"url": f"https://huggingface.co/{r['id']}/resolve/main/{quote(f['path'])}", "source": f"Hugging Face · {r['id']}",
-                        "size": f.get("size") or (f.get("lfs") or {}).get("size"), "page": f"https://huggingface.co/{r['id']}"}
+                src = {"url": f"https://huggingface.co/{r['id']}/resolve/main/{quote(f['path'])}", "source": f"Hugging Face · {r['id']}",
+                       "size": f.get("size") or (f.get("lfs") or {}).get("size"), "page": f"https://huggingface.co/{r['id']}"}
+                if await _usable(src, refused):
+                    return src
     return None
 
 
+async def _usable(src, refused=None):
+    """A source we can actually download: gated or restricted repos (401/403) and dead links (404) are skipped,
+    and noted in `refused` so the page can say why that copy wasn't used."""
+    size, status = await _size(src["url"])
+    if status in (401, 403, 404):
+        if refused is not None:
+            refused.append(f"{src['source']} (HTTP {status})")
+        return False
+    if size and not src.get("size"):
+        src["size"] = size
+    return True
+
+
+def _is_hf(url):
+    return (urlparse(url).hostname or "").lower() in ("huggingface.co", "www.huggingface.co", "hf.co")
+
+
+async def resolve_link(url, name, folder):
+    """A link an admin pasted for a missing model -> a direct file download we have checked we can fetch.
+    Accepts Civitai model/version pages and Hugging Face file, blob and repo pages as well as direct file links."""
+    url = (url or "").strip()
+    if not re.match(r"^https://", url):
+        raise WorkflowError(f"Use an https link for {name}")
+    u = urlparse(url)
+    src = {"url": url, "source": "link you provided", "folder": folder, "page": None}
+    if _is_civitai(url):
+        q = dict(x.split("=", 1) for x in u.query.split("&") if "=" in x)
+        vid = re.search(r"/api/download/models/(\d+)", u.path) or re.search(r"/model-versions/(\d+)", u.path)
+        vid = vid.group(1) if vid else q.get("modelVersionId")
+        mid = re.search(r"/models/(\d+)", u.path)
+        if not re.search(r"/api/download/models/\d+", u.path):
+            versions = []
+            if vid:
+                v = await _json_get(f"https://civitai.com/api/v1/model-versions/{vid}", _civitai_headers())
+                versions = [v] if v else []
+            elif mid:
+                versions = ((await _json_get(f"https://civitai.com/api/v1/models/{mid.group(1)}", _civitai_headers())) or {}).get("modelVersions", [])
+            if not versions:
+                raise WorkflowError(f"Couldn't read that Civitai page for {name}: check the link, or add a Civitai API key in Settings")
+            pick = next(((v, f) for v in versions for f in v.get("files", []) if f.get("name") == name), None)
+            if not pick:                                   # no file by that exact name: the chosen version's main file
+                v = versions[0]
+                f = next((f for f in v.get("files", []) if f.get("primary")), (v.get("files") or [None])[0])
+                if not f:
+                    raise WorkflowError(f"That Civitai version has no files to download for {name}")
+                pick = (v, f)
+            v, f = pick
+            src.update(url=f["downloadUrl"], size=int((f.get("sizeKB") or 0) * 1024) or None, source="Civitai link you provided",
+                       page=f"https://civitai.com/models/{v.get('modelId') or (mid and mid.group(1))}?modelVersionId={v.get('id')}")
+    elif _is_hf(url):
+        m = re.match(r"^/([\w.-]+/[\w.-]+)(?:/(blob|resolve|tree)/([^/]+)(?:/(.*))?)?/?$", u.path)
+        if not m:
+            raise WorkflowError(f"That doesn't look like a Hugging Face model link for {name}")
+        repo, kind, rev, path = m.groups()
+        if kind in ("blob", "resolve") and path:
+            src["url"] = f"https://huggingface.co/{repo}/resolve/{rev}/{path}"
+        else:                                              # a repo or folder page: find the file by its name
+            hit = next((f for f in await _hf_tree(repo) if isinstance(f, dict) and f.get("type") == "file" and Path(f["path"]).name == name), None)
+            if not hit:
+                raise WorkflowError(f"{repo} on Hugging Face has no file named {name}. Link the file itself instead.")
+            src.update(url=f"https://huggingface.co/{repo}/resolve/main/{quote(hit['path'])}", size=hit.get("size") or (hit.get("lfs") or {}).get("size"))
+        src.update(source="Hugging Face link you provided", page=f"https://huggingface.co/{repo}")
+    await asyncio.get_running_loop().run_in_executor(None, _public_host, urlparse(src["url"]).hostname)
+    await _check_download(src, name)
+    return src
+
+
+def _civitai_headers():
+    return {"Authorization": f"Bearer {settings['civitai_token']}"} if settings.get("civitai_token") else {}
+
+
+async def _check_download(src, name):
+    """Fetch the first byte: catches web pages, refused links and dead links before an install starts."""
+    url = src["url"]
+    headers = {"Range": "bytes=0-0", **(_hf_headers() if _is_hf(url) else {})}
+    host = urlparse(url).hostname
+    try:
+        async with http.get(_with_civitai_token(url), headers=headers, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=30)) as r:
+            ctype = r.headers.get("Content-Type", "")
+            if r.status in (401, 403):
+                hint = ("Hugging Face says this repo is gated or restricted: open its page, request or accept access, and make sure "
+                        "your Hugging Face token is in Settings" if _is_hf(url) else
+                        "Civitai may need your API key (Settings) or the model may be early-access" if _is_civitai(url) else "it may need a login")
+                raise WorkflowError(f"{host} refused the download for {name} (HTTP {r.status}): {hint}")
+            if r.status == 404:
+                raise WorkflowError(f"{host} has no file at that link for {name} (HTTP 404)")
+            if r.status not in (200, 206):
+                raise WorkflowError(f"{host} answered HTTP {r.status} for {name}")
+            if "text/html" in ctype:
+                raise WorkflowError(f"The link for {name} opens a web page, not a file. Use the file's download link "
+                                    "(on Civitai, a model page link also works; on Hugging Face, the file's page)")
+            total = re.search(r"/(\d+)$", r.headers.get("Content-Range", ""))
+            if total and not src.get("size"):
+                src["size"] = int(total.group(1))
+    except aiohttp.ClientError as e:
+        raise WorkflowError(f"Couldn't reach {host} for {name}: {e}")
+
+
 async def resolve_model(m, recipe):
-    """Find a download for one missing model. Exact filename matches only."""
-    name = m["name"]
+    """Find a download for one missing model. Exact filename matches only, and only copies we can actually download:
+    restricted ones are skipped and listed in m["refused"]."""
+    name, refused = m["name"], m.setdefault("refused", [])
     h = hints_from_workflow(recipe.get("workflow")).get(name)
     if h:
-        return {"url": h["url"], "source": "link in the workflow", "folder": h.get("folder") or m["folder"]}
+        src = {"url": h["url"], "source": "link in the workflow", "folder": h.get("folder") or m["folder"]}
+        if await _usable(src, refused):
+            return src
     for e in (await registry("model-list")).get("models", []):
         if e.get("filename") == name and e.get("url"):
             folder = e.get("save_path") if e.get("save_path") not in (None, "default") else m["folder"]
-            return {"url": e["url"], "source": "ComfyUI-Manager model list", "folder": folder.split("/")[0], "page": e.get("reference")}
+            src = {"url": e["url"], "source": "ComfyUI-Manager model list", "folder": folder.split("/")[0], "page": e.get("reference")}
+            if await _usable(src, refused):
+                return src
     for res in recipe.get("civitai") or []:              # resources Civitai lists for this very picture
         vid = res.get("modelVersionId")
         if not vid:
@@ -507,10 +616,12 @@ async def resolve_model(m, recipe):
         v = await _json_get(f"https://civitai.com/api/v1/model-versions/{vid}")
         for f in (v or {}).get("files", []):
             if f.get("name") == name:
-                return {"url": f["downloadUrl"], "source": "Civitai (from the picture)", "folder": m["folder"], "size": int((f.get("sizeKB") or 0) * 1024) or None,
-                        "page": f"https://civitai.com/models/{v.get('modelId')}?modelVersionId={vid}"}
+                src = {"url": f["downloadUrl"], "source": "Civitai (from the picture)", "folder": m["folder"], "size": int((f.get("sizeKB") or 0) * 1024) or None,
+                       "page": f"https://civitai.com/models/{v.get('modelId')}?modelVersionId={vid}"}
+                if await _usable(src, refused):
+                    return src
     for q in _queries(name):                           # Hugging Face: shorter and shorter names, exact file only
-        found = await _hf_find(q, name)
+        found = await _hf_find(q, name, refused=refused)
         if found:
             return found | {"folder": m["folder"]}
     for q in _queries(name):                           # Civitai: same idea
@@ -519,8 +630,10 @@ async def resolve_model(m, recipe):
             for ver in model.get("modelVersions", []):
                 for f in ver.get("files", []):
                     if f.get("name") == name:
-                        return {"url": f["downloadUrl"], "source": f"Civitai · {model.get('name')}", "folder": m["folder"],
-                                "size": int((f.get("sizeKB") or 0) * 1024) or None, "page": f"https://civitai.com/models/{model['id']}?modelVersionId={ver['id']}"}
+                        src = {"url": f["downloadUrl"], "source": f"Civitai · {model.get('name')}", "folder": m["folder"],
+                               "size": int((f.get("sizeKB") or 0) * 1024) or None, "page": f"https://civitai.com/models/{model['id']}?modelVersionId={ver['id']}"}
+                        if await _usable(src, refused):
+                            return src
     return None
 
 
@@ -608,11 +721,56 @@ async def code_search(cls, also=(), limit=15):
     return found
 
 
-async def resolve_nodes(missing, workflow=None, core_version=None):
-    """Map missing node types to node packs: ids recorded in the workflow first, then ComfyUI-Manager's registry,
-    then a code search of likely Comfy Registry packs. Types marked comfy-core need a newer ComfyUI instead."""
+_mgr = {"t": 0, "db": None}
+
+
+async def manager_db(comfy):
+    """ComfyUI-Manager's own data, the same its "Install Missing Custom Nodes" uses: node type -> pack mappings and
+    the installable pack list. Returns (mappings, packs by repo url, packs by id), or None when Manager isn't there."""
+    if _mgr["db"] and time.time() - _mgr["t"] < 600:
+        return _mgr["db"]
+    try:
+        mappings = await _json_get(f"{comfy}/customnode/getmappings?mode=cache", timeout=60)
+        listing = await _json_get(f"{comfy}/customnode/getlist?mode=cache&skip_update=true", timeout=120)
+    except Exception:
+        return None
+    if not mappings or not listing or not listing.get("node_packs"):
+        return None
+    by_id = listing["node_packs"]
+    by_repo = {}
+    for pid, p in by_id.items():
+        for u in [p.get("repository"), p.get("reference")] + list(p.get("files") or []):
+            if u:
+                by_repo.setdefault(u.rstrip("/").removesuffix(".git"), {**p, "id": pid})
+    _mgr.update(t=time.time(), db=(mappings, by_repo, by_id))
+    return _mgr["db"]
+
+
+def _manager_item(db, repo=None, pid=None):
+    if not db:
+        return None
+    if repo and not repo.startswith("http"):             # Manager's mappings name registry packs by their id
+        pid, repo = pid or repo, None
+    if pid and pid in db[2]:
+        return {**db[2][pid], "id": pid}
+    return db[1].get((repo or "").rstrip("/").removesuffix(".git"))
+
+
+def _from_manager(item, provides, found_by):
+    return {"repo": (item.get("repository") or item.get("reference") or (item.get("files") or [""])[0]).rstrip("/"),
+            "title": item.get("title") or item["id"], "author": item.get("author"), "description": (item.get("description") or "")[:300],
+            "install_type": item.get("install_type", "git-clone"), "provides": list(provides), "listed": True, "found_by": found_by,
+            "manager": {k: item.get(k) for k in ("id", "version", "cnr_latest", "repository", "files", "install_type", "title", "state", "reference")}}
+
+
+async def resolve_nodes(missing, workflow=None, core_version=None, comfy=None):
+    """Map missing node types to node packs, the way ComfyUI-Manager's "Install Missing Custom Nodes" does: pack ids
+    recorded in the workflow first, then Manager's node -> pack mappings (with its name patterns), then a code search
+    of likely Comfy Registry packs. Packs Manager knows install through Manager. Types marked comfy-core need a newer
+    ComfyUI instead."""
     if not missing:
         return [], [], []
+    db = await manager_db(comfy) if comfy else None
     packs, left, core = [], set(missing), []
     by_repo = {}
     for cls, rec in recorded_packs(workflow).items():
@@ -620,20 +778,29 @@ async def resolve_nodes(missing, workflow=None, core_version=None):
             continue
         if rec.get("cnr_id") == "comfy-core":
             core.append(cls); left.discard(cls); continue
+        item = _manager_item(db, pid=rec.get("cnr_id"))
+        if item:
+            pk = by_repo.setdefault(item["id"], _from_manager(item, [], "recorded in the workflow · ComfyUI-Manager"))
+            pk["provides"].append(cls); left.discard(cls); continue
         hit = None
         if rec.get("cnr_id"):
             hit = await registry_pack(rec["cnr_id"])
         if not hit and rec.get("aux_id") and re.fullmatch(r"[\w.-]+/[\w.-]+", rec["aux_id"]):
             hit = {"repo": f"https://github.com/{rec['aux_id']}", "title": rec["aux_id"].split("/")[-1], "description": "", "author": rec["aux_id"].split("/")[0]}
         if hit:
-            pk = by_repo.setdefault(hit["repo"], {**hit, "install_type": "git-clone", "provides": [], "listed": True, "found_by": "recorded in the workflow"})
+            item = _manager_item(db, repo=hit["repo"])
+            pk = by_repo.setdefault(hit["repo"], _from_manager(item, [], "recorded in the workflow · ComfyUI-Manager") if item else
+                                    {**hit, "install_type": "git-clone", "provides": [], "listed": True, "found_by": "recorded in the workflow"})
             pk["provides"].append(cls); left.discard(cls)
     packs += list(by_repo.values())
-    nodemap = await registry("extension-node-map")
-    catalog = {c.get("reference"): c for c in (await registry("custom-node-list")).get("custom_nodes", [])}
-    for c in list(catalog.values()):
-        for f in c.get("files", []):
-            catalog.setdefault(f, c)
+    if db:
+        nodemap, catalog = db[0], {}
+    else:                                                 # Manager not running: the same lists, fetched from its GitHub
+        nodemap = await registry("extension-node-map")
+        catalog = {c.get("reference"): c for c in (await registry("custom-node-list")).get("custom_nodes", [])}
+        for c in list(catalog.values()):
+            for f in c.get("files", []):
+                catalog.setdefault(f, c)
     providers = {}
     for repo, val in nodemap.items():
         names = set(val[0]) if val else set()
@@ -645,10 +812,15 @@ async def resolve_nodes(missing, workflow=None, core_version=None):
         best = max(providers, key=lambda r: (len(providers[r] & left), r in catalog), default=None)
         if not best or not providers[best] & left:
             break
-        c = catalog.get(best, {})
-        packs.append({"repo": best, "title": c.get("title") or (nodemap[best][1] or {}).get("title_aux") or best.rsplit("/", 1)[-1],
-                      "author": c.get("author"), "description": (c.get("description") or "")[:300], "install_type": c.get("install_type", "git-clone"),
-                      "provides": sorted(providers[best] & left), "listed": best in catalog, "found_by": "ComfyUI-Manager list"})
+        item = _manager_item(db, repo=best)
+        if item:
+            packs.append(_from_manager(item, sorted(providers[best] & left), "ComfyUI-Manager list"))
+        else:
+            c = catalog.get(best, {})
+            meta = nodemap[best][1] if len(nodemap[best]) > 1 and isinstance(nodemap[best][1], dict) else {}
+            packs.append({"repo": best, "title": c.get("title") or meta.get("title_aux") or best.rsplit("/", 1)[-1],
+                          "author": c.get("author"), "description": (c.get("description") or "")[:300], "install_type": c.get("install_type", "git-clone"),
+                          "provides": sorted(providers[best] & left), "listed": best in catalog or bool(db), "found_by": "ComfyUI-Manager list"})
         left -= providers[best]
     list_matched = {c for p in packs if p.get("found_by") == "ComfyUI-Manager list" for c in p["provides"]}
     for cls in sorted(left)[:3]:                          # code search: a few per workflow (GitHub limits anonymous lookups)
@@ -667,14 +839,20 @@ async def resolve_nodes(missing, workflow=None, core_version=None):
         if pk:
             pk["provides"] = sorted(set(pk["provides"]) | got)
         else:
-            packs.append({**clean, "install_type": "git-clone", "provides": sorted(got), "listed": True, "found_by": "found in the pack's code"})
+            item = _manager_item(db, repo=hit["repo"])
+            packs.append(_from_manager(item, sorted(got), "found in the pack's code · ComfyUI-Manager") if item else
+                         {**clean, "install_type": "git-clone", "provides": sorted(got), "listed": True, "found_by": "found in the pack's code"})
         left -= got
     return packs, sorted(left), sorted(core)
 
 
-async def manual_pack(ref, provides):
-    """A pack an admin named: a GitHub link or a Comfy Registry id."""
+async def manual_pack(ref, provides, comfy=None):
+    """A pack an admin named: a GitHub link or a Comfy Registry id. Installs through ComfyUI-Manager when it knows it."""
     ref = (ref or "").strip().rstrip("/")
+    db = await manager_db(comfy) if comfy else None
+    item = _manager_item(db, pid=ref) or _manager_item(db, repo=ref)
+    if item:
+        return _from_manager(item, provides, "added by an admin · ComfyUI-Manager")
     if re.fullmatch(r"https://github\.com/[\w.-]+/[\w.-]+(\.git)?", ref):
         repo = ref[:-4] if ref.endswith(".git") else ref
         if not await _json_get(f"https://api.github.com/repos/{repo.split('github.com/')[1]}"):
@@ -708,7 +886,7 @@ async def plan(recipe, comfy):
                     m["suggestions"] = await suggestions(m)
             except Exception as e:
                 m["source"], m["lookup_error"] = None, str(e)[:200]
-    packs = asyncio.create_task(resolve_nodes(a["missing_nodes"], recipe.get("workflow")))
+    packs = asyncio.create_task(resolve_nodes(a["missing_nodes"], recipe.get("workflow"), comfy=comfy))
     await asyncio.gather(*(one(m) for m in a["models"] if not m["installed"]))
     a["packs"], a["unknown_nodes"], a["core_nodes"] = await packs
     a["download_bytes"] = sum((m.get("source") or {}).get("size") or 0 for m in a["models"] if not m["installed"])
@@ -727,7 +905,9 @@ async def _download(step, url, dest):
         headers["Range"] = f"bytes={have}-"
     async with http.get(_with_civitai_token(url), headers=headers, timeout=aiohttp.ClientTimeout(total=None, sock_read=120)) as r:
         if r.status in (401, 403):
-            raise WorkflowError("The site refused the download — it may need a login token (Settings → Hugging Face / Civitai)")
+            raise WorkflowError(f"{urlparse(url).hostname} refused the download (HTTP {r.status}): "
+                                + ("the repo is gated or restricted — request access on its page and check your Hugging Face token in Settings"
+                                   if "huggingface.co" in url else "it may need an API key in Settings, or the model is early-access"))
         if r.status not in (200, 206):
             raise WorkflowError(f"Download failed: HTTP {r.status}")
         if r.status == 200:
@@ -774,6 +954,40 @@ def install_pack(step, pack):
     step["detail"] = "installed"
 
 
+async def manager_install(step, pack, comfy):
+    """Install a node pack through ComfyUI-Manager's queue (what its Install button does: registry version, its own
+    dependency handling and security checks). Returns False when Manager declines, so the caller can fall back."""
+    item = dict(pack["manager"])
+    if item.get("state") == "enabled":
+        step["detail"] = "already installed"
+        return True
+    item.update(ui_id=item["id"], skip_post_install=False, version=item.get("version") or "unknown",
+                selected_version="latest" if item.get("cnr_latest") else ("nightly" if item.get("version") == "nightly" else "unknown"))
+    step["detail"] = "queued in ComfyUI-Manager"
+    async with http.post(f"{comfy}/manager/queue/install", json=item, timeout=aiohttp.ClientTimeout(total=60)) as r:
+        if r.status != 200:
+            step["manager_said"] = f"HTTP {r.status} {(await r.text())[:200]}"
+            return False
+    async with http.post(f"{comfy}/manager/queue/start", json={}, timeout=aiohttp.ClientTimeout(total=60)) as r:
+        if r.status not in (200, 201):
+            step["manager_said"] = f"start: HTTP {r.status}"
+            return False
+    step["detail"] = "installing with ComfyUI-Manager"
+    end = time.time() + 3600
+    while time.time() < end:
+        await asyncio.sleep(2)
+        q = await _json_get(f"{comfy}/manager/queue/status", timeout=20) or {}
+        if not q.get("is_processing") and q.get("done_count", 0) >= q.get("total_count", 0):
+            break
+    _mgr["t"] = 0                                          # re-read pack states
+    db = await manager_db(comfy)
+    now = _manager_item(db, pid=item["id"]) or {}
+    if now.get("state") in (None, "not-installed"):
+        raise WorkflowError("ComfyUI-Manager couldn't install it — ComfyUI's log (journalctl --user -u comfyui) has the reason")
+    step["detail"] = "installed with ComfyUI-Manager" + (" (needs a fix: import failed)" if now.get("state") == "import-fail" else "")
+    return True
+
+
 async def _restart_comfy(step, comfy):
     step["detail"] = "restarting ComfyUI"
     await asyncio.create_subprocess_exec("systemctl", "--user", "restart", "comfyui.service")
@@ -787,6 +1001,7 @@ async def _restart_comfy(step, comfy):
     raise WorkflowError("ComfyUI didn't come back after the restart")
 
 
+_downloading = {}                            # destination file -> future, while some install is downloading it
 _install_gate = None                         # one install task at a time; later ones wait their turn ("queued")
 
 
@@ -828,17 +1043,25 @@ async def install(plan_, comfy, label):
         try:
             if s["kind"] == "model":
                 dest = MODELS / s["folder"] / s["label"]
+                while dest in _downloading:                # the same file is already coming in another install: wait for it
+                    s["detail"] = "waiting for the same file in another install"
+                    await asyncio.shield(_downloading[dest])
                 if dest.exists():                          # another workflow (or task) already fetched it
                     s["detail"] = "already downloaded"
                 else:
-                    await _download(s, s["url"], dest)
+                    _downloading[dest] = asyncio.get_running_loop().create_future()
+                    try:
+                        await _download(s, s["url"], dest)
+                    finally:
+                        _downloading.pop(dest).set_result(None)
             elif s["kind"] == "link":                      # same file, second folder: a link costs no disk space
                 dest = MODELS / s["folder"] / s["label"]
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 if not dest.exists():
                     dest.symlink_to(MODELS / s["link"][0] / s["link"][1])
             elif s["kind"] == "pack":
-                await asyncio.get_running_loop().run_in_executor(None, install_pack, s, s["pack"])
+                if not (s["pack"].get("manager") and await manager_install(s, s["pack"], comfy)):
+                    await asyncio.get_running_loop().run_in_executor(None, install_pack, s, s["pack"])
             else:
                 await _restart_comfy(s, comfy)
             s["status"] = "done"

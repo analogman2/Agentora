@@ -936,18 +936,18 @@ async def wf_delete(request):
 async def install_plan(r, body, force=True):
     """A workflow's plan with the admin's pasted model links and named node packs folded in."""
     plan = copy.deepcopy(await fresh_plan(r, force=force))
-    for m in plan["models"]:                              # links the admin pasted or picked for unmatched models
-        url = (body.get("links") or {}).get(m["name"])
+    for m in plan["models"]:                              # links the admin pasted or picked: these replace any found source
+        url = str((body.get("links") or {}).get(m["name"]) or "").strip()
         if url and not m["installed"]:
-            if not re.match(r"^https://", url):
-                raise web.HTTPBadRequest(text=f"Use an https link for {m['name']}")
-            await asyncio.get_running_loop().run_in_executor(None, W._public_host, urlparse(url).hostname)
-            m["source"] = {"url": url, "source": "link you provided", "folder": m["folder"]}
+            try:                                          # page links become file links; checked before anything starts
+                m["source"] = await W.resolve_link(url, m["name"], m["folder"])
+            except W.WorkflowError as e:
+                raise web.HTTPBadRequest(text=str(e))
     skip = set(body.get("skip_packs") or [])
     plan["packs"] = [p for p in plan["packs"] if p["repo"] not in skip]
     for ref, nodes in (body.get("extra_packs") or {}).items():   # packs an admin named for nodes nobody could match
         try:
-            pk = await W.manual_pack(ref, [n for n in (nodes or []) if isinstance(n, str)][:50])
+            pk = await W.manual_pack(ref, [n for n in (nodes or []) if isinstance(n, str)][:50], COMFY)
         except W.WorkflowError as e:
             raise web.HTTPBadRequest(text=str(e))
         if pk["repo"] not in {p["repo"] for p in plan["packs"]}:

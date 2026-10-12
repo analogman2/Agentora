@@ -1112,20 +1112,23 @@ function renderImportQ() {
 }
 const splitLinks = (t) => (t || "").split(/\s+/).map(x => x.trim()).filter(x => /^https?:\/\//.test(x));
 
+const linkBox = (m) => `<input type="text" data-link="${escapeHtml(m.name)}" placeholder="paste a link: Civitai model page or download, Hugging Face file or repo page" value="${escapeHtml(wf.links[m.name] || "")}">`;
 function renderWorkflow() {
   const w = wf.cur, p = w.plan, admin = ME && ME.role === "admin";
   const models = p.models.map(m => {
     const src = m.source;
     let status;
     if (m.installed) status = `<span class="ok">✓ installed</span> · ${escapeHtml(m.folder)}`;
-    else if (src) status = `<span class="need">⤓ will download</span> ${src.size ? gb(src.size) : ""} · ${escapeHtml(src.source)}${src.page ? ` · <a href="${escapeHtml(src.page)}" target="_blank" rel="noopener">page</a>` : ""}${src.note ? `<br><span class="need">${escapeHtml(src.note)}</span>` : ""}`;
+    else if (src) status = `<span class="need">⤓ will download</span> ${src.size ? gb(src.size) : ""} · ${escapeHtml(src.source)}${src.page ? ` · <a href="${escapeHtml(src.page)}" target="_blank" rel="noopener">page</a>` : ""}${src.note ? `<br><span class="need">${escapeHtml(src.note)}</span>` : ""}` +
+      (admin ? (wf.links[m.name] ? linkBox(m) : ` · <a href="#" data-relink="${escapeHtml(m.name)}">use a different link</a>`) : "");
     else status = `<span class="bad">✗ not found automatically</span> · goes in ${escapeHtml(m.folder)}` +
-      (admin ? `<input type="text" data-link="${escapeHtml(m.name)}" placeholder="paste a download link (Civitai / Hugging Face)" value="${escapeHtml(wf.links[m.name] || "")}">` +
+      (admin ? linkBox(m) +
         (m.suggestions && m.suggestions.length ? `<span class="sugg">Possible matches — check before using: ${m.suggestions.map(s => `<a href="${escapeHtml(s.page)}" target="_blank" rel="noopener">${escapeHtml(s.title)}</a> (${escapeHtml(s.file || "")}${s.size ? ", " + gb(s.size) : ""}) <a href="#" data-use="${escapeHtml(m.name)}" data-url="${escapeHtml(s.url)}">use</a>`).join(" · ")}</span>` : "") : "");
-    return `<li><div class="nm">${m.lora ? "LoRA · " : ""}${escapeHtml(m.name)}</div><div class="st">${status}</div></li>`;
+    const skipped = !m.installed && m.refused && m.refused.length ? `<div class="st">Skipped copies you can't download: ${m.refused.map(escapeHtml).join(", ")}</div>` : "";
+    return `<li><div class="nm">${m.lora ? "LoRA · " : ""}${escapeHtml(m.name)}</div><div class="st">${status}</div>${skipped}</li>`;
   }).join("");
   const packs = p.packs.map(k => `<li><div class="nm">${escapeHtml(k.title)}${k.author ? ` <span class="st">by ${escapeHtml(k.author)}</span>` : ""}</div>
-      <div class="st"><span class="need">⤓ node pack</span> · <a href="${escapeHtml(k.repo)}" target="_blank" rel="noopener">${escapeHtml(k.repo.replace("https://github.com/", ""))}</a> · provides ${k.provides.length} node${k.provides.length === 1 ? "" : "s"}${k.found_by ? " · " + escapeHtml(k.found_by) : ""}${k.listed ? "" : " · <span class='bad'>not in a registry</span>"}</div>
+      <div class="st"><span class="need">⤓ node pack${k.manager ? " · via ComfyUI-Manager" : ""}</span> · <a href="${escapeHtml(k.repo)}" target="_blank" rel="noopener">${escapeHtml(k.repo.replace("https://github.com/", ""))}</a> · provides ${k.provides.length} node${k.provides.length === 1 ? "" : "s"}${k.found_by ? " · " + escapeHtml(k.found_by) : ""}${k.listed ? "" : " · <span class='bad'>not in a registry</span>"}</div>
       ${k.description ? `<div class="st">${escapeHtml(k.description)}</div>` : ""}</li>`).join("")
     + (p.core_nodes && p.core_nodes.length ? `<li><div class="nm">Built into a newer ComfyUI</div><div class="st"><span class="need">${p.core_nodes.map(escapeHtml).join(", ")}</span> — these come with ComfyUI itself; updating ComfyUI adds them.</div></li>` : "")
     + p.unknown_nodes.map(n => `<li><div class="nm">${escapeHtml(n)}</div><div class="st"><span class="bad">✗ no known node pack provides this node</span>${admin
@@ -1163,6 +1166,12 @@ function renderWorkflow() {
   $("#wfRecheck").onclick = () => openWorkflow(w.id, true);
   $("#wfDel").onclick = async () => { if (!confirm(`Remove “${w.name}” from your workflows? Pictures you made with it stay.`)) return; await fetch(`/api/workflows/${w.id}`, {method: "DELETE"}); wf.cur = null; $("#wfDetail").innerHTML = ""; loadWorkflows(); };
   $("#wfDetail").querySelectorAll("[data-link]").forEach(i => i.oninput = () => { wf.links[i.dataset.link] = i.value.trim(); });
+  $("#wfDetail").querySelectorAll("[data-relink]").forEach(a => a.onclick = (e) => {
+    e.preventDefault();
+    a.insertAdjacentHTML("afterend", linkBox({name: a.dataset.relink}));
+    const i = a.nextElementSibling; a.remove();
+    i.oninput = () => { wf.links[i.dataset.link] = i.value.trim(); }; i.focus();
+  });
   $("#wfDetail").querySelectorAll("[data-pack]").forEach(i => i.oninput = () => { (wf.extraPacks = wf.extraPacks || {})[i.dataset.pack] = i.value.trim(); });
   $("#wfDetail").querySelectorAll("[data-use]").forEach(a => a.onclick = (e) => { e.preventDefault(); wf.links[a.dataset.use] = a.dataset.url; const i = $("#wfDetail").querySelector(`[data-link="${CSS.escape(a.dataset.use)}"]`); if (i) i.value = a.dataset.url; });
   $("#wfDetail").querySelectorAll("[data-rand]").forEach(c => c.onchange = () => { $("#wfDetail").querySelector(`input[type=number][data-f="${CSS.escape(c.dataset.rand)}"]`).disabled = c.checked; });
@@ -1191,9 +1200,10 @@ async function startInstall() {
   for (const [node, ref] of Object.entries(wf.extraPacks || {})) if (ref && p.unknown_nodes.includes(node)) (extra[ref] = extra[ref] || []).push(node);
   const total = packs.length + Object.keys(extra).length;
   if (!total && !p.models.some(m => !m.installed && (m.source || wf.links[m.name]))) { $("#wfTask").innerHTML = `<p class="err">Nothing to install yet — paste a link for the missing nodes or models first.</p>`; return; }
-  const lines = packs.map(k => "• " + k.title + " — " + k.repo).concat(Object.entries(extra).map(([ref, nodes]) => "• " + ref + "  (you added it · not vetted by any registry · for " + nodes.join(", ") + ")"));
+  const lines = packs.map(k => "• " + k.title + " — " + k.repo + (k.manager ? "  (via ComfyUI-Manager)" : "")).concat(Object.entries(extra).map(([ref, nodes]) => "• " + ref + "  (you added it · not vetted by any registry · for " + nodes.join(", ") + ")"));
   if (total && !confirm(`Install ${total} node pack${total === 1 ? "" : "s"} (third-party code from GitHub) and download ${gb(p.download_bytes)} of models? ComfyUI restarts afterwards.\n\n${lines.join("\n")}`)) return;
   $("#wfInstall").disabled = true;
+  if (Object.values(wf.links).some(Boolean)) $("#wfTask").innerHTML = `<p class="hint">Checking your links…</p>`;
   const r = await fetch(`/api/workflows/${wf.cur.id}/install`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({links: wf.links, extra_packs: extra})});
   if (!r.ok) { $("#wfTask").innerHTML = `<p class="err">${escapeHtml(await r.text())}</p>`; $("#wfInstall").disabled = false; return; }
   wf.task = await r.json(); pollInstall();
