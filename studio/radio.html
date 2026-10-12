@@ -134,7 +134,7 @@ img { display: block; }
 .songpage .acts { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
 .songpage .facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 14px; margin: 0; }
 .songpage .facts dt { color: var(--muted); } .songpage .facts dd { margin: 0; }
-pre.songly { max-height: none; font-size: 15px; }
+pre.ly.songly { max-height: none; overflow: visible; font-size: 15px; }
 .taste { margin-top: 16px; text-align: left; }
 .taste pre { white-space: pre-wrap; font: 13px/1.5 system-ui, sans-serif; background: var(--soft); border-radius: 8px; padding: 10px 12px; margin: 6px 0; }
 .taste .btn { font-size: 12px; padding: 3px 10px; }
@@ -1344,7 +1344,7 @@ let prioNow = null;
 function drawPrio(d) {
   prioNow = d.priority;
   $("prio").innerHTML = PRIO.map(([k, l]) => `<button type="button" data-prio="${k}" aria-pressed="${k === prioNow}" title="${esc(PRIO_HELP[k])}">${l}</button>`).join("");
-  $("prioNote").textContent = (d.waiting ? d.waiting + ". " : "") + PRIO_HELP[prioNow];
+  $("prioNote").textContent = PRIO_HELP[prioNow];             // the GPU line above already says when the radio is waiting
   $("prio").querySelectorAll("[data-prio]").forEach(b => b.onclick = async () => {
     try { drawPrio(await api("/api/gpu/priority", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({priority: b.dataset.prio})})); }
     catch (e) { $("prioNote").textContent = e.message; }
