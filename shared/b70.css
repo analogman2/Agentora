@@ -27,6 +27,12 @@
 body.b70-np-shown { padding-bottom: 76px; }
 @media (prefers-reduced-motion: no-preference) { .b70-np { transition: transform .2s; } }
 
-.b70-brain { display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px; border-radius: 999px; font: inherit; font-size: 13px;
-  border: 1px solid var(--line, #3333); background: var(--soft, transparent); color: var(--text, inherit); cursor: pointer; white-space: nowrap; }
-.b70-brain[data-brain="agi"] { border-color: var(--accent, #3157e0); }
+.b70-brain { display: inline-flex; align-items: center; gap: 7px; padding: 4px 6px; border: 0; background: none; font: inherit;
+  font-size: 13px; color: var(--muted, #888); cursor: pointer; white-space: nowrap; }
+.b70-brain .track { position: relative; width: 36px; height: 20px; border-radius: 999px; background: var(--line, #8886); flex: none;
+  transition: background .15s; }
+.b70-brain .knob { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 2px #0005; transition: left .15s; }
+.b70-brain[data-brain="agi"] .track { background: var(--accent, #3157e0); }
+.b70-brain[data-brain="agi"] .knob { left: 18px; }
+.b70-brain[data-brain="lemming"] .l, .b70-brain[data-brain="agi"] .r { color: var(--text, inherit); font-weight: 600; }

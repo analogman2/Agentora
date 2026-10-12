@@ -27,10 +27,11 @@
   const brain = () => { try { const v = localStorage.getItem("b70.brain"); return BRAINS[v] ? v : "agi"; } catch (e) { return "agi"; } };
   window.b70Brain = brain;
   const drawBrain = () => document.querySelectorAll("[data-b70-brain]").forEach(b => {
-    const [icon, name, tip] = BRAINS[brain()];
-    b.classList.add("b70-brain"); b.dataset.brain = brain(); b.type = "button"; b.title = tip;
-    b.setAttribute("aria-label", "Assistant model: " + name + ". " + tip);
-    b.innerHTML = `<span aria-hidden="true">${icon}</span> ${name}`;
+    const on = brain() === "agi";
+    b.classList.add("b70-brain"); b.dataset.brain = brain(); b.type = "button"; b.title = BRAINS[brain()][2];
+    b.setAttribute("role", "switch"); b.setAttribute("aria-checked", on);
+    b.setAttribute("aria-label", "Assistant model: " + BRAINS[brain()][1] + " (switch on for AGI)");
+    b.innerHTML = `<span class="l">🐹 Lemming</span><span class="track" aria-hidden="true"><span class="knob"></span></span><span class="r">🧠 AGI</span>`;
   });
   document.addEventListener("click", e => {
     const b = e.target.closest("[data-b70-brain]"); if (!b) return;
