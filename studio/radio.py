@@ -405,7 +405,13 @@ def llm_candidates():
     return out
 
 
-def write_spec(s, short=False):
+def gpu_first(cands):
+    """Songwriters on the GPU first (labelled "GPU" in settings, e.g. Qwen3 4B): for things someone is waiting on.
+    The big CPU songwriter stays as the fallback."""
+    return sorted(cands, key=lambda c: "gpu" not in c[2].lower())
+
+
+def write_spec(s, short=False, fast=False):
     want_inst = s["vocals"] == "instrumental" or (s["vocals"] == "mix" and random.random() < INSTRUMENTAL_SHARE)
     recent = [j for j in app.jobs.values() if j.get("station") == s["id"] and j.get("source") == "radio"
               and j.get("radio_status") in ("approved", "played", "rendering", "judging")]
@@ -448,7 +454,8 @@ def write_spec(s, short=False):
         u.append("The listener DISLIKED these, steer away from them: " + "; ".join(f"{f['title']} [{f['style'][:80]}]" for f in dislikes))
     if skips:
         u.append("Skipped (mildly less of this): " + "; ".join(f"[{f['style'][:60]}]" for f in skips))
-    for base, model, label in [c for c in llm_candidates() for _ in range(3)]:     # each server gets two retries
+    cands = gpu_first(llm_candidates()) if fast else llm_candidates()
+    for base, model, label in [c for c in cands for _ in range(3)]:     # each server gets two retries
         if not state["on"]:
             break
         try:
@@ -562,7 +569,7 @@ def produce(sid, on_request=False):
         ready = len(station_tracks(sid, ("approved",)))
         short = not busy and not ready and writing.get(sid, 0) <= 1 and not on_request
         takes = TAKES if ready >= 2 else 1      # spool running low: one take, so the broadcast never runs dry
-        spec = write_spec(s, short=short)
+        spec = write_spec(s, short=short, fast=on_request)   # someone is waiting: write it on the GPU
         if not on_request and (not state["on"] or state["station"] != sid):
             app.log("radio: discarding a spec written after the radio was switched off / retuned")
             return
@@ -1344,7 +1351,7 @@ def station_assist(body):
                f"{have}\n\nReturn {{\"ideas\": [{{\"name\", \"description\", "
                "\"vocals\": \"mix\"|\"vocals\"|\"instrumental\", \"theme\": one-sentence lyrics theme or \"\"}} x3]}}")
     last = None
-    for base, model, label in llm_candidates():
+    for base, model, label in gpu_first(llm_candidates()):
         try:
             req = {"model": model, "temperature": 0.8 if mode == "suggest" else 0.6, "top_p": 0.95, "max_tokens": 900,
                    "chat_template_kwargs": {"enable_thinking": False},

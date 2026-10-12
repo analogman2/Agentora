@@ -1113,7 +1113,7 @@ function wireAssist(ids, creating) {
   document.querySelectorAll("[data-assist]").forEach(b => b.onclick = async () => {
     const mode = b.dataset.assist, before = fields();
     document.querySelectorAll("[data-assist]").forEach(x => x.disabled = true);
-    msg.textContent = (mode === "improve" ? "Improving" : "Thinking up ideas") + "… the songwriter model runs on the CPU: usually under a minute, up to a few while the radio is writing songs.";
+    msg.textContent = (mode === "improve" ? "Improving" : "Thinking up ideas") + "… usually a few seconds on the GPU.";
     $("aIdeas").innerHTML = "";
     try {
       const r = await post("/api/radio/stations/assist", {mode, ...before});
@@ -1332,7 +1332,7 @@ function updateMk() {
   const s = stOf(view.id); if (!s) return;
   const mine = (R.making || []).filter(m => m.station === s.id);
   const parts = [];
-  if (s.asked) parts.push(`✍ writing ${s.asked === 1 ? "a song" : s.asked + " songs"} (the songwriter runs on the CPU, about a minute)`);
+  if (s.asked) parts.push(`✍ writing ${s.asked === 1 ? "a song" : s.asked + " songs"} (on the GPU, a few seconds)`);
   for (const m of mine) parts.push(`${m.status === "running" ? "🎙 recording" : "⏳ waiting to record"} “${esc(m.title)}”${m.stage ? " · " + esc(m.stage) : ""}${m.requested ? "" : " (radio queue)"}`);
   el.innerHTML = parts.length ? parts.join("<br>") : (s.ready ? `${s.ready} song${s.ready === 1 ? "" : "s"} ready to play` : "");
 }
