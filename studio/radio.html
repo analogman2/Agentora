@@ -513,8 +513,11 @@ function rerunStation() {
 }
 
 // ---------------- this device's sound (EQ / balance / mono through Web Audio; off = plain playback)
-const DEV_DEFAULT = {low: 0, mid: 0, high: 0, balance: 0, mono: false, fx: true};
+// Phones get plain playback by default: Bluetooth (car, headphones) route changes can silently suspend Web Audio there.
+const PHONE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+const DEV_DEFAULT = {low: 0, mid: 0, high: 0, balance: 0, mono: false, fx: !PHONE};
 let dev = Object.assign({}, DEV_DEFAULT, store.get("device", {}));
+if (PHONE && !dev.fxChosen) dev.fx = false;          // older saved settings never chose: use the phone default
 function applyDevice() {
   if (!devNodes) return;
   devNodes.low.gain.value = dev.low; devNodes.mid.gain.value = dev.mid; devNodes.high.gain.value = dev.high;
@@ -532,6 +535,7 @@ function ensureAudioGraph() {
     const pan = actx.createStereoPanner();
     src.connect(low); low.connect(mid); mid.connect(high); high.connect(mono); mono.connect(pan); pan.connect(actx.destination);
     devNodes = {low, mid, high, mono, pan}; applyDevice();
+    actx.onstatechange = () => { if (wantPlay && lid && !audio.paused && actx.state !== "running") actx.resume().catch(() => {}); };
   } catch (e) { console.warn("no Web Audio", e); }
 }
 
@@ -555,8 +559,16 @@ const reconnect = () => { if (wantPlay && lid) { met.reconnects++; status("Strea
 audio.addEventListener("error", () => { if (audio.getAttribute("src")) reconnect(); });
 audio.addEventListener("ended", reconnect);
 audio.addEventListener("play", setPlayingUI); audio.addEventListener("pause", setPlayingUI);
+let pausedAt = 0;                                  // the phone paused us (Bluetooth dropped, a call, the car's ⏸)
+audio.addEventListener("pause", () => { pausedAt = Date.now(); });
+audio.addEventListener("play", () => {
+  if (actx && actx.state !== "running") actx.resume().catch(() => {});
+  if (wantPlay && lid && pausedAt && Date.now() - pausedAt > 8000) { pausedAt = 0; connect(); }   // stale or dead connection: rejoin live
+  pausedAt = 0;
+});
 let stallT = -1, stallSince = Date.now();          // phones can leave a dead stream "playing" with no error
 setInterval(() => {
+  if (actx && wantPlay && lid && !audio.paused && actx.state !== "running") actx.resume().catch(() => {});   // Bluetooth route change
   if (!wantPlay || !lid || audio.paused || audio.currentTime !== stallT) { stallT = audio.currentTime; stallSince = Date.now(); return; }
   if (Date.now() - stallSince > 12000) { stallSince = Date.now(); met.reconnects++; status("Stream stalled — reconnecting…"); connect(); }
 }, 2000);
@@ -665,7 +677,7 @@ function updateMediaSession() {
 }
 if (ms) {
   const act = (a, f) => { try { ms.setActionHandler(a, f); } catch {} };
-  act("play", () => { if (lid) audio.play(); else togglePlay(); });
+  act("play", () => { if (!lid) return togglePlay(); wantPlay = true; audio.paused ? connect() : audio.play(); });   // live: rejoin, don't resume stale audio
   act("pause", () => { if (lid) togglePlay(); });
   act("stop", () => { if (lid) togglePlay(); });
   act("nexttrack", () => $("bSkip").click());
@@ -1066,6 +1078,7 @@ function renderSettings(msg) {
     const k = e.dataset.dev; dev[k] = e.type === "checkbox" ? e.checked : +e.value;
     if ($("dv_" + k)) $("dv_" + k).textContent = dev[k] + e.dataset.unit;
     store.set("device", dev); applyDevice();
+    if (k === "fx") { dev.fxChosen = true; store.set("device", dev); }
     if (k === "fx" && (actx ? !dev.fx : dev.fx) && confirm("Reload the page now to switch playback mode?")) location.reload();
   });
   $("devReset").onclick = () => { dev = Object.assign({}, DEV_DEFAULT); store.set("device", dev); applyDevice(); renderSettings("This device reset."); };
