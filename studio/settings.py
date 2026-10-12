@@ -17,7 +17,8 @@ SCHEMA = [
     ("buffer_seconds", "Broadcast", "Stream buffer (seconds)", "int", 4, 60,
      "Audio each player holds against network hiccups. Listeners hear the broadcast this far behind live."),
     ("takes", "Song making", "Takes per song", "int", 1, 4,
-     "Each song is recorded this many times and the critic airs the best take. 1 = fastest."),
+     "Most takes per song; the critic airs the best. Used in full only when the spool is nearly full: at most 2 while it "
+     "is half empty, 1 when it is about to run dry. 1 = fastest."),
     ("max_song_seconds", "Song making", "Longest song (seconds)", "int", 90, 420,
      "Safety cap; songs normally end on their own before this."),
     ("opener_seconds", "Song making", "Opening song length (seconds)", "int", 45, 240,

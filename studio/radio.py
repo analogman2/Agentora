@@ -659,11 +659,17 @@ def update_taste(sid):
     loved = liked_songs(s)[:8]
     disliked = [by_id[f["track"]] for f in s.get("feedback", []) if f["kind"] == "dislike" and f["track"] in by_id][-6:]
     skipped = [by_id[f["track"]] for f in s.get("feedback", []) if f["kind"] == "skip" and f["track"] in by_id][-4:]
-    if len(loved) + len(disliked) < 2:
+    rated = {f["track"] for f in s.get("feedback", [])} | {j["id"] for j in loved}
+    soft = lambda kind, n: list({f["track"]: by_id[f["track"]] for f in s.get("implicit", [])
+                                 if f["kind"] == kind and f["track"] in by_id and f["track"] not in rated}.values())[-n:]
+    heard, left = soft("heard", 6), soft("left", 4)
+    if len(loved) + len(disliked) + (len(heard) + len(left)) // 2 < 2:
         return
     line = lambda j: f"- {j['title']} [{j['style'][:110]}] " + " / ".join(l for l in (j.get("lyrics") or "").splitlines() if l.strip() and not l.startswith("["))[:140]
     ask = (f"Station: {s['name']} — {s.get('description') or ''}\nLIKED (thumbs up or saved):\n" + ("\n".join(map(line, loved)) or "-")
-           + "\nDISLIKED:\n" + ("\n".join(map(line, disliked)) or "-") + "\nSKIPPED (mild):\n" + ("\n".join(map(line, skipped)) or "-"))
+           + "\nDISLIKED:\n" + ("\n".join(map(line, disliked)) or "-") + "\nSKIPPED (mild):\n" + ("\n".join(map(line, skipped)) or "-")
+           + "\nLISTENED ALL THE WAY THROUGH (mild like):\n" + ("\n".join(map(line, heard)) or "-")
+           + "\nTUNED OUT EARLY (mild dislike):\n" + ("\n".join(map(line, left)) or "-"))
     for base, model, label in gpu_first(llm_candidates()):
         try:
             body = {"model": model, "temperature": 0.3, "max_tokens": 300, "chat_template_kwargs": {"enable_thinking": False},
@@ -673,9 +679,10 @@ def update_taste(sid):
             notes = r["choices"][0]["message"]["content"].strip()[:900]
             if "More of" in notes or "Less of" in notes:
                 with lock:
-                    s["taste"] = {"notes": notes, "updated": time.time(), "from": len(loved) + len(disliked)}
+                    s["taste"] = {"notes": notes, "updated": time.time(), "from": len(loved) + len(disliked) + len(heard) + len(left)}
                     save_station(s)
-                app.log(f"radio: taste notes updated for {s['name']} from {len(loved)} likes / {len(disliked)} dislikes")
+                app.log(f"radio: taste notes updated for {s['name']} from {len(loved)} likes / {len(disliked)} dislikes"
+                        f" / {len(heard)} heard through / {len(left)} tuned out")
                 return
         except Exception as e:
             app.log(f"radio: taste notes ({label}) failed: {e}")
@@ -688,6 +695,7 @@ def forget_taste(sid):
     with lock:
         s["taste"] = None
         s["feedback"] = []
+        s["implicit"] = []
         save_station(s)
     return {"ok": True}
 
@@ -776,6 +784,18 @@ def request_song(sid, like=None):
     return {"ok": True, "banked": bool(stations[sid].get("bank")) and not lj}
 
 
+def takes_for(ready):
+    """Takes to render for the next song, by how many approved songs are waiting. A take costs about half a song's
+    length in GPU time, so 3 takes per song can't keep up with a listener: the full count only when the spool is nearly
+    full, at most 2 while it is half empty, 1 when it is about to run dry."""
+    target = state["target_ahead"]
+    if ready >= max(2, target - 1):
+        return TAKES
+    if ready >= 2:
+        return min(TAKES, 2)
+    return 1
+
+
 def produce(sid, on_request=False, like=None):
     try:
         s = stations.get(sid)
@@ -786,7 +806,7 @@ def produce(sid, on_request=False, like=None):
                        for j in app.jobs.values())
         ready = len(station_tracks(sid, ("approved",)))
         short = not busy and not ready and writing.get(sid, 0) <= 1 and not on_request
-        takes = TAKES if ready >= 2 else 1      # spool running low: one take, so the broadcast never runs dry
+        takes = takes_for(ready)                # fewer takes when the spool runs low, so the broadcast never runs dry
         spec = None
         if not short and not like and s.get("bank"):     # a song the GPU lyricist wrote ahead of time
             with lock:
@@ -834,8 +854,10 @@ def judge(job):
         return settle_takes(job, s)
     job["radio_status"] = "judging"
     try:
-        score, sane, dup = critic_score(job, s)
-        job["critic"] = {"score": round(score, 4), "sane": sane, "dup": round(dup, 3)}
+        score, sane, dup, checks = critic_score(job, s)
+        job["critic"] = {"score": round(score, 4), "sane": sane, "dup": round(dup, 3), "checks": checks}
+        if checks.get("notes"):
+            app.log("radio critic notes", job["title"], f"take {job.get('take', 1)}:", "; ".join(checks["notes"]))
     except Exception:
         app.log("radio critic error:", traceback.format_exc())
         job["critic"] = {"score": None, "sane": True, "dup": 0.0}      # critic broke: don't hold the song back
@@ -903,6 +925,54 @@ def settle_stragglers():
             settle_takes(j, s)
 
 
+def audio_checks(y, sr=48000):
+    """Cheap signal checks on a take (mono float audio). Broken takes from the music model show up as long dropouts
+    or mostly-quiet audio; clipping is a lesser flaw."""
+    hop = sr // 2
+    n = len(y) // hop
+    if n < 8:
+        return {"dropout_s": 0.0, "quiet_share": 1.0, "clip_share": 0.0}
+    db = 20 * np.log10(np.sqrt((y[: n * hop].reshape(n, hop) ** 2).mean(1)) + 1e-9)
+    edge = max(2, n // 20)                       # ignore the first/last 5%: quiet intros and fade-outs are fine
+    quiet = db[edge:-edge] < -45
+    run = longest = 0
+    for q in quiet:
+        run = run + 1 if q else 0
+        longest = max(longest, run)
+    return {"dropout_s": longest / 2, "quiet_share": round(float(quiet.mean()), 3),
+            "clip_share": round(float((np.abs(y) >= 0.995).mean()), 5)}
+
+
+def quality_flags(job, s, y, emb):
+    """(penalty, broken, notes) for one take, on top of the CLAP fit score (station scores spread over ~0.1)."""
+    c = audio_checks(y)
+    notes, pen = [], 0.0
+    broken = c["dropout_s"] >= 8 or c["quiet_share"] > 0.25
+    if broken:
+        notes.append(f"dropout {c['dropout_s']:.0f}s / {c['quiet_share']:.0%} quiet")
+    if c["clip_share"] > 0.001:
+        pen += 0.02; notes.append("clipping")
+    secs = job.get("seconds") or 0
+    if secs >= job.get("max_seconds", MAX_SECONDS) - 1:            # never ended on its own: the length cap cut it off
+        pen += 0.03; notes.append("hit the length cap")
+    lines = [l for l in (job.get("lyrics") or "").splitlines() if l.strip() and not l.strip().startswith("[")]
+    if job.get("mode") == "song" and len(lines) >= 12:
+        pace = secs / len(lines)                 # healthy takes sing ~3.5-8 s per line
+        if pace < 3.0:
+            pen += 0.03; notes.append("rushed / skipped lyrics")
+        elif pace > 9.0:
+            pen += 0.02; notes.append("long stretches without lyrics")
+    if job.get("mode") == "song" and (job.get("lyrics") or "").strip():
+        try:
+            p_vocal = tag_scores(emb)["p_vocal"]
+            c["p_vocal"] = round(p_vocal, 3)
+            if p_vocal < 0.2:                    # a song with lyrics that came out without a voice
+                pen += 0.04; notes.append("no audible vocals")
+        except Exception:
+            pass
+    return pen, broken, notes, c
+
+
 def critic_score(job, s):
     """CLAP critic: how well this take fits the station, nudged by likes/dislikes, minus a novelty penalty."""
     sid = s["id"]
@@ -913,6 +983,12 @@ def critic_score(job, s):
     np.save(app.DATA / job["id"] / "clap.npy", emb)
     rms = float(np.sqrt(np.mean(y ** 2)))
     sane = (job.get("seconds") or 0) >= MIN_SONG_SECONDS and rms > 0.01
+    try:
+        penalty, broken, notes, checks = quality_flags(job, s, y, emb)
+    except Exception:
+        app.log("radio critic checks error:", traceback.format_exc())
+        penalty, broken, notes, checks = 0.0, False, [], {}
+    sane = sane and not broken
     if s["kind"] == "folder" and (sdir(sid) / "corpus.npy").is_file():
         ref = np.load(sdir(sid) / "corpus.npy")
     else:
@@ -934,10 +1010,11 @@ def critic_score(job, s):
     like_b = 0.15 * (float(np.max(np.stack(likes) @ emb)) - 0.5) if likes else 0.0       # gentle nudge only
     dis_p = 0.5 * max(0.0, float(np.max(np.stack(dislikes) @ emb)) - 0.6) if dislikes else 0.0
     dup = float(np.max(np.stack(recent) @ emb)) if recent else 0.0
-    score = base + like_b - dis_p - 1.0 * max(0.0, dup - 0.93)    # CLAP saturates within a genre: soft novelty penalty
+    score = base + like_b - dis_p - 1.0 * max(0.0, dup - 0.93) - penalty    # CLAP saturates within a genre: soft novelty penalty
     if dup > 0.99:
         sane = False          # only a true clone; same-station songs routinely score 0.95-0.97 (CLAP saturates)
-    return score, sane, dup
+        notes.append("near-copy of a recent song")
+    return score, sane, dup, {"penalty": round(penalty, 3), "notes": notes, **checks}
 
 
 # ----------------------------------------------------------------------------- broadcast
@@ -1063,10 +1140,12 @@ def _play_track(t):
     _air(t | {"duration": t.get("seconds")})
     app.log("radio on air:", t["title"], f"({len(bc['listeners'])} listening)")
     checked, start, pending = 0.0, bc["bytes"], b""
+    aired_at, present, finished = time.time(), set(bc["listeners"]), False
     try:
         while True:
             chunk = os.read(proc.stdout.fileno(), 8192)
             if not chunk:
+                finished = True                    # the whole song went out
                 break
             pending += chunk                       # only send whole MP3 frames so a skip never leaves a torn frame
             n = len(pending) // FRAME * FRAME
@@ -1088,6 +1167,57 @@ def _play_track(t):
                     break
     finally:
         proc.kill(); proc.wait()
+        try:
+            _listening_signal(t, aired_at, present, finished and not bc["skip"].is_set())
+        except Exception:
+            app.log("radio listening-signal error:", traceback.format_exc())
+
+
+# ----------------------------------------------------------------------------- implicit feedback
+# Few listeners press the thumbs, so how people listen counts as mild feedback: a song someone heard through to the
+# end is a soft like ("heard"); tuning out 10-60 s into a song, after listening for a while, is a soft skip ("left").
+# Both feed the taste notes (more weakly than thumbs); explicit thumbs on a song always win.
+IMPLICIT_EVERY = 5                      # rewrite the taste notes after this many new listening signals
+_departures = collections.deque(maxlen=200)   # (listener id, left at, joined at)
+
+
+def _listening_signal(t, aired_at, present, finished):
+    if not t.get("id") or not present:
+        return
+    stayed = [lid for lid in present if lid in bc["listeners"]]
+    lo, hi = aired_at + LEAD + 10, aired_at + LEAD + 60        # listeners hear the stream LEAD seconds late
+    left = [lid for lid, at, joined in list(_departures)
+            if lid in present and lid not in bc["listeners"] and lo <= at <= hi and aired_at - joined >= 120]
+    if finished and stayed:
+        implicit(t["id"], "heard")
+    elif left and not bc["skip"].is_set():
+        implicit(t["id"], "left")
+
+
+def implicit(track_id, kind):
+    with app.lock:
+        j = app.jobs.get(track_id)
+    if not j or j.get("source") != "radio" or j.get("radio_feedback"):
+        return                                  # thumbs already given: they speak louder
+    s = stations.get(j.get("station"))
+    if not s:
+        return
+    with lock:
+        s["implicit"] = ([f for f in s.get("implicit", []) if not (f["track"] == track_id and f["kind"] == kind)]
+                         + [{"track": track_id, "kind": kind, "t": time.time()}])[-200:]
+        s["stats"][kind] = s["stats"].get(kind, 0) + 1
+        s["implicit_new"] = s.get("implicit_new", 0) + 1
+        due = s["implicit_new"] >= IMPLICIT_EVERY
+        if due:
+            s["implicit_new"] = 0
+        save_station(s)
+    with app.lock:
+        sig = j.setdefault("listen_signals", {})
+        sig[kind] = sig.get(kind, 0) + 1
+    app.save_job(j)
+    app.log(f"radio: listening signal '{kind}' for {j['title']}")
+    if due:
+        threading.Thread(target=update_taste, args=(s["id"],), daemon=True).start()
 
 
 def _play_silence():
@@ -1167,6 +1297,7 @@ def stream(h):
         with bc_lock:
             if bc["listeners"].get(lid, {}).get("q") is q:
                 bc["listeners"].pop(lid, None)
+        _departures.append((lid, time.time(), _joined.get((lid, id(q)), time.time())))
         app.log(f"radio: listener {lid[:6]} {why} after {time.time() - bc_since(lid, q):.0f} s")
     h.close_connection = True
 

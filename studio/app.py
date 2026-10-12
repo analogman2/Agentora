@@ -188,6 +188,20 @@ def unload_ollama_gpu_models():
         log("couldn't check Ollama's GPU models:", e)
 
 
+def unload_radio_writers():
+    """Unload the radio's own songwriter/lyricist models from the GPU (they are only guests on the card)."""
+    try:
+        own = radio_writer_models()
+        for m in _get_json("http://127.0.0.1:11434/api/ps", timeout=5).get("models", []):
+            if m.get("size_vram") and m["name"] in own:
+                log("unloading the radio's", m["name"], "from the GPU for YuE2")
+                urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:11434/api/generate",
+                                       json.dumps({"model": m["name"], "keep_alive": 0}).encode(),
+                                       {"Content-Type": "application/json"}), timeout=30).read()
+    except Exception as e:
+        log("couldn't unload the radio's writer models:", e)
+
+
 def llm_active():
     if not LLM_UNIT:                     # STUDIO_LLM_UNIT="" -> no LLM service to pause (it shares the GPU)
         return False
@@ -358,6 +372,48 @@ def gpu_free_mib(index):
         return j["memory"]["used_mib"]["tile_0"]["current"]
     except Exception:
         return None
+
+
+VRAM_START_MIB = 16 * 1024      # YuE2 only starts when the card's used memory is below this (24 GB card: ~8 GB free)
+OOM_RETRIES = 2                 # a take that runs out of GPU memory goes back in the queue this many times
+
+
+def gpu_holders(index):
+    """Who is using GPU memory on one card: [(pid, short name, MiB)], biggest first. NVIDIA only; [] elsewhere."""
+    if not DEVICE.startswith("cuda"):
+        return []
+    out = []
+    try:
+        uuid_ = sh("nvidia-smi", "-i", str(index), "--query-gpu=uuid", "--format=csv,noheader", timeout=20)
+        rows = sh("nvidia-smi", "--query-compute-apps=gpu_uuid,pid,used_memory", "--format=csv,noheader,nounits", timeout=20)
+        for line in rows.splitlines():
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) != 3 or parts[0] != uuid_:
+                continue
+            pid, mib = int(parts[1]), int(parts[2])
+            try:
+                cmd = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+                args = [c.decode(errors="replace") for c in cmd if c]
+            except OSError:
+                args = []
+            text = " ".join(args)
+            if "ollama" in text:
+                name = "Ollama"
+            elif "ComfyUI" in text or "comfy" in text.lower():
+                name = "ComfyUI"
+            elif "yue2" in text.lower() or "multiprocessing" in text:
+                name = "YuE2"
+            else:
+                name = Path(args[0]).name if args else f"pid {pid}"
+            out.append((pid, name, mib))
+    except Exception as e:
+        log("couldn't list GPU memory users:", e)
+    return sorted(out, key=lambda x: -x[2])
+
+
+def holders_text(index):
+    h = gpu_holders(index)
+    return ", ".join(f"{name} {mib / 1024:.1f} GB" for _, name, mib in h[:3]) if h else "unknown"
 
 
 def soften_ending(path, fade=6.0):
@@ -588,10 +644,13 @@ class Worker(threading.Thread):
             time.sleep(0.5)
             return
         if pend and not self.holding():
-            self.acquire()
+            if not self.acquire():                # not enough free GPU memory yet: wait, never start YuE2 into an OOM
+                time.sleep(10)
+                return
         if pend and self.holding():
             for sl in self.slots:                 # bring back crashed workers while a session is active
-                if not sl.alive() and not sl.disabled and (not sl.restarts or time.time() - sl.restarts[-1] > 20):
+                if not sl.alive() and not sl.disabled and (not sl.restarts or time.time() - sl.restarts[-1] > 20) and \
+                        (gpu_free_mib(sl.index) or 0) < VRAM_START_MIB:      # only onto a card with room (no OOM on start)
                     self.heal(sl, "worker process is not running")
         # hand queued jobs to idle, loaded slots
         for sl in self.slots:
@@ -656,9 +715,20 @@ class Worker(threading.Thread):
                         if "status" in data:
                             save_job(sl.job)
                     elif kind == "finished":
-                        save_job(sl.job); done = sl.job; sl.job = None
-                        self.last_activity = time.time(); self.finished(done)
+                        done = sl.job; sl.job = None
+                        self.last_activity = time.time()
                         err = done.get("error") or ""
+                        if done["status"] == "failed" and "out of memory" in err.lower() and done.get("oom_retries", 0) < OOM_RETRIES:
+                            # another program grabbed the card: requeue the take and restart YuE2 once memory is free
+                            log(f"{done['id']} ran out of GPU memory on {sl.device} (held by: {holders_text(sl.index)}); "
+                                f"retry {done.get('oom_retries', 0) + 1}/{OOM_RETRIES}")
+                            with lock:
+                                done.update(status="queued", stage="Waiting for GPU memory (retrying)", error=None, started=None,
+                                            finished=None, progress={}, device=None, oom_retries=done.get("oom_retries", 0) + 1)
+                            save_job(done)
+                            sl.stop()                     # a fresh process, started only after the memory check in acquire()
+                            continue
+                        save_job(done); self.finished(done)
                         sl.fails = sl.fails + 1 if done["status"] == "failed" else 0
                         if "DEVICE_LOST" in err or "level_zero backend failed" in err or sl.fails >= 3:
                             self.heal(sl, err or f"{sl.fails} failures in a row")
@@ -686,7 +756,7 @@ class Worker(threading.Thread):
     def wait_vram(self, index, below_mib, timeout, what):
         for _ in range(timeout):
             used = gpu_free_mib(index)
-            if used is not None and used < below_mib:
+            if used is None or used < below_mib:      # None: this card can't be measured -> don't block on it
                 return True
             time.sleep(1)
         log(f"timeout waiting for {what} on xpu:{index}; VRAM used {gpu_free_mib(index)} MiB")
@@ -707,14 +777,25 @@ class Worker(threading.Thread):
         if gpu_priority() == "radio":
             free_comfy_if_idle()
         self.set_gpu("switching", "Waiting for GPU memory…")
-        for sl in self.slots:
-            self.wait_vram(sl.index, 16 * 1024, 120, "the LLM to free GPU memory")
+        short = [sl for sl in self.slots if not sl.disabled and not self.wait_vram(sl.index, VRAM_START_MIB, 60, "GPU memory to free up")]
+        if short:
+            free_comfy_if_idle()                  # an idle ComfyUI keeps its models on the card: ask it to let go, whatever the priority
+            unload_ollama_gpu_models()
+            unload_radio_writers()                # the radio's own GPU lyricist never outranks the radio
+            short = [sl for sl in short if not self.wait_vram(sl.index, VRAM_START_MIB, 30, "GPU memory to free up")]
+        if short and len(short) == len([sl for sl in self.slots if not sl.disabled]):
+            who = holders_text(short[0].index)
+            log(f"not starting YuE2: GPU memory still in use ({who}); waiting")
+            self.set_gpu("waiting", f"Waiting for GPU memory — in use by {who}")
+            return False
+        for sl in short:                          # multi-GPU: start on the cards that have room, retry the others later
+            log(f"skipping {sl.device} for now: memory in use ({holders_text(sl.index)})")
         self.set_gpu("switching", "Loading YuE2…")
         if all(sl.disabled for sl in self.slots):
             for sl in self.slots:
                 sl.disabled = False; sl.restarts = []
         for sl in self.slots:
-            if not sl.alive() and not sl.disabled:
+            if not sl.alive() and not sl.disabled and sl not in short:
                 sl.start()
         t0 = time.time()
         while not any(sl.ready for sl in self.slots) and time.time() - t0 < 300:
@@ -722,6 +803,7 @@ class Worker(threading.Thread):
             if not self.holding():
                 raise RuntimeError("Could not start YuE2 on any GPU")
         self.set_gpu("studio", "YuE2 loaded")
+        return True
 
     def release(self):
         self.set_gpu("switching", "Returning the GPUs to the LLM…")
