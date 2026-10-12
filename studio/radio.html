@@ -417,6 +417,7 @@ textarea { resize: vertical; max-height: 85vh; }
 
 <div class="asst" id="asst" role="dialog" aria-modal="false" aria-labelledby="asstTitle" hidden>
   <div class="ah"><strong id="asstTitle">💬 Assistant</strong><span class="small muted" id="asstWho"></span>
+    <button data-b70-brain></button>
     <button class="x" id="asstNew" title="Start a new conversation">New</button>
     <button class="x" id="asstClose" title="Close" aria-label="Close the assistant">✕</button></div>
   <div class="ab" id="asstLog" aria-live="polite"></div>
@@ -1300,7 +1301,7 @@ $("asstForm").onsubmit = async (e) => {
   A.log.push({who: "me", text});
   const reply = {who: "ai", text: "", tools: []}; A.log.push(reply); asstDraw();
   try {
-    const r = await fetch("/api/assistant/chat", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({message: text, previous: A.prev})});
+    const r = await fetch("/api/assistant/chat", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({message: text, previous: A.prev, model: window.b70Brain ? b70Brain() : "agi"})});
     if (!r.ok) { const j = await r.json().catch(() => ({})); if (r.status === 403) asstCheck(); throw new Error(j.error || r.statusText); }
     const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "";
     for (;;) {
