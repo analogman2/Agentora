@@ -199,6 +199,10 @@ pre.ly { white-space: pre-wrap; font: 14px/1.7 system-ui, sans-serif; margin: 10
 .side .meter { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin: 8px 0 4px; }
 .side .meter i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s; }
 .side .links { display: flex; flex-direction: column; gap: 6px; }
+.side .meter i.warn { background: var(--amber, #d99a1e); } .side .meter i.full { background: var(--red, #d33); }
+.diskparts { list-style: none; margin: 6px 0 0; padding: 0; font-size: 12px; color: var(--muted); }
+.diskparts li { display: flex; justify-content: space-between; gap: 8px; padding: 1px 0; }
+.diskparts li b { font-weight: 500; color: var(--text); white-space: nowrap; }
 .prio { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .prio button { font-size: 13px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
 .prio button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
@@ -370,6 +374,10 @@ textarea { resize: vertical; max-height: 85vh; }
       <div class="small" style="margin:10px 0 4px;font-weight:600" id="prioLbl">Priority</div>
       <div class="prio" id="prio" role="group" aria-labelledby="prioLbl"></div>
       <div class="small muted" id="prioNote"></div></section>
+    <section class="card"><h3>Disk</h3>
+      <div class="meter" role="meter" aria-label="Disk space used" aria-valuemin="0" aria-valuemax="100" id="diskMeter"><i id="diskBar"></i></div>
+      <div class="small muted" id="diskText">—</div>
+      <ul class="diskparts" id="diskParts"></ul></section>
     <section class="card"><h3>Assistant</h3>
       <div class="small muted" style="margin-bottom:8px">Hermes, the local AI agent: ask it to change stations, rate songs, make pictures and videos, or check on this machine.</div>
       <div class="links"><button class="btn" id="asstOpen">💬 Open assistant</button>
@@ -1215,6 +1223,19 @@ function drawPrio(d) {
 }
 async function loadPrio() { try { drawPrio(await api("/api/gpu/priority")); } catch (e) {} }
 loadPrio(); setInterval(() => { if (!document.hidden) loadPrio(); }, 15000);
+
+// ---------- disk usage (side panel)
+const diskSize = (n) => n >= 2 ** 40 ? (n / 2 ** 40).toFixed(2) + " TB" : n >= 2 ** 30 ? (n / 2 ** 30).toFixed(n >= 100 * 2 ** 30 ? 0 : 1) + " GB" : Math.round(n / 2 ** 20) + " MB";
+async function loadDisk() {
+  try {
+    const d = await api("/api/disk"), pct = 100 * d.used / d.total, low = d.free < 15 * 2 ** 30;
+    $("diskBar").style.width = pct.toFixed(1) + "%"; $("diskBar").className = low ? "full" : pct > 85 ? "warn" : "";
+    $("diskMeter").setAttribute("aria-valuenow", Math.round(pct));
+    $("diskText").textContent = `${diskSize(d.free)} free of ${diskSize(d.total)}` + (low ? " · almost full" : "");
+    $("diskParts").innerHTML = d.parts.filter(p => p.bytes > 0).sort((a, b) => b.bytes - a.bytes).map(p => `<li><span>${esc(p.label)}</span><b>${diskSize(p.bytes)}</b></li>`).join("");
+  } catch (e) {}
+}
+loadDisk(); setInterval(() => { if (!document.hidden) loadDisk(); }, 60000);
 </script>
 </body>
 </html>

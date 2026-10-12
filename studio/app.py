@@ -85,6 +85,41 @@ def set_gpu_priority(v):
     return {"priority": v, "choices": PRIORITIES}
 
 
+# ---- disk usage for the side panel (same folders the Image & Video Studio reports)
+DISK_PARTS = [("ComfyUI models", Path.home() / "ComfyUI" / "models"), ("Chat models (Ollama)", Path("/usr/share/ollama/.ollama/models")),
+              ("Creations", Path.home() / "ComfyUI" / "output"), ("Radio songs", DATA)]
+_disk = {"t": 0, "parts": None}
+_disk_lock = threading.Lock()
+
+
+def _tree_bytes(root):
+    total, stack = 0, [str(root)]
+    while stack:
+        try:
+            with os.scandir(stack.pop()) as it:
+                for e in it:
+                    try:
+                        if e.is_dir(follow_symlinks=False):
+                            stack.append(e.path)
+                        elif e.is_file(follow_symlinks=False):
+                            total += e.stat(follow_symlinks=False).st_blocks * 512
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+    return total
+
+
+def disk_view():
+    du = shutil.disk_usage(DATA if DATA.exists() else Path.home())
+    if (_disk["parts"] is None or time.time() - _disk["t"] > 300) and _disk_lock.acquire(blocking=False):
+        try:
+            _disk.update(t=time.time(), parts=[{"label": l, "bytes": _tree_bytes(d)} for l, d in DISK_PARTS if d.exists()])
+        finally:
+            _disk_lock.release()
+    return {"total": du.total, "used": du.used, "free": du.free, "parts": _disk["parts"] or []}
+
+
 def _get_json(url, timeout=3):
     with urllib.request.urlopen(url, timeout=timeout) as r:
         return json.loads(r.read())
@@ -944,6 +979,8 @@ class Handler(BaseHTTPRequestHandler):
             import assistant
             if assistant.handle(self, "GET", path):
                 return
+        if path == "/api/disk":
+            return self.send(200, disk_view())
         if path == "/api/gpu/priority":
             return self.send(200, {"priority": gpu_priority(), "choices": PRIORITIES, "waiting": gpu["detail"] if gpu["owner"] == "waiting" else None})
         if path == "/api/state":
