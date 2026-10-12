@@ -107,6 +107,7 @@ def init(studio_module):
             create_station({"name": name, "kind": "text", "description": desc, "vocals": vocals})
     save_state()
     threading.Thread(target=spool_loop, daemon=True, name="radio-spool").start()
+    threading.Thread(target=bank_loop, daemon=True, name="radio-lyricist").start()
     threading.Thread(target=playout_loop, daemon=True, name="radio-playout").start()
 
 
@@ -436,7 +437,7 @@ def gpu_first(cands):
     return sorted(cands, key=lambda c: "gpu" not in c[2].lower())
 
 
-def write_spec(s, short=False, fast=False):
+def write_spec(s, short=False, fast=False, writers=None, like=None):
     want_inst = s["vocals"] == "instrumental" or (s["vocals"] == "mix" and random.random() < INSTRUMENTAL_SHARE)
     recent = [j for j in app.jobs.values() if j.get("station") == s["id"] and j.get("source") == "radio"
               and j.get("radio_status") in ("approved", "played", "rendering", "judging")]
@@ -461,9 +462,25 @@ def write_spec(s, short=False, fast=False):
         u.append(f"LYRICS THEME for every song on this station (keep the station's musical sound; this is about the words, "
                  f"title and mood): {s['theme']}")
     u.append("This song must be INSTRUMENTAL." if want_inst else "This song has vocals.")
-    if not want_inst:                                     # a concrete starting point, so songs aren't all the same anthem
+    story = None
+    if like:                                              # "More like this" from a song page
+        if not want_inst and like.get("lyrics"):
+            u.append(f"The listener LOVED this song and asked for more like it. Same world, feel, groove and lyrical voice; a NEW "
+                     f"story and a new title: {like['title']} [{like['style'][:160]}] — it opens: "
+                     + " / ".join(l for l in like["lyrics"].splitlines() if l.strip() and not l.startswith("["))[:300])
+        else:
+            u.append(f"The listener LOVED this song and asked for more like it: {like['title']} [{like['style'][:160]}]. Same feel, new song.")
+    elif not want_inst:                                   # a concrete starting point, so songs aren't all the same anthem
+        story = random.choice(STORY_SEEDS)
         u.append("Story idea for THIS song (adapt it to the station's world and lyrics theme, or invent something just as "
-                 "specific): " + random.choice(STORY_SEEDS) + ".")
+                 "specific): " + story + ".")
+    taste = (s.get("taste") or {}).get("notes")
+    if taste:
+        u.append("WHAT THIS LISTENER HAS TAUGHT THE STATION (follow it closely): " + taste)
+    loved = [j for j in liked_songs(s) if j.get("lyrics")][:2]
+    if loved and not want_inst:
+        u.append("Opening lines of songs the listener loved, as the voice to aim for (never copy them): "
+                 + "; ".join(f"{j['title']}: " + " / ".join(l for l in j["lyrics"].splitlines() if l.strip() and not l.startswith("["))[:160] for j in loved))
     if short:
         u.append("Make this one SHORT - it opens the broadcast: [Verse] of 4 lines, [Chorus] of 4 lines, [Outro] of 2 lines (10 sung lines total).")
     if recent:
@@ -482,7 +499,7 @@ def write_spec(s, short=False, fast=False):
         u.append("The listener DISLIKED these, steer away from them: " + "; ".join(f"{f['title']} [{f['style'][:80]}]" for f in dislikes))
     if skips:
         u.append("Skipped (mildly less of this): " + "; ".join(f"[{f['style'][:60]}]" for f in skips))
-    cands = gpu_first(llm_candidates()) if fast else llm_candidates()
+    cands = writers or (gpu_first(llm_candidates()) if fast else llm_candidates())
     for base, model, label in [c for c in cands for _ in range(3)]:     # each server gets two retries
         if not state["on"]:
             break
@@ -510,9 +527,9 @@ def write_spec(s, short=False, fast=False):
                 u.append(f"IMPORTANT: your title '{title}' repeats words from recent titles. Write a NEW song with a "
                          "completely different title and topic.")
                 raise ValueError(f"title '{title}' repeats recent titles; asking again")
-            if not inst and lyrics.strip() and "gpu" not in label.lower():   # editor pass (the small GPU model edits badly: skip)
+            if not inst and lyrics.strip() and "fallback" not in label.lower():   # editor pass (the small fallback model edits badly: skip)
                 lyrics, title = edit_lyrics(s, title, style, lyrics, base, model, label)
-            return {"title": title[:80], "style": style, "instrumental": inst, "lyrics": lyrics if not inst else "", "writer": label}
+            return {"title": title[:80], "style": style, "instrumental": inst, "lyrics": lyrics if not inst else "", "writer": label, "story": story}
         except Exception as e:
             app.log(f"radio: spec writer {label} failed ({e}); trying the next one")
     words = s["description"] or profile_text(s)
@@ -570,6 +587,121 @@ def edit_lyrics(s, title, style, lyrics, base, model, label):
     return best
 
 
+LYRICIST = ("http://localhost:11434/v1", "qwen3.6-lyricist", "Qwen 3.6 27B (GPU lyricist)")
+BANK_SIZE = 3
+bank_writing = threading.Event()        # the worker waits for this before loading YuE2
+
+
+def lyricist_may_run():
+    """The 27B lyricist needs most of the card: only when nothing else is on it."""
+    if app.gpu["owner"] in ("studio", "switching", "waiting") or art.inflight or app.comfy_busy() or app.assistant_on_gpu():
+        return False
+    used = app.gpu_free_mib(0)
+    return used is not None and used < 6000
+
+
+def bank_loop():
+    """Fill the current station's lyric bank with the GPU lyricist whenever the card is free."""
+    while True:
+        time.sleep(20)
+        try:
+            sid = state["station"]
+            if not state["on"] or sid not in stations:
+                continue
+            s = stations[sid]
+            if len(s.get("bank") or []) >= BANK_SIZE or not lyricist_may_run():
+                continue
+            bank_writing.set()
+            try:
+                t0 = time.time()
+                spec = write_spec(s, writers=[LYRICIST])
+            finally:
+                bank_writing.clear()
+                try:                                      # give the card straight back
+                    urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:11434/api/generate",
+                                           json.dumps({"model": LYRICIST[1], "keep_alive": 0}).encode(), {"Content-Type": "application/json"}), timeout=30).read()
+                except Exception:
+                    pass
+            if spec.get("writer") == LYRICIST[2]:
+                with lock:
+                    s.setdefault("bank", []).append(spec | {"banked": time.time()})
+                    save_station(s)
+                app.log(f"radio: lyricist banked {spec['title']!r} for {s['name']} in {time.time() - t0:.0f}s")
+        except Exception:
+            bank_writing.clear()
+            app.log("radio bank error:", traceback.format_exc())
+
+
+def liked_songs(s):
+    """Songs on this station the listener thumbed up or saved to the playlist, newest first."""
+    keep = {f["track"] for f in s.get("feedback", []) if f["kind"] == "keep"}
+    with app.lock:
+        songs = [j for j in app.jobs.values() if j.get("station") == s["id"] and j.get("source") == "radio"
+                 and (j["id"] in keep or j.get("playlist_at"))]
+    return sorted(songs, key=lambda j: -(j.get("playlist_at") or j.get("finished") or 0))
+
+
+TASTE_SYSTEM = """You read what one radio listener liked and disliked on a station and write a short brief for the station's
+songwriter. Be concrete: tempos, instruments, vocal types, moods, topics, kinds of lyrics and storytelling. Three lines exactly:
+More of: ...
+Less of: ...
+Lyrics: ...
+At most 90 words in total. No preamble."""
+
+
+def update_taste(sid):
+    """Rewrite the station's taste notes from thumbs (and playlist saves). Runs in a thread after feedback."""
+    s = stations.get(sid)
+    if not s:
+        return
+    with app.lock:
+        by_id = {j["id"]: j for j in app.jobs.values() if j.get("station") == sid}
+    loved = liked_songs(s)[:8]
+    disliked = [by_id[f["track"]] for f in s.get("feedback", []) if f["kind"] == "dislike" and f["track"] in by_id][-6:]
+    skipped = [by_id[f["track"]] for f in s.get("feedback", []) if f["kind"] == "skip" and f["track"] in by_id][-4:]
+    if len(loved) + len(disliked) < 2:
+        return
+    line = lambda j: f"- {j['title']} [{j['style'][:110]}] " + " / ".join(l for l in (j.get("lyrics") or "").splitlines() if l.strip() and not l.startswith("["))[:140]
+    ask = (f"Station: {s['name']} — {s.get('description') or ''}\nLIKED (thumbs up or saved):\n" + ("\n".join(map(line, loved)) or "-")
+           + "\nDISLIKED:\n" + ("\n".join(map(line, disliked)) or "-") + "\nSKIPPED (mild):\n" + ("\n".join(map(line, skipped)) or "-"))
+    for base, model, label in gpu_first(llm_candidates()):
+        try:
+            body = {"model": model, "temperature": 0.3, "max_tokens": 300, "chat_template_kwargs": {"enable_thinking": False},
+                    "messages": [{"role": "system", "content": TASTE_SYSTEM}, {"role": "user", "content": ask}], **app.LLM_EXTRA}
+            r = json.loads(urllib.request.urlopen(urllib.request.Request(base + "/chat/completions", json.dumps(body).encode(),
+                           {"Content-Type": "application/json"}), timeout=120).read())
+            notes = r["choices"][0]["message"]["content"].strip()[:900]
+            if "More of" in notes or "Less of" in notes:
+                with lock:
+                    s["taste"] = {"notes": notes, "updated": time.time(), "from": len(loved) + len(disliked)}
+                    save_station(s)
+                app.log(f"radio: taste notes updated for {s['name']} from {len(loved)} likes / {len(disliked)} dislikes")
+                return
+        except Exception as e:
+            app.log(f"radio: taste notes ({label}) failed: {e}")
+
+
+def forget_taste(sid):
+    s = stations.get(sid)
+    if not s:
+        raise app.BadRequest("No such station")
+    with lock:
+        s["taste"] = None
+        s["feedback"] = []
+        save_station(s)
+    return {"ok": True}
+
+
+def track_details(tid):
+    with app.lock:
+        j = app.jobs.get(tid)
+    if not j or j.get("source") != "radio":
+        raise app.BadRequest("No such song")
+    return track_view(j) | {"critic": j.get("critic"), "writer": j.get("spec_writer"), "story": j.get("story"), "created": j.get("created"),
+                            "approved_at": j.get("approved_at"), "airings": j.get("airings", 0), "status": j.get("radio_status"),
+                            "requested": bool(j.get("requested")), "liked_from": j.get("liked_from")}
+
+
 # ----------------------------------------------------------------------------- spool
 
 def station_tracks(sid, statuses=("approved",)):
@@ -623,7 +755,7 @@ def spool_loop():
             app.log("radio spool error:", traceback.format_exc())
 
 
-def request_song(sid):
+def request_song(sid, like=None):
     """🎵 Create a song now: write and record one song for this station straight away, whatever the radio is playing."""
     if sid not in stations:
         raise app.BadRequest("No such station")
@@ -634,11 +766,17 @@ def request_song(sid):
             raise app.BadRequest("Three songs for this station are already on the way")
         requested[sid] = requested.get(sid, 0) + 1
         writing[sid] = writing.get(sid, 0) + 1
-    threading.Thread(target=produce, args=(sid, True), daemon=True).start()
-    return {"ok": True}
+    lj = None
+    if like:
+        with app.lock:
+            lj = dict(app.jobs.get(like) or {})
+        if not lj:
+            raise app.BadRequest("No such song")
+    threading.Thread(target=produce, args=(sid, True, lj), daemon=True).start()
+    return {"ok": True, "banked": bool(stations[sid].get("bank")) and not lj}
 
 
-def produce(sid, on_request=False):
+def produce(sid, on_request=False, like=None):
     try:
         s = stations.get(sid)
         if not s:
@@ -649,7 +787,19 @@ def produce(sid, on_request=False):
         ready = len(station_tracks(sid, ("approved",)))
         short = not busy and not ready and writing.get(sid, 0) <= 1 and not on_request
         takes = TAKES if ready >= 2 else 1      # spool running low: one take, so the broadcast never runs dry
-        spec = write_spec(s, short=short)              # quality over speed: the big songwriter + editor, requests too
+        spec = None
+        if not short and not like and s.get("bank"):     # a song the GPU lyricist wrote ahead of time
+            with lock:
+                spec = s["bank"].pop(0) if s.get("bank") else None
+                save_station(s)
+            recent_titles = [j["title"] for j in sorted((j for j in app.jobs.values() if j.get("station") == sid and j.get("source") == "radio"),
+                                                        key=lambda j: -j["created"])[:12]]
+            if spec and similar_title(spec["title"], recent_titles, last=recent_titles[:5]):
+                spec = None                               # too close to something just played: write a fresh one
+            if spec:
+                app.log(f"radio: using banked song {spec['title']!r} ({spec['writer']})")
+        if not spec:
+            spec = write_spec(s, short=short, like=like)  # quality over speed: the big songwriter + editor, requests too
         if not on_request and (not state["on"] or state["station"] != sid):
             app.log("radio: discarding a spec written after the radio was switched off / retuned")
             return
@@ -660,7 +810,8 @@ def produce(sid, on_request=False):
         if not spec["instrumental"] and not spec["lyrics"].strip():
             body["mode"] = "instrumental"
         app.new_jobs(body, extra={"source": "radio", "station": sid, "priority": 0 if on_request else 1, "radio_status": "rendering",
-                                  "spec_writer": spec["writer"], **({"requested": True} if on_request else {})})
+                                  "spec_writer": spec["writer"], "story": spec.get("story"), **({"liked_from": like.get("id")} if like else {}),
+                                  **({"requested": True} if on_request else {})})
         with lock:
             s["stats"]["generated"] += 1; save_station(s)
     except Exception:
@@ -1105,7 +1256,8 @@ def api_state(listener=None):
         st = []
         for s in sorted(stations.values(), key=lambda s: s["created"]):
             st.append({k: s.get(k) for k in ("id", "name", "kind", "description", "vocals", "language", "theme", "stats", "analysis")} |
-                      {"art": art.stamp(art.station_path(s["id"])), "asked": requested.get(s["id"], 0), "ready": len(station_tracks(s["id"])), "inflight": inflight(s["id"]),
+                      {"art": art.stamp(art.station_path(s["id"])), "asked": requested.get(s["id"], 0),
+                       "taste": (s.get("taste") or {}).get("notes"), "banked": len(s.get("bank") or []), "ready": len(station_tracks(s["id"])), "inflight": inflight(s["id"]),
                        "problem": (backoff[s["id"]]["reason"] + f" — retrying in {int(backoff[s['id']]['until'] - time.time())}s")
                                   if s["id"] in backoff and time.time() < backoff[s["id"]]["until"] else None,
                        "profile": {k: v for k, v in (s.get("profile") or {}).items() if k in ("tracks", "top", "bpm_median", "bpm_range", "keys", "vocal_share")} or None,
@@ -1224,6 +1376,8 @@ def feedback(track_id, kind):
             save_station(s)
     j["radio_feedback"] = None if kind == "clear" else kind
     app.save_job(j)
+    if s and kind in ("keep", "dislike", "clear"):
+        threading.Thread(target=update_taste, args=(s["id"],), daemon=True).start()
     return {"ok": True}
 
 
@@ -1300,6 +1454,8 @@ def set_playlist(track_id, on):
             raise app.BadRequest("No such radio track")
         j["playlist_at"] = time.time() if on else None
         app.save_job(j)
+    if j.get("station") in stations:                       # a saved song counts as a like
+        threading.Thread(target=update_taste, args=(j["station"],), daemon=True).start()
     return {"ok": True, "in_playlist": on}
 
 
@@ -1545,7 +1701,13 @@ def handle(h, method, path):
             return h.send(200, f.read_bytes(), "image/jpeg", {"Cache-Control": "private, max-age=604800"}) or True
         m = re.fullmatch(r"/api/radio/stations/([\w]+)/song", path)
         if method == "POST" and m:
-            return h.send(200, request_song(m.group(1))) or True
+            return h.send(200, request_song(m.group(1), (h.body() or {}).get("like"))) or True
+        m = re.fullmatch(r"/api/radio/stations/([\w]+)/taste", path)
+        if method == "DELETE" and m:
+            return h.send(200, forget_taste(m.group(1))) or True
+        m = re.fullmatch(r"/api/radio/tracks/([\w-]+)", path)
+        if method == "GET" and m:
+            return h.send(200, track_details(m.group(1))) or True
         if method == "POST" and path == "/api/radio/art":
             b = h.body()
             return h.send(200, art.request("station", b["station"]) if b.get("station") else art.request("song", str(b.get("track") or ""))) or True

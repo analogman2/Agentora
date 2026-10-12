@@ -127,7 +127,7 @@ def _get_json(url, timeout=3):
 
 def radio_writer_models():
     """The radio's own songwriter models (settings keep LYRICS_LLMS current); these never count as the assistant."""
-    names = {m for _, m, _ in LYRICS_LLMS if m}
+    names = {m for _, m, _ in LYRICS_LLMS if m} | {"qwen3.6-lyricist"}       # the GPU lyricist is the radio's too
     return names | {m + ":latest" for m in names if ":" not in m}       # Ollama reports untagged names as :latest
 
 
@@ -693,6 +693,11 @@ class Worker(threading.Thread):
         return False
 
     def acquire(self):
+        import radio
+        t0 = time.time()
+        while radio.bank_writing.is_set() and time.time() - t0 < 300:      # let the GPU lyricist finish its song first
+            self.set_gpu("switching", "Waiting for the lyricist to finish a song…")
+            time.sleep(2)
         if llm_active():
             self.set_gpu("switching", "Pausing the LLM to free the GPUs…")
             log("stopping", LLM_UNIT)

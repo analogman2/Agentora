@@ -98,7 +98,8 @@ img { display: block; }
                   color: #fff; opacity: 0; transition: opacity .15s; }
 .row:hover .thumb .pv, .row.previewing .thumb .pv { opacity: 1; }
 .row .tx { flex: 1; min-width: 0; }
-.row .tx .a { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .tx .a { display: block; color: inherit; text-decoration: none; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .tx a.a:hover { text-decoration: underline; }
 .row .tx .b { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row .fb { width: 20px; text-align: center; flex: none; font-size: 14px; }
 .row .dur { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; flex: none; width: 44px; text-align: right; }
@@ -125,6 +126,19 @@ img { display: block; }
 .np .acts { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .np details { margin-top: 22px; max-width: 560px; }
 .np details summary { cursor: pointer; color: var(--muted); }
+.songpage { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 40px; align-items: start; }
+.songpage .cover img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; box-shadow: var(--shadow); display: block; }
+.songpage .st { color: var(--accent); text-decoration: none; font-weight: 600; font-size: 14px; }
+.songpage h1 { margin: 6px 0 6px; font-size: 32px; line-height: 1.15; }
+.songpage .style { color: var(--muted); font-size: 14px; }
+.songpage .acts { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.songpage .facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 14px; margin: 0; }
+.songpage .facts dt { color: var(--muted); } .songpage .facts dd { margin: 0; }
+pre.songly { max-height: none; font-size: 15px; }
+.taste { margin-top: 16px; text-align: left; }
+.taste pre { white-space: pre-wrap; font: 13px/1.5 system-ui, sans-serif; background: var(--soft); border-radius: 8px; padding: 10px 12px; margin: 6px 0; }
+.taste .btn { font-size: 12px; padding: 3px 10px; }
+@media (max-width: 760px) { .songpage { grid-template-columns: 1fr; gap: 18px; } .songpage .cover { max-width: 320px; } }
 pre.ly { white-space: pre-wrap; font: 14px/1.7 system-ui, sans-serif; margin: 10px 0 0; max-height: 360px; overflow: auto; }
 .status { margin-top: 18px; color: var(--muted); font-size: 14px; min-height: 1.5em; }
 @media (max-width: 760px) { .np { grid-template-columns: 1fr; gap: 22px; min-height: 0; } .np .cover { max-width: 360px; margin: 0 auto; } }
@@ -706,9 +720,9 @@ $("powerBtn").onclick = async () => {
 const view = {tab: "now", sub: "playlist", id: null, q: ""};
 function route() {
   const [tab, arg] = decodeURIComponent(location.hash.slice(1) || "now").split("/");
-  view.tab = ["now", "collection", "browse", "station", "search"].includes(tab) ? tab : "now";
+  view.tab = ["now", "collection", "browse", "station", "search", "song"].includes(tab) ? tab : "now";
   if (view.tab === "collection") view.sub = ["playlist", "history", "stations"].includes(arg) ? arg : store.get("sub", "playlist");
-  if (view.tab === "station") view.id = arg;
+  if (view.tab === "station" || view.tab === "song") view.id = arg;
   if (view.tab === "search") view.q = arg || "";
   document.querySelectorAll(".tabs a").forEach(a => a.classList.toggle("on", a.dataset.tab === view.tab || (view.tab === "station" && a.dataset.tab === "browse")));
   if (view.tab !== "search") $("q").value = "";
@@ -726,9 +740,42 @@ async function renderView() {
   else if (view.tab === "station") html = await stationView(view.id);
   else if (view.tab === "collection") html = await collectionView();
   else if (view.tab === "search") html = await searchView(view.q);
+  else if (view.tab === "song") html = await songView(view.id);
   if (seq !== renderSeq) return;
   page.innerHTML = html;
   if (view.tab === "now") status(statusText);
+}
+// ---------- song page: cover, lyrics, story, scores and actions for one song
+async function songView(id) {
+  let t;
+  try { t = await api(`/api/radio/tracks/${encodeURIComponent(id)}`); } catch (e) { return `<p class="empty">${esc(e.message)}</p>`; }
+  const st = stOf(t.station), c = t.critic || {};
+  const facts = [
+    t.story ? ["Story idea", t.story] : null,
+    t.writer ? ["Written by", t.writer] : null,
+    c.score != null ? ["Quality score", `${c.score.toFixed(3)}${c.bar > 0 ? ` (station bar ${c.bar.toFixed(3)})` : ""}${c.takes ? ` · best of ${c.takes} take${c.takes === 1 ? "" : "s"}` : ""}`] : null,
+    t.seconds ? ["Length", mmss(t.seconds)] : null,
+    t.played_at ? ["Last played", whenText(t.played_at) + (t.airings > 1 ? ` · aired ${t.airings} times` : "")] : ["Status", t.status === "approved" ? "Ready, not aired yet" : t.status || ""],
+    t.requested ? ["Made", t.liked_from ? "On request — more like another song" : "On request"] : null,
+  ].filter(Boolean);
+  return `<section class="songpage">
+    <div class="cover"><img src="${trackArt(t)}" alt=""></div>
+    <div class="info">
+      ${st ? `<a class="st" href="#station/${esc(st.id)}">${esc(st.name)}</a>` : ""}
+      <h1>${esc(t.title)}</h1>
+      <div class="style">${esc(t.style)}</div>
+      <div class="acts">
+        <button class="pill primary" data-act="song-play" data-audio="${esc(t.audio)}">▶ Preview</button>
+        <button class="pill ${t.feedback === "keep" ? "primary" : ""}" data-act="song-fb" data-kind="${t.feedback === "keep" ? "clear" : "keep"}" title="Make more like this" aria-pressed="${t.feedback === "keep"}">👍</button>
+        <button class="pill ${t.feedback === "dislike" ? "primary" : ""}" data-act="song-fb" data-kind="${t.feedback === "dislike" ? "clear" : "dislike"}" title="Fewer like this" aria-pressed="${t.feedback === "dislike"}">👎</button>
+        <button class="pill ${t.in_playlist ? "primary" : ""}" data-act="song-plus" data-on="${t.in_playlist ? 1 : 0}">${t.in_playlist ? "✓ In my playlist" : "+ Playlist"}</button>
+        ${st ? `<button class="pill" data-act="song-more" data-station="${esc(st.id)}" title="Write and record a new song in the spirit of this one">🎵 More like this</button>` : ""}
+        <button class="pill" data-act="song-art" title="Draw a new cover">🎨 New cover</button>
+        <a class="pill" href="${esc(t.audio)}?download=1">⤓ Download</a>
+      </div>
+      <dl class="facts">${facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>
+      ${t.lyrics ? `<p class="label" style="margin-top:18px">Lyrics</p><pre class="ly songly">${esc(t.lyrics)}</pre>` : `<p class="small muted" style="margin-top:18px">Instrumental</p>`}
+    </div></section>`;
 }
 function stationTile(s) {
   const air = R.on && R.station === s.id;
@@ -742,7 +789,7 @@ function songRow(t, opts = {}) {
   const sub = [opts.when, t.station_name, opts.extra, t.style].filter(Boolean).join(" · ");
   return `<li class="row" data-id="${esc(t.id)}" data-audio="${esc(t.audio)}">
     <div class="thumb" data-act="preview" title="Preview this song"><img src="${trackArt(t)}" alt="" loading="lazy"><span class="pv">▶</span></div>
-    <div class="tx"><div class="a" title="${esc(t.title)}">${esc(t.title)}</div><div class="b" title="${esc(t.style)}">${esc(sub)}</div></div>
+    <div class="tx"><a class="a" href="#song/${esc(t.id)}" title="Open “${esc(t.title)}”">${esc(t.title)}</a><div class="b" title="${esc(t.style)}">${esc(sub)}</div></div>
     <span class="fb">${fb}</span><span class="dur">${t.seconds ? mmss(t.seconds) : ""}</span>
     <span class="acts"><button class="plus ${t.in_playlist ? "in" : ""}" data-act="plus" data-on="${t.in_playlist ? 1 : 0}" title="${t.in_playlist ? "In your playlist — click to remove" : "Add to my playlist"}" aria-label="${t.in_playlist ? "Remove from playlist" : "Add to playlist"}">${t.in_playlist ? "✓" : "+"}</button>
       <a class="dl" href="${esc(t.audio)}?download=1" title="Download MP3" aria-label="Download">⤓</a></span></li>`;
@@ -768,7 +815,7 @@ function nowView() {
     <div class="cover"><img src="${t ? trackArt(t) : stationArt(st)}" alt=""></div>
     <div>
       <a class="st" href="#station/${esc(st ? st.id : "")}">${esc(t ? (t.station_name || (st && st.name)) : st ? st.name : "")}${t && t.airing === "rerun" ? " · via Reruns" : ""}</a>
-      <h1>${t ? esc(t.title) : "Next song on the way…"}</h1>
+      <h1>${t ? `<a href="#song/${esc(t.id)}" style="color:inherit;text-decoration:none" title="Lyrics, story and details">${esc(t.title)}</a>` : "Next song on the way…"}</h1>
       <div class="style">${t ? esc(t.style) : ""}</div>
       <div class="meta">${chips.map(c => `<span class="chip">${esc(c)}</span>`).join("")}</div>
       <div class="acts">${t ? `<button class="pill ${t.in_playlist ? "primary" : ""}" data-act="np-plus">${t.in_playlist ? "✓ In my playlist" : "+ Add to my playlist"}</button>
@@ -799,6 +846,9 @@ async function stationView(id) {
         <button class="iconbtn bigplay" data-play="${esc(id)}" title="${playing ? "Playing" : "Play this station"}" aria-label="Play this station">${playing ? "<b>≋</b>" : '<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'}</button>
         <a class="iconbtn" href="/radio/stream.mp3" target="_blank" title="Open the live stream in another player" aria-label="Open stream">📡</a></div>
       ${air ? `<div class="chip" style="display:inline-block">On air now</div>` : `<div class="small muted">Playing it retunes the radio for everyone listening.</div>`}
+      ${id !== RERUNS ? `<div class="taste">${s.taste ? `<p class="label">What it has learned from you</p><pre>${esc(s.taste)}</pre>
+          <button class="btn" data-act="forget-taste" title="Clear these notes and the thumbs behind them">Forget</button>` : `<p class="small muted">Thumbs up, thumbs down and playlist saves teach this station what you like.</p>`}
+        ${s.banked ? `<p class="small muted">✍ ${s.banked} song${s.banked === 1 ? "" : "s"} pre-written by the GPU lyricist, ready to record</p>` : ""}</div>` : ""}
       ${id !== RERUNS ? `<div style="margin-top:14px"><button class="btn" data-act="make-song" title="Write and record a new song for this station right away">🎵 Create a song now</button>
         <div class="small muted" id="mkStat" role="status" style="margin-top:6px"></div></div>` : ""}
     </div>
@@ -855,6 +905,12 @@ $("page").addEventListener("click", async (e) => {
   if (act === "np-art" && current) { post("/api/radio/art", {track: current.id}).then(() => hint("Drawing a new cover — it appears in a minute or two (between songs).")).catch(e => hint(e.message)); return; }
   if (act === "preview" || act === "preview-feature") return preview(row ? row.dataset.audio : a.dataset.audio, row);
   if (act === "edit") return editStation(stOf(view.id));
+  if (act === "forget-taste") { if (!confirm("Forget what this station has learned from your thumbs?")) return; await api(`/api/radio/stations/${encodeURIComponent(view.id)}/taste`, {method: "DELETE"}).catch(e => toast(e.message)); await refresh(); renderView(); return; }
+  if (act === "song-fb") { await post("/api/radio/feedback", {track: view.id, kind: a.dataset.kind}).catch(e => toast(e.message)); toast(a.dataset.kind === "keep" ? "👍 Noted — the station learns from this." : a.dataset.kind === "dislike" ? "👎 Noted — fewer like this." : "Cleared."); renderView(); return; }
+  if (act === "song-plus") { try { await setPlaylist(view.id, a.dataset.on !== "1"); } catch (err) { toast(err.message); } renderView(); return; }
+  if (act === "song-art") { post("/api/radio/art", {track: view.id}).then(() => toast("Drawing a new cover — it appears in a minute or two.")).catch(e => toast(e.message)); return; }
+  if (act === "song-more") { post(`/api/radio/stations/${encodeURIComponent(a.dataset.station)}/song`, {like: view.id}).then(() => toast("Writing a new song in the spirit of this one — it's recorded next.")).catch(e => toast(e.message)); return; }
+  if (act === "song-play") return preview(a.dataset.audio, null);
   if (act === "make-song") {
     a.disabled = true;
     post(`/api/radio/stations/${encodeURIComponent(view.id)}/song`).then(() => { hint("Writing a new song for this station — it's recorded next, ahead of everything else."); refresh().then(updateMk); })
