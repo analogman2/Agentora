@@ -85,7 +85,7 @@ def init(studio_module):
         pass
     if os.environ.get("RADIO_AHEAD"):                 # songs to keep ready or in the making (overrides the saved value)
         state["target_ahead"] = int(os.environ["RADIO_AHEAD"])
-    import settings, sys
+    import settings
     settings.init(app, sys.modules[__name__])        # saved ⚙ settings win over env vars and built-ins
     # resume only after a quick service restart (studio was alive < 2 min ago); after a reboot the radio starts off
     state["on"] = bool(state.get("on")) and time.time() - (state.get("heartbeat") or 0) < 120 and state.get("station") is not None

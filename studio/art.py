@@ -6,7 +6,7 @@ Station art first (a new or changed station gets it between any two songs); song
 
 Station art: <station dir>/art.jpg     Song art: <song dir>/cover.jpg
 """
-import json, random, re, subprocess, tempfile, threading, time, urllib.parse, urllib.request
+import json, random, re, subprocess, tempfile, threading, time, urllib.error, urllib.parse, urllib.request
 from pathlib import Path
 
 import app
@@ -18,6 +18,7 @@ lock = threading.Lock()
 inflight = None                        # {"kind", "id", "prompt_id", "started"}
 failed = {}                            # "kind:id" -> when (tried again after an hour)
 forced = []                            # [("station"|"song", id)] asked for from the page: first in line
+comfy_down_until = 0                   # ComfyUI not answering (e.g. restarting): try again after this
 radio = None                           # the radio module (set by init)
 
 
@@ -165,7 +166,8 @@ def step(busy, pend):
             inflight = None
             _free()
         return inflight is not None
-    if busy or app.gpu_yield_reason():
+    global comfy_down_until
+    if busy or app.gpu_yield_reason() or time.time() < comfy_down_until:
         return False
     item = _wanted(songs_ok=not pend)
     if not item:
@@ -175,6 +177,13 @@ def step(busy, pend):
         r = _req("/prompt", {"prompt": _graph(prompt, random.randrange(2**48), f"radio_art/{kind}_{oid}"), "client_id": "radio-art"})
         inflight = {"kind": kind, "id": oid, "prompt_id": r["prompt_id"], "started": time.time()}
         return True
+    except urllib.error.URLError as e:
+        if not isinstance(e, urllib.error.HTTPError):    # ComfyUI isn't up (restarting): not this picture's fault
+            comfy_down_until = time.time() + 30
+            return False
+        failed[f"{kind}:{oid}"] = time.time()
+        app.log(f"art: ComfyUI didn't take the job ({e})")
+        return False
     except Exception as e:
         failed[f"{kind}:{oid}"] = time.time()
         app.log(f"art: ComfyUI didn't take the job ({e})")
