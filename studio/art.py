@@ -39,20 +39,49 @@ def _clean(text, n):
     return re.sub(r"\s+", " ", str(text or "")).strip()[:n]
 
 
+SCENE_SYSTEM = """You turn music into a single image idea for cover art. Describe ONE striking scene in 40-70 words: setting,
+objects, colours, light, texture, art style (painting, photo, illustration...). Strict rules: no names of any person, band, artist,
+song, album or station; no text, letters, signs, logos or writing of any kind; no real or recognisable people. Prefer places,
+objects, nature, abstract shapes or anonymous silhouettes over performers. Reply with the description only."""
+
+
+def _scene(about):
+    """A purely visual description (no names, no words) from the GPU songwriter, so the picture model has nothing to write."""
+    for base, model, label in radio.gpu_first(radio.llm_candidates()):
+        try:
+            body = {"model": model, "temperature": 0.9, "max_tokens": 200, "chat_template_kwargs": {"enable_thinking": False},
+                    "messages": [{"role": "system", "content": SCENE_SYSTEM}, {"role": "user", "content": about}], **app.LLM_EXTRA}
+            r = json.loads(urllib.request.urlopen(urllib.request.Request(base + "/chat/completions", json.dumps(body).encode(),
+                           {"Content-Type": "application/json"}), timeout=90).read())
+            text = _clean(r["choices"][0]["message"]["content"], 700).strip('"')
+            if len(text) > 40:
+                return text
+        except Exception as e:
+            app.log(f"art: scene from {label} failed ({e})")
+    return None
+
+
+def _no_names(text):
+    """Fallback: drop capitalised words (names) and quoted bits, keep the genre words."""
+    text = re.sub(r"[\"“”'‘’][^\"“”'‘’]{0,80}[\"“”'‘’]", " ", str(text or ""))
+    return _clean(re.sub(r"(?<![.!?]\s)(?<!^)\b[A-Z][\w/&-]*(?:\s+[A-Z][\w/&-]*)*", " ", text), 500)
+
+
+def _final(scene):
+    return f"{scene} Square album cover composition, rich colour, cinematic lighting, highly detailed, tasteful."
+
+
 def station_prompt(s):
-    theme = f" Its songs are about: {_clean(s.get('theme'), 300)}." if s.get("theme") else ""
-    return (f"Square cover art for a music radio station. The music: {_clean(s.get('description') or s.get('name'), 700)}.{theme} "
-            "An evocative illustrated scene that captures the genre and mood, rich colour, cinematic lighting, strong album-cover "
-            "composition, tasteful and safe for work. Absolutely no text, letters, words, logos or watermarks anywhere in the image.")
+    about = f"Music radio station. The music: {_clean(s.get('description') or s.get('name'), 700)}." + \
+            (f" Its songs are about: {_clean(s.get('theme'), 300)}." if s.get("theme") else "")
+    return _final(_scene(about) or f"An evocative scene for {_no_names(s.get('description') or 'music')}, atmospheric, no people.")
 
 
 def song_prompt(j):
     lines = [l.strip() for l in (j.get("lyrics") or "").splitlines() if l.strip() and not l.strip().startswith("[")][:8]
-    words = f" Imagery inspired by these lyrics: {_clean(' / '.join(lines), 500)}." if lines else ""
-    return (f"Square album cover art for a song. Music style: {_clean(j.get('style'), 400)}. The song's mood and story: "
-            f"{_clean(j.get('title'), 80)}.{words} A striking, original illustrated or photographic scene that fits the music, "
-            "rich colour, dramatic lighting, album-cover composition, tasteful and safe for work. "
-            "Absolutely no text, letters, words, titles, logos or watermarks anywhere in the image.")
+    about = f"A song. Style: {_clean(j.get('style'), 400)}. Title: {_clean(j.get('title'), 80)}." + \
+            (f" Lyrics: {_clean(' / '.join(lines), 500)}" if lines else " Instrumental.")
+    return _final(_scene(about) or f"An evocative scene for {_no_names(j.get('style'))}, atmospheric, no people.")
 
 
 def _graph(prompt, seed, prefix):
@@ -79,24 +108,24 @@ def _req(path, body=None, timeout=10):
 
 
 def _wanted(songs_ok):
-    """The next picture to make: (kind, id, prompt) or None."""
+    """The next picture to make: (kind, id, station or song) or None."""
     now = time.time()
     skip = lambda k: now - failed.get(k, 0) < 3600
     with lock:
         while forced:
             kind, oid = forced[0]
             if kind == "station" and oid in radio.stations:
-                return kind, oid, station_prompt(radio.stations[oid])
+                return kind, oid, radio.stations[oid]
             with app.lock:
                 j = app.jobs.get(oid)
             if kind == "song" and j:
-                return kind, oid, song_prompt(j)
+                return kind, oid, j
             forced.pop(0)
     if MODE == "off":
         return None
     for sid, s in list(radio.stations.items()):
         if (s.get("description") or s.get("name")) and not station_path(sid).exists() and not skip("station:" + sid):
-            return "station", sid, station_prompt(s)
+            return "station", sid, s
     if MODE != "stations and songs" or not songs_ok:
         return None
     with app.lock:
@@ -105,7 +134,7 @@ def _wanted(songs_ok):
     songs.sort(key=lambda j: (j.get("radio_status") != "approved", -(j.get("approved_at") or j.get("finished") or 0)))
     for j in songs[:SONG_BACKLOG]:
         if not song_path(j["id"]).exists() and not skip("song:" + j["id"]):
-            return "song", j["id"], song_prompt(j)
+            return "song", j["id"], j
     return None
 
 
@@ -172,7 +201,8 @@ def step(busy, pend):
     item = _wanted(songs_ok=not pend)
     if not item:
         return False
-    kind, oid, prompt = item
+    kind, oid, obj = item
+    prompt = station_prompt(obj) if kind == "station" else song_prompt(obj)     # a name-free scene (a couple of seconds)
     try:
         r = _req("/prompt", {"prompt": _graph(prompt, random.randrange(2**48), f"radio_art/{kind}_{oid}"), "client_id": "radio-art"})
         inflight = {"kind": kind, "id": oid, "prompt_id": r["prompt_id"], "started": time.time()}
