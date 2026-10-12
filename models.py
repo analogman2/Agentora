@@ -6,7 +6,7 @@ For every downloaded model <folder>/<name>.<ext> this writes:
   <folder>/<stem>.genstudio.json                 source, name, version, type, base model, trigger words, description, hashes
   <folder>/.previews/<stem>/N.<ext>              up to MAX_PREVIEWS example pictures/videos
 """
-import asyncio, html, json, re, time, uuid
+import asyncio, hashlib, html, json, re, time, uuid
 from pathlib import Path
 from urllib.parse import quote
 
@@ -91,7 +91,7 @@ async def civitai_search(query="", types="", sort="Most Downloaded", base="", ns
     for m in d.get("items", []):
         v = (m.get("modelVersions") or [{}])[0]
         imgs = [i for i in v.get("images", []) if nsfw or (i.get("nsfwLevel") or 1) <= 2]
-        out.append({"id": m["id"], "name": m.get("name"), "type": m.get("type"), "nsfw": m.get("nsfw"), "base": v.get("baseModel"),
+        out.append({"id": m["id"], "name": m.get("name"), "type": m.get("type"), "nsfw": m.get("nsfw"), "level": m.get("nsfwLevel"), "base": v.get("baseModel"),
                     "creator": (m.get("creator") or {}).get("username"), "downloads": (m.get("stats") or {}).get("downloadCount"),
                     "likes": (m.get("stats") or {}).get("thumbsUpCount"),
                     "image": _thumb(imgs[0]["url"]) if imgs else None, "image_type": imgs[0].get("type") if imgs else None})
@@ -120,7 +120,7 @@ async def civitai_model(model_id, nsfw=False):
                        "folder": civitai_folder(m.get("type"), v.get("baseModel"), f.get("type")),
                        "installed": bool(W.find_installed(f.get("name") or "", civitai_folder(m.get("type"), v.get("baseModel"), f.get("type"))))}
                       for f in v.get("files", []) if f.get("type") != "Training Data"]})
-    return {"id": m["id"], "name": m.get("name"), "type": m.get("type"), "nsfw": m.get("nsfw"), "tags": m.get("tags") or [],
+    return {"id": m["id"], "name": m.get("name"), "type": m.get("type"), "nsfw": m.get("nsfw"), "level": m.get("nsfwLevel"), "tags": m.get("tags") or [],
             "creator": (m.get("creator") or {}).get("username"), "stats": m.get("stats") or {}, "downloadable": m.get("type") not in NOT_MODELS,
             "description": plain_text(m.get("description")), "page": f"https://civitai.com/models/{m['id']}", "versions": versions}
 
@@ -296,3 +296,117 @@ def remove(folder, file):
         prev.rmdir()
     if (root / ".previews").is_dir() and not any((root / ".previews").iterdir()):
         (root / ".previews").rmdir()                  # last one gone: no empty folder left behind
+
+
+# ---------------------------------------------------------------- information for models downloaded elsewhere
+
+def _sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        while chunk := fh.read(8 << 20):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _known_sha(folder, rel):
+    try:
+        import ratings
+        return (ratings.ratings.get(f"{folder}/{rel}") or {}).get("sha256")
+    except Exception:
+        return None
+
+
+async def _civitai_meta(model_id, version_id, sha=None, name=None):
+    m = await civitai_model(model_id, nsfw=True)
+    v = next((v for v in m["versions"] if v["id"] == int(version_id)), None) or (m["versions"] or [None])[0]
+    if not v:
+        return None, []
+    f = next((f for f in v["files"] if sha and (f.get("sha256") or "").lower() == sha.lower()), None) or \
+        next((f for f in v["files"] if f["name"] == name), None) or (v["files"] or [{}])[0]
+    meta = {"source": "civitai", "page": f"{m['page']}?modelVersionId={v['id']}", "model": m["name"], "version": v["name"], "type": m["type"],
+            "base": v["base"], "trained_words": v["trained_words"], "creator": m["creator"], "description": m["description"],
+            "notes": v["notes"], "tags": m["tags"], "sha256": sha or f.get("sha256"), "nsfw": m["nsfw"], "level": m.get("level")}
+    return meta, v["images"]
+
+
+async def fetch_info(folder, rel, hint=None, step=None):
+    """Find information and example pictures for an installed model and save them like a Models-page download:
+    Civitai by the file's SHA-256 (or the Civitai link it came from), else Hugging Face by exact name and size."""
+    f = W.MODELS / folder / rel
+    if not f.is_file():
+        raise W.WorkflowError(f"{folder}/{rel} isn't installed")
+    stem, size = Path(rel).stem, f.stat().st_size
+    meta, images = None, []
+    url = (hint or {}).get("url") or ""
+    vid = re.search(r"civitai\.(?:com|green|red)/api/download/models/(\d+)", url)
+    if vid:
+        v = await W._json_get(f"https://civitai.com/api/v1/model-versions/{vid.group(1)}", {"User-Agent": "genstudio", **_civitai_headers()})
+        if v and v.get("modelId"):
+            meta, images = await _civitai_meta(v["modelId"], v["id"], name=Path(rel).name)
+    if not meta:
+        if step is not None:
+            step["detail"] = f"fingerprinting {Path(rel).name}"
+        sha = _known_sha(folder, rel) or await asyncio.get_running_loop().run_in_executor(None, _sha256, f)
+        v = await W._json_get(f"https://civitai.com/api/v1/model-versions/by-hash/{sha}", {"User-Agent": "genstudio", **_civitai_headers()})
+        if v and v.get("modelId"):
+            meta, images = await _civitai_meta(v["modelId"], v["id"], sha=sha, name=Path(rel).name)
+        else:
+            repo = re.match(r"https://huggingface\.co/([\w.-]+/[\w.-]+)/", url)
+            repo = repo.group(1) if repo else None
+            if not repo:                                    # same file name and size in a Hugging Face repo
+                for q in W._queries(Path(rel).name):
+                    hit = await W._hf_find(q, Path(rel).name)
+                    if hit and (not hit.get("size") or int(hit["size"]) == size):
+                        repo = hit["source"].split("· ", 1)[-1]
+                        break
+            if repo:
+                r = await hf_repo(repo)
+                meta = {"source": "huggingface", "page": r["page"], "model": repo, "version": rel, "type": "", "base": "", "trained_words": [],
+                        "creator": repo.split("/")[0], "description": r["readme"][:4000], "license": r["license"], "tags": r["tags"], "sha256": sha}
+                images = r["images"]
+            else:
+                meta = {"source": "unknown", "sha256": sha, "not_found": True}
+    if step is not None:
+        step["detail"] = f"saving pictures for {Path(rel).name}"
+    previews = await _save_previews(images, folder, stem) if images else []
+    meta.update(file=Path(rel).name, folder=folder, size=size, downloaded=f.stat().st_mtime, fetched=time.time(), previews=previews)
+    (f.parent / f"{stem}.genstudio.json").write_text(json.dumps(meta, indent=1))
+    return meta
+
+
+def _needs_info(m, force):
+    meta = m.get("meta")
+    return not m.get("link") and (force or not meta or (meta.get("not_found") and time.time() - (meta.get("fetched") or 0) > 7 * 86400))
+
+
+def start_fetch_all(force=False, only=None):
+    """A Models-page task: look up information for every installed model that has none (or `only` these)."""
+    todo = [m for m in installed() if (only and (m["folder"], m["file"]) in only) or (not only and _needs_info(m, force))]
+    tid = uuid.uuid4().hex[:10]
+    step = {"kind": "info", "label": "Model information", "status": "waiting", "done": 0, "total": len(todo), "detail": f"{len(todo)} models to look up"}
+    task = {"id": tid, "label": "Looking up model information", "steps": [step], "status": "running", "started": time.time(), "kind": "info"}
+    W.tasks[tid] = task; recent.append(tid); del recent[:-30]
+
+    async def go():
+        step["status"] = "running"
+        found = missing = 0
+        for m in todo:
+            try:
+                meta = await fetch_info(m["folder"], m["file"], step=step)
+                missing += bool(meta.get("not_found")); found += not meta.get("not_found")
+            except Exception as e:
+                W.log(f"model info: {m['folder']}/{m['file']}: {e}")
+                missing += 1
+            step["done"] += 1
+        step.update(status="done", detail=f"found information for {found} · {missing} not found on Civitai or Hugging Face")
+        task.update(status="done", finished=time.time())
+    asyncio.create_task(go())
+    return task
+
+
+async def after_workflow_download(folder, name, src):
+    """Hook for workflow installs: fetch the model's information right after its download finishes."""
+    try:
+        await fetch_info(folder, name, hint=src)
+    except Exception as e:
+        W.log(f"model info for {folder}/{name}: {e}")

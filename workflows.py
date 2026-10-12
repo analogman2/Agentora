@@ -1030,6 +1030,7 @@ async def _restart_comfy(step, comfy):
     raise WorkflowError("ComfyUI didn't come back after the restart")
 
 
+after_download = None                        # set by models.py: fetch a model's information after a workflow downloads it
 _downloading = {}                            # destination file -> future, while some install is downloading it
 _install_gate = None                         # one install task at a time; later ones wait their turn ("queued")
 
@@ -1083,6 +1084,8 @@ async def install(plan_, comfy, label):
                         await _download(s, s["url"], dest)
                     finally:
                         _downloading.pop(dest).set_result(None)
+                    if after_download:                     # its information and pictures, like a Models-page download
+                        asyncio.create_task(after_download(s["folder"], s["label"], {"url": s["url"]}))
             elif s["kind"] == "link":                      # same file, second folder: a link costs no disk space
                 dest = MODELS / s["folder"] / s["label"]
                 dest.parent.mkdir(parents=True, exist_ok=True)

@@ -13,6 +13,7 @@ from aiohttp import web
 from PIL import Image
 
 import auth
+import ratings as R
 import workflows as W
 import models as M
 
@@ -373,7 +374,7 @@ def lora_files():
     return {str(f.relative_to(root)) for f in root.rglob("*") if f.is_file() and f.suffix.lower() in (".safetensors", ".pt", ".ckpt", ".bin")} if root.exists() else set()
 
 
-def check_loras(raw):
+def check_loras(raw, admin=True):
     """[{"name", "strength"}] from the Create panel: installed files only, at most 6, strengths -4..4."""
     if not raw:
         return []
@@ -384,6 +385,8 @@ def check_loras(raw):
         name = str((l or {}).get("name") or "")
         if name not in have:
             raise web.HTTPBadRequest(text=f"LoRA not installed: {name or '(none chosen)'}")
+        if not admin and R.rating_of("loras", name) != "pg13":
+            raise web.HTTPForbidden(text=f"{name} isn't available on this account")
         try:
             strength = float(l.get("strength", 1))
         except (TypeError, ValueError):
@@ -398,10 +401,12 @@ async def list_loras(request):
     """Installed LoRAs with what the Models page knows about them (base model, trigger words)."""
     items = await asyncio.get_running_loop().run_in_executor(None, M.installed)
     by = {m["file"]: m for m in items if m["folder"] == "loras"}
+    admin = is_admin(request)
     return web.json_response({"loras": [{"name": n, "title": ((by.get(n) or {}).get("meta") or {}).get("model"),
                                          "base": ((by.get(n) or {}).get("meta") or {}).get("base"),
-                                         "words": (((by.get(n) or {}).get("meta") or {}).get("trained_words") or [])[:8]}
-                                        for n in sorted(lora_files(), key=str.lower)]})
+                                         "words": (((by.get(n) or {}).get("meta") or {}).get("trained_words") or [])[:8],
+                                         **({"rating": R.rating_of("loras", n)} if admin else {})}
+                                        for n in sorted(lora_files(), key=str.lower) if admin or R.rating_of("loras", n) == "pg13"]})
 
 
 async def wf_exact(request):
@@ -439,7 +444,7 @@ async def generate(request):
     if not prompt:
         raise web.HTTPBadRequest(text="Write a prompt first")
     count = max(1, min(int(body.get("count") or 1), 8 if kind == "image" else 4))
-    loras = check_loras(body.get("loras"))
+    loras = check_loras(body.get("loras"), is_admin(request))
     await prepare_gpu()
     fixed_seed = body.get("seed")
     created = []
@@ -674,6 +679,24 @@ async def on_startup(app):
     W.log = lambda *a: print(*a, flush=True)
     W.settings.update(hf_token=S["hf_token"], civitai_token=S["civitai_token"])
     app["watcher"] = asyncio.create_task(watch_comfy(app))
+    R.load()
+    W.after_download = M.after_workflow_download
+    app["ratings"] = asyncio.create_task(rate_models_forever())
+
+
+async def rate_models_forever():
+    """Keep content-model ratings current (new downloads get rated within minutes)."""
+    await asyncio.sleep(20)
+    while True:
+        try:
+            await R.refresh()
+        except Exception as e:
+            print(f"ratings: {e}", flush=True)
+        await asyncio.sleep(600)
+
+
+def is_admin(request):
+    return (request.get("user") or {}).get("role") == "admin"
 
 
 async def on_cleanup(app):
@@ -976,12 +999,20 @@ def my_recipe(request):
     return r
 
 
-def recipe_card(r, plan=None):
+def blocked_models(plan):
+    """Installed content models in a workflow that aren't rated PG-13 (non-admins can't run it)."""
+    return [m["name"] for m in plan.get("models", []) if m.get("installed") and not R.name_allowed(m.get("use") or m["name"])]
+
+
+def recipe_card(r, plan=None, admin=True):
     out = {k: r.get(k) for k in ("id", "name", "kind", "thumb", "created", "source")}
     out["saved"] = r.get("saved_values") or {}
     if plan:
         out["plan"] = {k: plan.get(k) for k in ("kind", "missing_nodes", "models", "packs", "unknown_nodes", "core_nodes", "fields", "notes", "ready",
                                                 "download_bytes", "free_bytes")}
+        if not admin:                                     # PG-13 accounts: no prompts carried over from the source picture
+            out["plan"]["fields"] = [{**f, "value": ""} if f["type"] == "text" else f for f in plan.get("fields", [])]
+            out["plan"]["blocked"] = blocked_models(plan)
     return out
 
 
@@ -1045,7 +1076,7 @@ async def wf_import(request):
     first_text = next((v for n in (meta.get("prompt") or {}).values() if isinstance(n, dict)
                        for k, v in n.get("inputs", {}).items() if k in ("text", "prompt") and isinstance(v, str) and v.strip()), "")
     r = {"id": uuid.uuid4().hex[:12], "owner": request["user"]["name"], "created": time.time(), "source": source,
-         "name": (first_text.strip().split("\n")[0][:60] or Path(name).stem[:60]), "thumb": thumbnail(data),
+         "name": ((first_text.strip().split("\n")[0][:60] if is_admin(request) else "") or Path(name).stem[:60]), "thumb": thumbnail(data),
          "prompt": meta.get("prompt"), "workflow": meta.get("workflow"), "civitai": meta.get("civitai") or [], "kind": "image"}
     try:
         quick = await W.analyze(r, COMFY)                 # instant: reads the workflow, checks what's installed
@@ -1068,13 +1099,15 @@ async def wf_list(request):
             card, hit = recipe_card(r), plans.get(r["id"])
             if hit:
                 card["ready"] = hit[1]["ready"]
+                if not is_admin(request):
+                    card["blocked"] = bool(blocked_models(hit[1]))
             out.append(card)
     return web.json_response({"workflows": out})
 
 
 async def wf_get(request):
     r = my_recipe(request)
-    return web.json_response(recipe_card(r, await fresh_plan(r, force=request.query.get("refresh") == "1")))
+    return web.json_response(recipe_card(r, await fresh_plan(r, force=request.query.get("refresh") == "1"), is_admin(request)))
 
 
 async def wf_delete(request):
@@ -1186,6 +1219,10 @@ async def wf_run(request):
         a = await W.analyze(r, COMFY)
     except W.WorkflowError as e:
         raise web.HTTPBadRequest(text=str(e))
+    if not is_admin(request):
+        blocked = blocked_models(a)
+        if blocked:
+            raise web.HTTPForbidden(text="This workflow uses models that aren't available on this account: " + ", ".join(blocked[:5]))
     if not a["ready"]:
         missing = [m["name"] for m in a["models"] if not m["installed"]] + a["missing_nodes"]
         raise web.HTTPConflict(text="Still missing: " + ", ".join(missing[:8]) + (" …" if len(missing) > 8 else "") + ". An admin can install them.")
@@ -1200,8 +1237,12 @@ async def wf_run(request):
     for f in a["fields"]:
         if f["type"] in ("image", "video") and f["id"] not in images:
             raise web.HTTPBadRequest(text=f"Choose a picture for “{f['label']}” first")
-    loras = check_loras(body.get("loras"))
-    values = body.get("values") or {}
+    loras = check_loras(body.get("loras"), is_admin(request))
+    values = dict(body.get("values") or {})
+    if not is_admin(request):                             # prompt boxes left empty stay empty (not the source picture's text)
+        for f in a["fields"]:
+            if f["type"] == "text" and f["id"] not in values:
+                values[f["id"]] = {"value": ""}
     if loras:                                             # fail before freeing the GPU if they can't be added
         try:
             W.inject_loras(W.build_prompt(a, values, images), loras)
@@ -1261,13 +1302,21 @@ async def models_folders(request):
 @wf_error
 async def models_civitai_search(request):
     q = request.query
-    return web.json_response(await M.civitai_search(q.get("query", "")[:100], q.get("types", ""), q.get("sort", "Most Downloaded"),
-                                                    q.get("base", ""), q.get("nsfw") == "1", q.get("cursor", "")))
+    admin = is_admin(request)
+    d = await M.civitai_search(q.get("query", "")[:100], q.get("types", ""), q.get("sort", "Most Downloaded"),
+                               q.get("base", ""), admin and q.get("nsfw") == "1", q.get("cursor", ""))
+    if not admin:                                         # PG-13 accounts: only models Civitai rates PG / PG-13
+        d["items"] = [m for m in d["items"] if m.get("level") and not (m["level"] & ~R.PG13_BITS) and not m.get("nsfw")]
+    return web.json_response(d)
 
 
 @wf_error
 async def models_civitai_model(request):
-    return web.json_response(await M.civitai_model(request.match_info["id"], request.query.get("nsfw") == "1"))
+    admin = is_admin(request)
+    d = await M.civitai_model(request.match_info["id"], admin and request.query.get("nsfw") == "1")
+    if not admin and (not d.get("level") or d["level"] & ~R.PG13_BITS or d.get("nsfw")):
+        raise web.HTTPForbidden(text="That model isn't available on this account")
+    return web.json_response(d)
 
 
 @wf_error
@@ -1299,7 +1348,38 @@ async def models_tasks(request):
 
 async def models_installed(request):
     items = await asyncio.get_running_loop().run_in_executor(None, M.installed)
-    return web.json_response({"models": items, "free": shutil.disk_usage(W.MODELS).free})
+    for m in items:
+        m["rating"] = R.rating_of(m["folder"], m["file"])
+        m["content"] = m["folder"] in R.CONTENT
+        if m["rating"] != "pg13" and m["content"]:
+            e = R.ratings.get(f"{m['folder']}/{m['file']}") or {}
+            m["rated_by"], m["level"] = e.get("by"), e.get("level")
+    if not is_admin(request):
+        items = [m for m in items if m["rating"] == "pg13"]
+    return web.json_response({"models": items, "free": shutil.disk_usage(W.MODELS).free,
+                              "rating": {"running": R.state["running"], "last": R.state["last"]}})
+
+
+async def models_fetch_info(request):
+    """Admins: look up information + pictures for every installed model that has none, or for one model."""
+    require_admin(request)
+    b = await request.json() if request.can_read_body else {}
+    only = {(str(b["folder"]), str(b["file"]))} if b.get("file") else None
+    return web.json_response(W.public_task(M.start_fetch_all(force=bool(b.get("force")), only=only)))
+
+
+@wf_error
+async def models_rate(request):
+    """Admins: rate a content model PG-13 or adults-only, or hand it back to automatic rating."""
+    require_admin(request)
+    b = await request.json()
+    folder, file = str(b.get("folder", "")), str(b.get("file", ""))
+    if folder not in R.CONTENT or not (W.MODELS / folder / file).resolve().is_relative_to((W.MODELS / folder).resolve()):
+        raise web.HTTPBadRequest(text="Not a content model")
+    R.set_rating(folder, file, b.get("rating"))
+    if b.get("rating") == "auto":
+        asyncio.create_task(R.refresh())
+    return web.json_response({"ok": True, "rating": R.rating_of(folder, file)})
 
 
 @wf_error
@@ -1316,6 +1396,15 @@ async def model_media(request):
     path = (root / rel).resolve()
     if not path.is_relative_to(root) or not path.is_file() or not (".previews" in path.parts or ".preview." in path.name):
         raise web.HTTPNotFound()
+    if not is_admin(request):                             # previews of models that aren't PG-13 stay admin-only
+        if ".previews" in path.parts:                     # <dir>/.previews/<stem>/N.ext
+            stem, home = path.parent.name, path.parent.parent.parent
+        else:                                             # <dir>/<stem>.preview.ext
+            stem, home = path.name.split(".preview.")[0], path.parent
+        model = next((home / (stem + ext) for ext in (".safetensors", ".ckpt", ".pt", ".pth", ".bin", ".gguf", ".sft") if (home / (stem + ext)).is_file()), None)
+        rel = model.relative_to(root).parts if model else ()
+        if not model or R.rating_of(rel[0], str(Path(*rel[1:]))) != "pg13":
+            raise web.HTTPNotFound()
     return web.FileResponse(path, headers={"Cache-Control": "private, max-age=86400"})
 
 
@@ -1355,6 +1444,8 @@ def main():
     app.router.add_get("/api/loras", list_loras)
     app.router.add_get("/api/gpu-priority", get_priority)
     app.router.add_get("/api/disk", disk_usage)
+    app.router.add_post("/api/models/rating", models_rate)
+    app.router.add_post("/api/models/fetch-info", models_fetch_info)
     app.router.add_post("/api/gpu-priority", set_priority)
     app.router.add_post("/api/workflows/install-many", wf_install_many)
     app.router.add_get("/api/installs", install_list)

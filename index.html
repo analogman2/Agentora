@@ -104,6 +104,14 @@ textarea:focus, input:focus { border-color: var(--accent); }
 .req input { margin-top: 6px; font-size: 13px; padding: 6px 8px; }
 .req .sugg { display: block; font-size: 12px; margin-top: 4px; }
 .prio { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+#mRate { grid-template-columns: repeat(3, 1fr); }
+.mselbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 8px; font-size: 13px; color: var(--muted); }
+.mselbar .btn { padding: 5px 10px; font-size: 13px; }
+.mselbar .mrate { display: inline-flex; gap: 4px; align-items: center; }
+.mrows li.sel { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 10px; }
+.mrows .tick { flex: none; width: 18px; height: 18px; border-radius: 5px; border: 2px solid var(--line); display: grid; place-items: center; font-size: 12px; font-style: normal; color: #fff; }
+.mrows li.sel .tick { background: var(--accent); border-color: var(--accent); }
+.rbadge { font-size: 11px; font-weight: 600; border: 1px solid; border-radius: 999px; padding: 0 7px; margin-left: 6px; vertical-align: 1px; white-space: nowrap; }
 .prio button { font-size: 13px; padding: 6px 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
 .prio button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
 .prio button:disabled { cursor: default; }
@@ -611,12 +619,17 @@ const ui = { kind: "image", aspect: { image: "1:1", video: "16:9" }, count: 1, s
 const cards = new Map();
 let jobsById = {}, lbJob = null, pollTimer = null;
 
-function saved() { try { return JSON.parse(localStorage.getItem("genstudio") || "{}"); } catch { return {}; } }
-function remember() { try { localStorage.setItem("genstudio", JSON.stringify({ kind: ui.kind, aspect: ui.aspect, count: ui.count, seconds: ui.seconds, engine: ui.engine, loras: ui.loras,
+// the Create panel's draft (prompt, shape, LoRAs...) is kept per account, never shared between people on one browser
+const uiKey = () => "genstudio.ui." + (ME ? ME.name : "");
+function saved() { try { return ME ? JSON.parse(localStorage.getItem(uiKey()) || "{}") : {}; } catch { return {}; } }
+function remember() { if (!ME) return; try { localStorage.setItem(uiKey(), JSON.stringify({ kind: ui.kind, aspect: ui.aspect, count: ui.count, seconds: ui.seconds, engine: ui.engine, loras: ui.loras,
   prompt: cwfActive() ? ui.builtinPrompt : $("#prompt").value })); } catch {} }
-Object.assign(ui, (({ kind, aspect, count, seconds, engine, loras }) => ({ ...(kind && { kind }), ...(aspect && { aspect }), ...(count && { count }), ...(seconds && { seconds }),
-  ...(engine && { engine }), ...(loras && { loras }) }))(saved()));
-$("#prompt").value = ui.builtinPrompt = saved().prompt || "";
+try { localStorage.removeItem("genstudio"); } catch {}  // the old shared draft from before accounts had their own
+function restoreUi() {
+  Object.assign(ui, (({ kind, aspect, count, seconds, engine, loras }) => ({ ...(kind && { kind }), ...(aspect && { aspect }), ...(count && { count }), ...(seconds && { seconds }),
+    ...(engine && { engine }), ...(loras && { loras }) }))(saved()));
+  $("#prompt").value = ui.builtinPrompt = saved().prompt || "";
+}
 
 function chips(el, values, current, fmt, onPick, disabled) {
   el.innerHTML = "";
@@ -691,7 +704,7 @@ const savedVal = (card, f) => card.saved && card.saved[f.id] && card.saved[f.id]
 
 function renderEngine() {
   if (!wf.loaded && ME && !cwf.listing) { cwf.listing = true; loadWorkflows().finally(() => { cwf.listing = false; }); }
-  const sel = $("#engine"), mine = wf.list.filter(x => x.kind === ui.kind);
+  const sel = $("#engine"), mine = wf.list.filter(x => x.kind === ui.kind && !x.blocked);
   if (ui.engine[ui.kind] !== "builtin" && wf.loaded && !mine.some(x => x.id === ui.engine[ui.kind])) ui.engine[ui.kind] = "builtin";
   sel.innerHTML = `<option value="builtin">${BUILTIN[ui.kind]}</option>` + (mine.length ? `<optgroup label="Your workflows">${mine.map(x =>
     `<option value="${x.id}">${escapeHtml(x.name.slice(0, 70))}${x.ready === false ? " (needs downloads)" : ""}</option>`).join("")}</optgroup>` : "");
@@ -703,6 +716,7 @@ function renderEngine() {
     $("#cwfRetry").onclick = (e) => { e.preventDefault(); delete cwf.failed[ui.engine[ui.kind]]; render(); }; return; }
   if (!card) { note.textContent = "⟳ Checking the workflow…"; loadCwf(ui.engine[ui.kind]); return; }
   const p = card.plan;
+  if (p.blocked && p.blocked.length) { note.innerHTML = `<span class="err" style="display:inline">This workflow uses models that aren't available on this account.</span>`; return; }
   note.innerHTML = (p.ready ? `<span style="color:#2f9e5c">Ready ✓</span>` : `<span class="err" style="display:inline">Needs downloads before it can run.</span>`) +
     ` · <a href="#" id="cwfOpen">${p.ready ? "More settings" : "Open it"} in Workflows</a>` + (posField(card) ? "" : " · This workflow has no prompt box; your text is ignored.");
   $("#cwfOpen").onclick = (e) => { e.preventDefault(); ui.kind = "workflow"; render(); remember(); openWorkflow(card.id); };
@@ -765,6 +779,7 @@ async function saveWorkflowValues(id, values) {
 async function createWithWorkflow(prompt, loras) {
   const card = cwf.cards[ui.engine[ui.kind]];
   if (!card) { $("#err").textContent = "Still checking the workflow — try again in a moment."; return; }
+  if (card.plan.blocked && card.plan.blocked.length) { $("#err").textContent = "This workflow uses models that aren't available on this account."; return; }
   if (!card.plan.ready) { $("#err").textContent = "This workflow needs downloads first: open it in Workflows."; return; }
   const values = {};
   for (const f of card.plan.fields) {                    // everything as last saved for this workflow, then this prompt
@@ -802,7 +817,7 @@ function renderLoras() {
   $("#loraCount").textContent = list.length ? `(${list.length})` : "";
   if (LORAS === null) { if ($("#loraBox").open || list.length) loadLoras(); }
   const opts = (cur) => `<option value="">Choose a LoRA…</option>` + (LORAS || []).map(l =>
-    `<option value="${escapeHtml(l.name)}" ${l.name === cur ? "selected" : ""}>${escapeHtml(l.name.replace(/\.safetensors$/, ""))}${l.base ? " · " + escapeHtml(l.base) : ""}</option>`).join("")
+    `<option value="${escapeHtml(l.name)}" ${l.name === cur ? "selected" : ""}>${escapeHtml(l.name.replace(/\.safetensors$/, ""))}${l.base ? " · " + escapeHtml(l.base) : ""}${l.rating && l.rating !== "pg13" ? " · " + (l.rating === "adult" ? "adults only" : "unrated") : ""}</option>`).join("")
     + (cur && LORAS && !LORAS.some(l => l.name === cur) ? `<option value="${escapeHtml(cur)}" selected>${escapeHtml(cur)} (not installed)</option>` : "");
   $("#loraRows").innerHTML = list.map((l, i) => {
     const info = (LORAS || []).find(x => x.name === l.name);
@@ -1172,15 +1187,34 @@ function renderWorkflowList() {
 // several workflows at once (admins): pick them, then one combined install — shared files download once, ComfyUI restarts once
 wf.picked = new Set(); wf.saved = {};
 function renderSelBar() {
-  const bar = $("#wfSelBar");
-  if (!(ME && ME.role === "admin") || wf.list.length < 2) { bar.innerHTML = ""; return; }
-  if (!wf.selecting) { bar.innerHTML = `<button class="btn" id="wfSelStart" title="Download what several workflows need in one go">Install for several…</button>`; $("#wfSelStart").onclick = () => { wf.selecting = true; wf.picked.clear(); renderWorkflowList(); }; return; }
+  const bar = $("#wfSelBar"), admin = ME && ME.role === "admin";
+  if (!ME || !wf.list.length) { bar.innerHTML = ""; return; }
+  if (!wf.selecting) {
+    bar.innerHTML = `<button class="btn" id="wfSelStart" title="Pick several workflows to delete${admin ? " or install everything for" : ""}">Select…</button>`;
+    $("#wfSelStart").onclick = () => { wf.selecting = true; wf.picked.clear(); renderWorkflowList(); }; return;
+  }
   const n = wf.picked.size;
   bar.innerHTML = `<span>${n} selected</span><button class="btn" id="wfSelAll">${n === wf.list.length ? "None" : "All"}</button>
-    <button class="btn primary" id="wfSelGo" ${n ? "" : "disabled"}>Install everything for ${n || ""} ${n === 1 ? "workflow" : "workflows"}</button><button class="btn" id="wfSelCancel">Done</button>`;
+    <button class="btn danger" id="wfSelDel" ${n ? "" : "disabled"}>Delete</button>
+    ${admin ? `<button class="btn primary" id="wfSelGo" ${n ? "" : "disabled"}>Install everything</button>` : ""}<button class="btn" id="wfSelCancel">Done</button>`;
   $("#wfSelAll").onclick = () => { n === wf.list.length ? wf.picked.clear() : wf.list.forEach(x => wf.picked.add(x.id)); renderWorkflowList(); };
   $("#wfSelCancel").onclick = () => { wf.selecting = false; renderWorkflowList(); };
-  $("#wfSelGo").onclick = installMany;
+  $("#wfSelDel").onclick = deleteMany;
+  if ($("#wfSelGo")) $("#wfSelGo").onclick = installMany;
+}
+async function deleteMany() {
+  const ids = [...wf.picked], names = wf.list.filter(x => wf.picked.has(x.id)).map(x => "• " + x.name);
+  if (!confirm(`Remove ${ids.length} workflow${ids.length === 1 ? "" : "s"} from your list? Pictures and videos you made with them stay.\n\n${names.slice(0, 15).join("\n")}${names.length > 15 ? "\n…" : ""}`)) return;
+  let failed = 0;
+  for (const id of ids) {
+    const r = await fetch(`/api/workflows/${id}`, {method: "DELETE"}).catch(() => null);
+    if (!r || !r.ok) failed++;
+    delete cwf.cards[id];
+    if (wf.cur && wf.cur.id === id) { wf.cur = null; $("#wfDetail").innerHTML = ""; }
+  }
+  wf.picked.clear(); wf.selecting = false;
+  await loadWorkflows();
+  wfSay(failed ? `${failed} couldn't be removed.` : `Removed ${ids.length} workflow${ids.length === 1 ? "" : "s"}.`, !!failed);
 }
 function savedFor(id) {                                  // model links / node pack links typed on each workflow's page
   const v = id === (wf.cur && wf.cur.id) ? {links: wf.links, extraPacks: wf.extraPacks} : wf.saved[id];
@@ -1355,7 +1389,8 @@ function renderWorkflow() {
       <div id="wfTask"></div>`}
     <div style="margin-top:6px">${fieldsHtml}${numHtml}</div>
     <label class="lbl">How many runs</label><div class="chips" id="wfCount"></div>
-    <button class="btn primary" id="wfGo" ${p.ready ? "" : "disabled"}>Create</button>
+    ${p.blocked && p.blocked.length ? `<p class="err" style="display:block">This workflow uses models that aren't available on this account: ${p.blocked.map(escapeHtml).join(", ")}.</p>` : ""}
+    <button class="btn primary" id="wfGo" ${p.ready && !(p.blocked && p.blocked.length) ? "" : "disabled"}>Create</button>
     <div class="err" id="wfErr"></div>`;
   chips($("#wfCount"), [1, 2, 4], wf.count || 1, null, v => { wf.count = v; renderWorkflowCount(); });
   $("#wfRecheck").onclick = () => openWorkflow(w.id, true);
@@ -1626,6 +1661,9 @@ async function openHf(repo) {
 }
 
 // Installed
+const RATING = {pg13: ["PG-13", "#2f9e5c", "Everyone can use it"], adult: ["Adults only", "var(--err)", "Only admins can use it"],
+                unknown: ["Unrated", "#c27c0e", "Only admins can use it until it's rated"]};
+const ratingBadge = (m) => m.content && isAdmin() ? ` <span class="rbadge" style="border-color:${RATING[m.rating][1]};color:${RATING[m.rating][1]}">${RATING[m.rating][0]}</span>` : "";
 async function renderInstalled() {
   $("#mBody").innerHTML = `<p class="hint">Reading your model folders…</p>`;
   let d; try { d = await jsonCall("/api/models/installed", "GET"); } catch (e) { $("#mBody").innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`; return; }
@@ -1633,12 +1671,59 @@ async function renderInstalled() {
   const groups = {};
   d.models.forEach(m => (groups[m.folder] = groups[m.folder] || []).push(m));
   const total = d.models.reduce((a, m) => a + m.size, 0);
-  $("#mBody").innerHTML = `<p class="hint" style="margin-top:0">${d.models.length} models · ${gbs(total)} · ${gbs(d.free)} free on disk</p>` +
+  MS.picked = MS.picked || new Set();
+  const missingInfo = d.models.filter(m => !m.link && (!m.meta || m.meta.not_found)).length;
+  $("#mBody").innerHTML = (isAdmin() ? `<div class="mselbar" id="mSelBar"></div>` : "") + `<p class="hint" style="margin-top:0">${d.models.length} models · ${gbs(total)} · ${gbs(d.free)} free on disk${isAdmin()
+      ? ` · <button class="btn" id="mInfoAll" style="padding:3px 10px;font-size:13px">Download info for all models</button> · LoRAs, checkpoints and diffusion models need a PG-13 rating before non-admin accounts can use them${d.rating && d.rating.running ? " (checking ratings with Civitai now…)" : ""}` : ""}</p>` +
     Object.entries(groups).map(([folder, list]) => `<div class="mgroup"><h3>${escapeHtml(folder)} (${list.length})</h3><ul class="mrows">${list.map((m, i) => `
-      <li data-inst="${escapeHtml(folder)}|${escapeHtml(m.file)}" style="cursor:pointer">${m.preview ? (/\.(mp4|webm)$/.test(m.preview) ? `<video class="th" src="/model-media/${encodeURI(m.preview)}" muted></video>` : `<img class="th" src="/model-media/${encodeURI(m.preview)}" alt="" loading="lazy">`) : `<div class="th">◆</div>`}
-        <div class="tx"><b>${escapeHtml(m.meta && m.meta.model ? m.meta.model : m.file)}</b><span>${escapeHtml(m.file)}${m.meta && m.meta.base ? " · " + escapeHtml(m.meta.base) : ""}${m.meta && m.meta.trained_words && m.meta.trained_words.length ? " · triggers: " + escapeHtml(m.meta.trained_words.slice(0, 3).join(", ")) : ""}${m.link ? " · linked" : ""}</span></div>
+      <li data-inst="${escapeHtml(folder)}|${escapeHtml(m.file)}" style="cursor:pointer" class="${MS.selecting && MS.picked.has(folder + "|" + m.file) ? "sel" : ""}">${MS.selecting ? `<i class="tick" aria-hidden="true">${MS.picked.has(folder + "|" + m.file) ? "✓" : ""}</i>` : ""}${m.preview ? (/\.(mp4|webm)$/.test(m.preview) ? `<video class="th" src="/model-media/${encodeURI(m.preview)}" muted></video>` : `<img class="th" src="/model-media/${encodeURI(m.preview)}" alt="" loading="lazy">`) : `<div class="th">◆</div>`}
+        <div class="tx"><b>${escapeHtml(m.meta && m.meta.model ? m.meta.model : m.file)}${ratingBadge(m)}</b><span>${escapeHtml(m.file)}${m.meta && m.meta.base ? " · " + escapeHtml(m.meta.base) : ""}${m.meta && m.meta.trained_words && m.meta.trained_words.length ? " · triggers: " + escapeHtml(m.meta.trained_words.slice(0, 3).join(", ")) : ""}${m.link ? " · linked" : ""}</span></div>
         <span class="sz">${gbs(m.size)}</span></li>`).join("")}</ul></div>`).join("");
-  $("#mBody").querySelectorAll("[data-inst]").forEach(li => li.onclick = () => { const [f, file] = li.dataset.inst.split("|"); openInstalled(MS.installed.find(m => m.folder === f && m.file === file)); });
+  $("#mBody").querySelectorAll("[data-inst]").forEach(li => li.onclick = () => {
+    if (MS.selecting) { const k = li.dataset.inst; MS.picked.has(k) ? MS.picked.delete(k) : MS.picked.add(k); renderInstalledRows(); return; }
+    const [f, file] = li.dataset.inst.split("|"); openInstalled(MS.installed.find(m => m.folder === f && m.file === file));
+  });
+  renderMSelBar();
+  if ($("#mInfoAll")) {
+    $("#mInfoAll").title = missingInfo ? `${missingInfo} models have no information yet` : "Every model has its information";
+    $("#mInfoAll").onclick = async () => {
+      try { await jsonCall("/api/models/fetch-info", "POST", {}); $("#mInfoAll").disabled = true; $("#mInfoAll").textContent = "Looking up… (see Downloads above)"; pollDownloads(); }
+      catch (e) { $("#mBody").insertAdjacentHTML("afterbegin", `<p class="err">${escapeHtml(e.message)}</p>`); }
+    };
+  }
+}
+function renderInstalledRows() {                         // redraw ticks without re-reading the folders
+  $("#mBody").querySelectorAll("[data-inst]").forEach(li => {
+    const on = MS.picked.has(li.dataset.inst); li.classList.toggle("sel", on);
+    const t = li.querySelector(".tick"); if (t) t.textContent = on ? "✓" : "";
+  });
+  renderMSelBar();
+}
+function renderMSelBar() {
+  const bar = $("#mSelBar"); if (!bar) return;
+  if (!MS.selecting) { bar.innerHTML = `<button class="btn" id="mSelStart">Select…</button>`; $("#mSelStart").onclick = () => { MS.selecting = true; MS.picked.clear(); renderInstalled(); }; return; }
+  const picked = MS.installed.filter(m => MS.picked.has(m.folder + "|" + m.file)), n = picked.length;
+  const bytes = picked.reduce((a, m) => a + m.size, 0), content = picked.filter(m => m.content).length;
+  bar.innerHTML = `<span>${n} selected${n ? " · " + gbs(bytes) : ""}</span><button class="btn" id="mSelAll">${n === MS.installed.length ? "None" : "All"}</button>
+    <button class="btn danger" id="mSelDel" ${n ? "" : "disabled"}>Delete</button>
+    <span class="mrate">Rate: <button class="btn" data-mrate="pg13" ${content ? "" : "disabled"}>PG-13</button><button class="btn" data-mrate="adult" ${content ? "" : "disabled"}>Adults only</button><button class="btn" data-mrate="auto" ${content ? "" : "disabled"}>Automatic</button></span>
+    <button class="btn" id="mSelDone">Done</button>`;
+  $("#mSelAll").onclick = () => { n === MS.installed.length ? MS.picked.clear() : MS.installed.forEach(m => MS.picked.add(m.folder + "|" + m.file)); renderInstalledRows(); };
+  $("#mSelDone").onclick = () => { MS.selecting = false; MS.picked.clear(); renderInstalled(); };
+  $("#mSelDel").onclick = async () => {
+    if (!confirm(`Delete ${n} model file${n === 1 ? "" : "s"} (${gbs(bytes)}) for good? Their pictures and information go too, and workflows that use them will need them again.\n\n${picked.slice(0, 15).map(m => "• " + m.folder + "/" + m.file).join("\n")}${n > 15 ? "\n…" : ""}`)) return;
+    let failed = [];
+    for (const m of picked) {
+      try { await jsonCall(`/api/models/installed?folder=${encodeURIComponent(m.folder)}&file=${encodeURIComponent(m.file)}`, "DELETE"); MS.picked.delete(m.folder + "|" + m.file); }
+      catch (e) { failed.push(m.file + ": " + e.message); }
+    }
+    await renderInstalled(); loadDisk();
+    if (failed.length) $("#mBody").insertAdjacentHTML("afterbegin", `<p class="err">Couldn't delete: ${failed.map(escapeHtml).join("; ")}</p>`);
+  };
+  bar.querySelectorAll("[data-mrate]").forEach(b => b.onclick = async () => {
+    for (const m of picked.filter(m => m.content)) await jsonCall("/api/models/rating", "POST", {folder: m.folder, file: m.file, rating: b.dataset.mrate}).catch(() => {});
+    LORAS = null; await renderInstalled();
+  });
 }
 function openInstalled(m) {
   const meta = m.meta || {};
@@ -1647,11 +1732,23 @@ function openInstalled(m) {
     ${(meta.previews || []).length ? `<div class="mstrip">${meta.previews.map(pv => pv.type === "video" ? `<video src="/model-media/${encodeURI(pv.file)}" muted loop playsinline autoplay class="${pv.nsfw ? "blur" : ""}"></video>` : `<img src="/model-media/${encodeURI(pv.file)}" alt="" loading="lazy" class="${pv.nsfw ? "blur" : ""}">`).join("")}</div>` : ""}
     <div class="mdetail" style="margin-top:14px"><div>
       ${(meta.trained_words || []).length ? `<label class="lbl">Trigger words</label><div>${meta.trained_words.map(w => `<span class="trig">${escapeHtml(w)}</span>`).join("")}</div>` : ""}
-      <label class="lbl">About</label><div class="mtext">${escapeHtml(meta.description || (m.meta ? "No description." : "Downloaded outside this page, so no information was saved. Download it here again to fetch its pictures and details."))}</div></div>
+      <label class="lbl">About</label><div class="mtext">${escapeHtml(meta.description || (meta.not_found ? "Not found on Civitai or Hugging Face by its fingerprint or name." : m.meta ? "No description." : "No information saved yet."))}</div>
+      ${isAdmin() ? `<button class="btn" id="mInfoOne" style="margin-top:8px">${m.meta && !meta.not_found ? "Refresh its information" : "Look up its information"}</button>` : ""}</div>
     <div>${meta.sha256 ? `<label class="lbl">SHA-256</label><div class="hint" style="word-break:break-all">${escapeHtml(meta.sha256)}</div>` : ""}
+      ${isAdmin() && m.content ? `<label class="lbl">Who can use it</label><div class="prio" id="mRate">${[["pg13", "PG-13 · everyone"], ["adult", "Adults only"], ["auto", "Automatic"]].map(([k, l]) =>
+        `<button type="button" data-rate="${k}" aria-pressed="${k === (m.rated_by === "admin" ? m.rating : "auto")}">${l}</button>`).join("")}</div>
+        <p class="hint">Now: <b>${RATING[m.rating][0]}</b> — ${RATING[m.rating][2]}.${m.rated_by && m.rated_by !== "admin" ? ` Rated by ${escapeHtml(m.rated_by)}${m.level ? ` (Civitai level ${m.level})` : ""}.` : ""} Automatic uses Civitai's rating for this exact file, else adult-sounding names count as adults only.</p>` : ""}
       ${isAdmin() ? `<label class="lbl">Remove</label><button class="btn danger" id="mDel">Delete this model</button><p class="hint">Deletes the file, its pictures and its information. Workflows that use it will need it again.</p>` : ""}</div></div>`;
   $("#mDlgBody").querySelectorAll(".blur").forEach(e => e.onclick = () => e.classList.remove("blur"));
   $("#mDlgBody").querySelectorAll(".trig").forEach(t => t.onclick = () => navigator.clipboard.writeText(t.textContent).catch(() => {}));
+  if ($("#mInfoOne")) $("#mInfoOne").onclick = async () => {
+    try { await jsonCall("/api/models/fetch-info", "POST", {folder: m.folder, file: m.file}); $("#mInfoOne").disabled = true; $("#mInfoOne").textContent = "Looking it up… (see Downloads)"; pollDownloads(); }
+    catch (e) { $("#mDlgBody").insertAdjacentHTML("beforeend", `<p class="err">${escapeHtml(e.message)}</p>`); }
+  };
+  $("#mDlgBody").querySelectorAll("[data-rate]").forEach(b => b.onclick = async () => {
+    try { await jsonCall("/api/models/rating", "POST", {folder: m.folder, file: m.file, rating: b.dataset.rate}); $("#mDlg").classList.remove("show"); renderInstalled(); LORAS = null; }
+    catch (e) { $("#mDlgBody").insertAdjacentHTML("beforeend", `<p class="err">${escapeHtml(e.message)}</p>`); }
+  });
   if ($("#mDel")) $("#mDel").onclick = async () => {
     if (!confirm(`Delete ${m.file} (${gbs(m.size)}) for good?`)) return;
     try { await jsonCall(`/api/models/installed?folder=${encodeURIComponent(m.folder)}&file=${encodeURIComponent(m.file)}`, "DELETE"); $("#mDlg").classList.remove("show"); renderInstalled(); }
@@ -1672,6 +1769,8 @@ async function pollDownloads() {
     const shown = d.tasks.filter(t => t.status === "running" || Date.now() / 1000 - (t.finished || 0) < 600).slice(0, 8);
     running = shown.some(t => t.status === "running");
     $("#mDownloads").innerHTML = shown.length ? `<div class="dlbox"><label class="lbl" style="margin-top:4px">Downloads</label>${shown.map(t => { const s = t.steps[0];
+      if (s.kind === "info") return `<div class="it"><b>${escapeHtml(t.label)}</b><br>${s.status === "done" ? `<span class="okc">✓ ${escapeHtml(s.detail || "done")}</span>`
+        : `<span class="hint">${escapeHtml(s.detail || "")} · ${s.done} of ${s.total} models</span>`}${s.status !== "done" && s.total ? `<div class="prog2"><i style="width:${(100 * s.done / s.total).toFixed(1)}%"></i></div>` : ""}</div>`;
       return `<div class="it"><b>${escapeHtml(t.label)}</b> <span class="hint">→ ${escapeHtml(s.folder)}</span><br>${s.status === "done" ? `<span class="okc">✓ installed with its pictures and information</span>`
         : s.status === "error" ? `<span class="badc">✗ ${escapeHtml(s.error || "failed")}</span>` : `<span class="hint">${escapeHtml(s.detail || "")}${s.total ? ` · ${gbs(s.done)} of ${gbs(s.total)}` : s.done ? " · " + gbs(s.done) : ""}</span>
         ${s.total ? `<div class="prog2"><i style="width:${(100 * s.done / s.total).toFixed(1)}%"></i></div>` : ""}`}</div>`; }).join("")}</div>` : "";
@@ -1732,18 +1831,21 @@ $("#authForm").onsubmit = async (e) => {
   } catch (err) { $("#aErr").textContent = err.message; }
   $("#aGo").disabled = false;
 };
+let startedAs = null;
 function signedIn(user) {
+  if (startedAs && startedAs !== user.name) { location.reload(); return; }   // someone else signed in on this page: start clean
+  startedAs = user.name;
   ME = user; $("#auth").classList.remove("show"); loadPrio(); loadDisk();
   $("#lnHermes").hidden = user.role !== "admin";
   $("#userName").textContent = user.name; $("#userWho").textContent = `Signed in as ${user.name}${user.role === "admin" ? " · admin" : ""}`;
   $("#mUsers").hidden = user.role !== "admin";
   cards.forEach(c => c.remove()); cards.clear();
-  if (!started) { started = true; render(); route(); }
+  if (!started) { started = true; restoreUi(); render(); route(); }
   poll();
   fetch("/api/settings").then(r => r.json()).then(d => { SET = d; applyDefaults(); render(); }).catch(() => {});
 }
 
-$("#mOut").onclick = async () => { await jsonCall("/api/logout", "POST").catch(() => {}); clearTimeout(pollTimer); cards.forEach(c => c.remove()); cards.clear(); $("#grid").innerHTML = ""; showAuth("login"); };
+$("#mOut").onclick = async () => { await jsonCall("/api/logout", "POST").catch(() => {}); location.reload(); };   // a clean page: nothing of this account stays on screen
 const openAcc = (title, html) => { $("#accTitle").textContent = title; $("#accBody").innerHTML = html; $("#accDlg").classList.add("show"); };
 $("#accClose").onclick = () => $("#accDlg").classList.remove("show");
 $("#mPw").onclick = () => {

@@ -1,5 +1,6 @@
 # secrets and per-machine data: never commit
 agent.token
+ratings.json
 settings.json
 users.json
 sessions.json
