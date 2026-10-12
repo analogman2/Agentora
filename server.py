@@ -656,6 +656,82 @@ async def disk_usage(request):
                               "partial_downloads": partial, "measured": _disk["t"]})
 
 
+# ---------- ✨ Improve prompt (the fast GPU model through Ollama; the big CPU model if that's unavailable)
+PROMPT_MODELS = ["qwen3:4b-instruct-2507-q4_K_M", "qwen3.6-songwriter"]
+PROMPT_GUIDE = {
+    "image": "a picture model (Z-Image) that reads natural sentences: say who/what the subject is, what they're doing, the setting, "
+             "composition and framing, lighting, colour palette, and the medium or style (photo with camera and lens, oil painting, "
+             "3D render...). 50-110 words.",
+    "video": "a video model (Wan 2.2) that animates a few seconds: describe the subject, the ACTION as it unfolds over time, the camera "
+             "movement (slow dolly in, handheld tracking, static wide...), the setting, lighting and mood. 40-90 words.",
+}
+
+
+async def home_page(request):
+    return web.FileResponse(HERE / "home.html", headers={"Cache-Control": "no-cache"})
+
+
+async def home_summary(request):
+    """Everything the home page shows. Open to anyone who can reach the site: counts and what's on the radio only;
+    a signed-in person also gets their own latest creations."""
+    out = {"radio": None, "studio": {}, "system": {}, "user": None}
+    try:
+        async with http.get(RADIO + "/api/radio/state", timeout=aiohttp.ClientTimeout(total=3)) as r:
+            d = await r.json()
+        st = next((x for x in d.get("stations", []) if x["id"] == d.get("station")), None)
+        sv = d.get("stream") or {}
+        aired = [a for a in sv.get("aired", []) if a.get("start_pos") is not None and a["start_pos"] <= (sv.get("pos") or 0)]
+        now = aired[-1] if aired and aired[-1].get("id") else None
+        out["radio"] = {"on": d.get("on"), "station": st and {"id": st["id"], "name": st["name"], "art": st.get("art"), "ready": st.get("ready")},
+                        "now": now and {"id": now["id"], "title": now.get("title"), "style": (now.get("style") or "")[:120], "cover": now.get("cover")},
+                        "listeners": sv.get("listeners", 0), "gpu": (d.get("gpu") or {}).get("owner"), "detail": (d.get("gpu") or {}).get("detail"),
+                        "making": len(d.get("making") or [])}
+    except Exception:
+        pass
+    active = [j for j in jobs.values() if j["status"] in ("queued", "running")]
+    out["studio"] = {"queued": sum(j["status"] == "queued" for j in active), "running": sum(j["status"] == "running" for j in active)}
+    g = await gpu_state()
+    du = shutil.disk_usage(W.MODELS)
+    out["system"] = {"vram_used": g["used_mb"], "vram_total": g["total_mb"], "disk_free": du.free, "disk_total": du.total, "priority": gpu_priority()}
+    me = request.get("user")
+    if me:
+        mine = sorted((j for j in jobs.values() if j.get("owner") == me["name"] and j["status"] == "done" and j.get("outputs")),
+                      key=lambda j: -j["created"])[:6]
+        out["user"] = {"name": me["name"], "admin": me["role"] == "admin",
+                       "recent": [{"id": j["id"], "kind": j["kind"], "url": public(j)["outputs"][0]["url"]} for j in mine]}
+    return web.json_response(out)
+
+
+async def improve_prompt(request):
+    """Edit the person's prompt into a fuller one for the chosen model; keeps their idea, adds what's missing."""
+    b = await request.json()
+    text = str(b.get("prompt") or "").strip()[:2000]
+    kind = b.get("kind") if b.get("kind") in PROMPT_GUIDE else "image"
+    if not text:
+        raise web.HTTPBadRequest(text="Write a few words first")
+    system = ("You improve prompts for " + PROMPT_GUIDE[kind] + " EDIT the person's prompt; do not replace it. Keep every subject, "
+              "detail, name, style and wording choice they gave, in their language. Only add what's missing and make it vivid and "
+              "specific. Reply with the improved prompt only: no preamble, no quotes, no lists.")
+    if not is_admin(request):
+        system += " Keep it PG-13: no nudity, sexual content, graphic violence or gore; if the prompt asks for that, tone it down."
+    last = None
+    for model in PROMPT_MODELS:
+        try:
+            async with http.post(OLLAMA + "/api/chat", json={"model": model, "stream": False, "think": False,
+                                 "options": {"temperature": 0.4, "num_predict": 300},
+                                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": text}]},
+                                 timeout=aiohttp.ClientTimeout(total=180)) as r:
+                if r.status != 200:
+                    last = f"{model}: HTTP {r.status}"; continue
+                out = ((await r.json()).get("message") or {}).get("content", "").strip().strip('"')
+            if len(out) >= max(10, len(text) // 2):
+                return web.json_response({"prompt": out[:2500], "model": model})
+            last = f"{model}: an empty reply"
+        except Exception as e:
+            last = f"{model}: {e}"
+    raise web.HTTPServiceUnavailable(text=f"Couldn't improve it right now ({last})")
+
+
 async def get_priority(request):
     return web.json_response({"priority": gpu_priority(), "choices": PRIORITIES})
 
@@ -735,7 +811,7 @@ async def put_settings(request):
 
 UPLOADS_FILE = HERE / "uploads.json"
 uploads = {}                       # uploaded start-picture name -> owner
-PUBLIC_PATHS = {"/", "/api/session", "/api/setup", "/api/login"}
+PUBLIC_PATHS = {"/", "/home", "/api/home", "/api/session", "/api/setup", "/api/login"}
 
 
 def load_uploads():
@@ -1443,6 +1519,9 @@ def main():
     app.router.add_put("/api/workflows/{id}/exact", wf_exact)
     app.router.add_get("/api/loras", list_loras)
     app.router.add_get("/api/gpu-priority", get_priority)
+    app.router.add_post("/api/prompt/improve", improve_prompt)
+    app.router.add_get("/home", home_page)
+    app.router.add_get("/api/home", home_summary)
     app.router.add_get("/api/disk", disk_usage)
     app.router.add_post("/api/models/rating", models_rate)
     app.router.add_post("/api/models/fetch-info", models_fetch_info)

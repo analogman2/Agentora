@@ -103,6 +103,10 @@ textarea:focus, input:focus { border-color: var(--accent); }
 .req .ok { color: #2f9e5c; } .req .need { color: #c27c0e; } .req .bad { color: var(--err); }
 .req input { margin-top: 6px; font-size: 13px; padding: 6px 8px; }
 .req .sugg { display: block; font-size: 12px; margin-top: 4px; }
+.lblrow { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.lblrow .improve { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.btn.imp { padding: 3px 10px; font-size: 12px; }
+.impmsg { font-size: 12px; color: var(--muted); }
 .prio { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 #mRate { grid-template-columns: repeat(3, 1fr); }
 .mselbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 8px; font-size: 13px; color: var(--muted); }
@@ -422,7 +426,7 @@ body.view-workflows .wflist span { padding: 0; }
 <body>
 <nav class="nav"><div class="nav-in">
   <a class="brand" href="#create">∞ b70 <span>studio</span></a>
-  <div class="apps" role="navigation" aria-label="Switch app"><a href="#" data-app="radio" class=""  title="Radio (Alt+1)"><b aria-hidden="true">📻</b><span>Radio</span></a><a href="#" data-app="studio" class="on" aria-current="page" title="Image & Video (Alt+2)"><b aria-hidden="true">🖼</b><span>Image &amp; Video</span></a><a href="#" data-app="music" class=""  title="Music (Alt+3)"><b aria-hidden="true">🎵</b><span>Music</span></a></div>
+  <div class="apps" role="navigation" aria-label="Switch app"><a href="#" data-app="home" title="Home (Alt+0)"><b aria-hidden="true">🏠</b><span>Home</span></a><a href="#" data-app="radio" class=""  title="Radio (Alt+1)"><b aria-hidden="true">📻</b><span>Radio</span></a><a href="#" data-app="studio" class="on" aria-current="page" title="Image & Video (Alt+2)"><b aria-hidden="true">🖼</b><span>Image &amp; Video</span></a><a href="#" data-app="music" class=""  title="Music (Alt+3)"><b aria-hidden="true">🎵</b><span>Music</span></a></div>
   <div class="navtabs">
     <a href="#create" data-view="create">Create</a>
     <a href="#creations" data-view="creations">My creations</a>
@@ -502,7 +506,8 @@ body.view-workflows .wflist span { padding: 0; }
       <label class="lbl" for="engine">Model</label>
       <select id="engine" aria-describedby="engineNote"></select>
       <div class="hint" id="engineNote"></div>
-      <label class="lbl" for="prompt">Describe it</label>
+      <div class="lblrow"><label class="lbl" for="prompt">Describe it</label><span class="improve"><button type="button" class="btn imp" data-improve="prompt"
+        title="Rewrite your prompt into a fuller one for the picture or video model, keeping your idea">✨ Improve</button><span class="impmsg" data-impmsg="prompt" role="status"></span></span></div>
       <textarea id="prompt" placeholder="A red fox sitting in fresh snow at golden hour, photorealistic"></textarea>
 
       <div id="videoOnly" hidden>
@@ -1376,7 +1381,7 @@ function renderWorkflow() {
   const needs = p.models.filter(m => !m.installed).length + p.missing_nodes.length;
   const fieldsHtml = p.fields.map(f => {
     const id = "wff_" + f.id.replace(/\W/g, "_");
-    if (f.type === "text") return `<div><label class="lbl" for="${id}">${escapeHtml(f.label)}</label><textarea id="${id}" data-f="${escapeHtml(f.id)}" style="min-height:${f.label === "Prompt" ? 110 : 60}px">${escapeHtml(savedVal(w, f))}</textarea></div>`;
+    if (f.type === "text") return `<div>${f.label === "Prompt" ? `<div class="lblrow"><label class="lbl" for="${id}">Prompt</label><span class="improve"><button type="button" class="btn imp" data-improve="${id}" title="Rewrite this prompt into a fuller one, keeping your idea">✨ Improve</button><span class="impmsg" data-impmsg="${id}" role="status"></span></span></div>` : `<label class="lbl" for="${id}">${escapeHtml(f.label)}</label>`}<textarea id="${id}" data-f="${escapeHtml(f.id)}" style="min-height:${f.label === "Prompt" ? 110 : 60}px">${escapeHtml(savedVal(w, f))}</textarea></div>`;
     if (f.type === "image" || f.type === "video") return `<div><label class="lbl">${escapeHtml(f.label)}</label><div class="source"><img data-imgprev="${escapeHtml(f.id)}" hidden alt=""><div class="hint" style="flex:1">${f.type === "video" ? "Videos as input aren't supported yet" : "Choose the picture this workflow starts from."}</div>${f.type === "image" ? `<button class="btn" data-upimg="${escapeHtml(f.id)}">Choose</button>` : ""}</div></div>`;
     return null;
   }).filter(Boolean).join("");
@@ -2076,7 +2081,7 @@ async function loadDisk() {
 setInterval(() => { if (!document.hidden) loadDisk(); }, 60000);
 
 // ---------- app switcher: one browser tab per app; switching jumps to that tab without reloading it (the radio keeps playing)
-const B70_APPS = {radio: ":7860/radio", studio: ":7870/", music: ":7860/"}, B70_THIS = "studio";
+const B70_APPS = {home: ":7870/home", radio: ":7860/radio", studio: ":7870/", music: ":7860/"}, B70_THIS = "studio";
 if (!window.name || window.name.startsWith("b70-")) window.name = "b70-" + B70_THIS;
 function b70Open(key) {
   if (key === B70_THIS) return;
@@ -2089,7 +2094,24 @@ function b70Open(key) {
   w.focus();
 }
 document.querySelectorAll("[data-app]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); b70Open(a.dataset.app); }));
-document.addEventListener("keydown", e => { if (e.altKey && !e.ctrlKey && !e.metaKey && ["1", "2", "3"].includes(e.key)) { e.preventDefault(); b70Open(["radio", "studio", "music"][+e.key - 1]); } });
+document.addEventListener("keydown", e => { if (e.altKey && !e.ctrlKey && !e.metaKey && ["0", "1", "2", "3"].includes(e.key)) { e.preventDefault(); b70Open(["home", "radio", "studio", "music"][+e.key]); } });
+
+// ---------- ✨ Improve prompt: the local GPU model rewrites the prompt into a fuller one (Undo puts yours back)
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-improve]"); if (!b) return;
+  const box = document.getElementById(b.dataset.improve), msg = document.querySelector(`[data-impmsg="${CSS.escape(b.dataset.improve)}"]`);
+  if (!box || !box.value.trim()) { if (msg) msg.textContent = "Write a few words first."; return; }
+  const before = box.value;
+  const kind = box.id === "prompt" ? (ui.kind === "video" ? "video" : "image") : (wf.cur && wf.cur.plan && wf.cur.plan.kind) || "image";
+  b.disabled = true; if (msg) msg.textContent = "Improving…";
+  try {
+    const r = await fetch("/api/prompt/improve", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({prompt: before, kind})});
+    if (!r.ok) throw new Error(await r.text());
+    box.value = (await r.json()).prompt; box.dispatchEvent(new Event("input", {bubbles: true}));
+    if (msg) { msg.innerHTML = `Improved ✓ <a href="#" data-undo>Undo</a>`; msg.querySelector("[data-undo]").onclick = (ev) => { ev.preventDefault(); box.value = before; box.dispatchEvent(new Event("input", {bubbles: true})); msg.textContent = "Back to yours."; }; }
+  } catch (err) { if (msg) msg.textContent = err.message.slice(0, 160); }
+  b.disabled = false;
+});
 </script>
 </body>
 </html>
