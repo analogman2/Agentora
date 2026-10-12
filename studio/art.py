@@ -51,6 +51,7 @@ def _scene(about):
         try:
             body = {"model": model, "temperature": 0.9, "max_tokens": 200, "chat_template_kwargs": {"enable_thinking": False},
                     "messages": [{"role": "system", "content": SCENE_SYSTEM}, {"role": "user", "content": about}], **app.LLM_EXTRA}
+            app.llm_used(model)
             r = json.loads(urllib.request.urlopen(urllib.request.Request(base + "/chat/completions", json.dumps(body).encode(),
                            {"Content-Type": "application/json"}), timeout=90).read())
             text = _clean(r["choices"][0]["message"]["content"], 700).strip('"')

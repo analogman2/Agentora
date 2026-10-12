@@ -125,9 +125,23 @@ def _get_json(url, timeout=3):
         return json.loads(r.read())
 
 
+# Models the radio shares with the Hermes assistant (AGI = the GPU lyricist, Lemming = the GPU fallback writer): they count
+# as the radio's only while the radio has used them recently (Ollama keeps a model ~5 min after its last request).
+SHARED_WITH_ASSISTANT = {"qwen3.6-agent", "qwen3.5-agent-fast"}
+_llm_used = {}
+
+
+def llm_used(model):
+    """The radio (songwriter, lyricist, art scenes, station helper) is about to call this Ollama model."""
+    _llm_used[model] = time.time()
+
+
 def radio_writer_models():
     """The radio's own songwriter models (settings keep LYRICS_LLMS current); these never count as the assistant."""
-    names = {m for _, m, _ in LYRICS_LLMS if m} | {"qwen3.6-lyricist"}       # the GPU lyricist is the radio's too
+    import radio
+    names = {m for _, m, _ in LYRICS_LLMS if m} | {radio.LYRICIST[1]}       # the GPU lyricist is the radio's too
+    names = {m for m in names if m not in SHARED_WITH_ASSISTANT or time.time() - _llm_used.get(m, 0) < 420
+             or (m == radio.LYRICIST[1] and radio.bank_writing.is_set())}
     return names | {m + ":latest" for m in names if ":" not in m}       # Ollama reports untagged names as :latest
 
 

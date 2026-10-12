@@ -11,14 +11,14 @@ http://127.0.0.1:7860 (radio at /radio, classic deck at /radio/classic, music st
 - `studio/radio.py`: stations, the song pipeline (an LLM writes style + lyrics, YuE2 sings 2 takes, a critic keeps the
   better one), the live MP3 broadcast, feedback, playlist, history. API under /api/radio/*.
 - `studio/art.py`: cover art via ComfyUI (Z-Image), drawn between songs only; scenes are name-free.
-- Lyrics: `SPEC_SYSTEM` brief + `STORY_SEEDS` + `edit_lyrics` editor pass; the GPU lyricist (`qwen3.6-lyricist`,
+- Lyrics: `SPEC_SYSTEM` brief + `STORY_SEEDS` + `edit_lyrics` editor pass; the GPU lyricist (`qwen3.6-agent`, shared with Hermes's AGI;
   27B) fills each station's lyric bank when the card is free (`bank_loop`); taste notes from thumbs (`update_taste`).
 - `studio/settings.py`: every radio/audio setting with ranges (served at /api/radio/settings).
 - `studio/assistant.py`: the radio's Assistant panel, relaying chat to Hermes (http://127.0.0.1:8642) for signed-in
   Studio admins only.
 - `studio/radio.html`: the radio page (one file). Here `$` takes a bare element id: `$("powerBtn")`, not `$("#powerBtn")`.
   `esc()` escapes HTML; `api()` is the fetch helper.
-- Songwriter LLM: `qwen3.6-songwriter` in Ollama (Qwen 3.6 35B-A3B, CPU only). Fallback `qwen3:4b-instruct` on the GPU.
+- Songwriter LLM: `qwen3.6-songwriter` in Ollama (Qwen 3.6 35B-A3B, CPU only). Fallback `qwen3.5-agent-fast` (Qwen 3.5 9B, Hermes's Lemming) on the GPU. `app.SHARED_WITH_ASSISTANT` models count as the radio's only while it used them in the last 7 min.
 - Data (not in git): `library/` (every song), `radio/` (stations, state, history), `gpu.json`.
 
 ## How to change it safely

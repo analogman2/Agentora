@@ -432,7 +432,7 @@ def llm_candidates():
 
 
 def gpu_first(cands):
-    """Songwriters on the GPU first (labelled "GPU" in settings, e.g. Qwen3 4B): for things someone is waiting on.
+    """Songwriters on the GPU first (labelled "GPU" in settings, e.g. Qwen 3.5 9B): for things someone is waiting on.
     The big CPU songwriter stays as the fallback."""
     return sorted(cands, key=lambda c: "gpu" not in c[2].lower())
 
@@ -508,6 +508,7 @@ def write_spec(s, short=False, fast=False, writers=None, like=None):
                     "chat_template_kwargs": {"enable_thinking": False},
                     "messages": [{"role": "system", "content": SPEC_SYSTEM}, {"role": "user", "content": "\n".join(u)}],
                     **app.LLM_EXTRA}
+            app.llm_used(model)
             r = json.loads(urllib.request.urlopen(urllib.request.Request(base + "/chat/completions", json.dumps(body).encode(),
                            {"Content-Type": "application/json"}), timeout=app.LLM_TIMEOUT).read())
             text = r["choices"][0]["message"]["content"]
@@ -569,6 +570,7 @@ def edit_lyrics(s, title, style, lyrics, base, model, label):
         try:
             body = {"model": model, "temperature": 0.7, "top_p": 0.95, "max_tokens": 2200, "chat_template_kwargs": {"enable_thinking": False},
                     "messages": [{"role": "system", "content": EDIT_SYSTEM}, {"role": "user", "content": ask}], **app.LLM_EXTRA}
+            app.llm_used(model)
             r = json.loads(urllib.request.urlopen(urllib.request.Request(base + "/chat/completions", json.dumps(body).encode(),
                            {"Content-Type": "application/json"}), timeout=app.LLM_TIMEOUT).read())
             out = parse_json_reply(r["choices"][0]["message"]["content"])
@@ -587,7 +589,7 @@ def edit_lyrics(s, title, style, lyrics, base, model, label):
     return best
 
 
-LYRICIST = ("http://localhost:11434/v1", "qwen3.6-lyricist", "Qwen 3.6 27B (GPU lyricist)")
+LYRICIST = ("http://localhost:11434/v1", "qwen3.6-agent", "Qwen 3.6 27B (GPU lyricist)")   # one loaded copy shared with Hermes's AGI
 BANK_SIZE = 3
 bank_writing = threading.Event()        # the worker waits for this before loading YuE2
 
@@ -674,6 +676,7 @@ def update_taste(sid):
         try:
             body = {"model": model, "temperature": 0.3, "max_tokens": 300, "chat_template_kwargs": {"enable_thinking": False},
                     "messages": [{"role": "system", "content": TASTE_SYSTEM}, {"role": "user", "content": ask}], **app.LLM_EXTRA}
+            app.llm_used(model)
             r = json.loads(urllib.request.urlopen(urllib.request.Request(base + "/chat/completions", json.dumps(body).encode(),
                            {"Content-Type": "application/json"}), timeout=120).read())
             notes = r["choices"][0]["message"]["content"].strip()[:900]
@@ -1731,6 +1734,7 @@ def station_assist(body):
             req = {"model": model, "temperature": 0.8 if mode == "suggest" else 0.3, "top_p": 0.9, "max_tokens": 900,
                    "chat_template_kwargs": {"enable_thinking": False},
                    "messages": [{"role": "system", "content": ASSIST_SYSTEM}, {"role": "user", "content": ask}], **app.LLM_EXTRA}
+            app.llm_used(model)
             r = json.loads(urllib.request.urlopen(urllib.request.Request(base + "/chat/completions", json.dumps(req).encode(),
                            {"Content-Type": "application/json"}), timeout=max(app.LLM_TIMEOUT, 300)).read())
             out = parse_json_reply(r["choices"][0]["message"]["content"])
