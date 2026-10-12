@@ -657,7 +657,7 @@ async def disk_usage(request):
 
 
 # ---------- ✨ Improve prompt (the fast GPU model through Ollama; the big CPU model if that's unavailable)
-PROMPT_MODELS = ["qwen3:4b-instruct-2507-q4_K_M", "qwen3.6-songwriter"]
+PROMPT_MODELS = ["qwen3.5-agent-fast", "qwen3.6-songwriter"]   # Lemming (Qwen 3.5 9B, GPU), then the CPU songwriter
 PROMPT_GUIDE = {
     "image": "a picture model (Z-Image) that reads natural sentences: say who/what the subject is, what they're doing, the setting, "
              "composition and framing, lighting, colour palette, and the medium or style (photo with camera and lens, oil painting, "
