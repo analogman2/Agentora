@@ -18,6 +18,7 @@
 :root[data-theme="dark"] { --bg: #0f1115; --card: #15181d; --soft: #1c2027; --text: #e9eaee; --muted: #9ba1ab; --line: #272b33;
   --accent: #7d97ff; --accent-ink: #0d1226; --ok: #5fd08e; --warn: #f2c14e; --err: #ff7b72; }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
 .nav { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
 .nav-in { max-width: 1180px; margin: 0 auto; height: 60px; padding: 0 16px; display: flex; align-items: center; gap: 18px; }
@@ -32,11 +33,11 @@ h1 { font-size: 26px; margin: 0 0 4px; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .card h2 { margin: 0; font-size: 18px; display: flex; align-items: center; gap: 8px; }
 .card h2 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
-.dot.on { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.off { background: var(--err); }
+.card h2 .dot.on { background: var(--ok); } .card h2 .dot.warn { background: var(--warn); } .card h2 .dot.off { background: var(--err); }
 .muted { color: var(--muted); } .small { font-size: 13px; }
 .np { display: flex; gap: 14px; align-items: center; min-width: 0; }
 .np img { width: 96px; height: 96px; border-radius: 8px; object-fit: cover; background: var(--soft); flex: none; }
-.np .t { min-width: 0; } .np b { display: block; font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.np .t { min-width: 0; } .np b { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 17px; line-height: 1.3; }
 .np .st { font-size: 13px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: auto; }
 .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--card);
