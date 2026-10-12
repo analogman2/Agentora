@@ -1569,12 +1569,14 @@ def favorites():
     return sorted(out, key=lambda t: -t["kept_at"])
 
 
-def history(sid, limit=40):
+def history(sid, limit=40, upcoming=False):
+    """Songs a station has aired, newest first; upcoming=True also lists the recorded songs waiting to air (first)."""
     with app.lock:
         played = sorted((j for j in app.jobs.values() if j.get("source") == "radio" and j.get("played_at")
                          and (sid == RERUNS or j.get("station") == sid)),
                         key=lambda j: -j["played_at"])[:limit]
-    return [track_view(j) for j in played]
+    ready = sorted(station_tracks(sid, ("approved",)), key=lambda j: j.get("approved_at", 0)) if upcoming and sid != RERUNS else []
+    return [track_view(j) | {"up_next": True} for j in ready] + [track_view(j) | {"airings": j.get("airings", 1)} for j in played]
 
 
 def feedback(track_id, kind):
@@ -1917,7 +1919,7 @@ def handle(h, method, path):
             return h.send(200, {"track": t}) or True
         m = re.fullmatch(r"/api/radio/stations/([\w]+)/history", path)
         if method == "GET" and m:
-            return h.send(200, {"tracks": history(m.group(1))}) or True
+            return h.send(200, {"tracks": history(m.group(1), min(1000, int(q.get("limit") or 40)), q.get("upcoming") == "1")}) or True
         m = re.fullmatch(r"/api/radio/stations/([\w]+)/art", path)
         if method == "GET" and m:
             f = art.station_path(m.group(1))

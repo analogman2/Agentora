@@ -165,6 +165,51 @@ pre.ly { white-space: pre-wrap; font: 14px/1.7 system-ui, sans-serif; margin: 10
 .subtabs a { text-decoration: none; padding: 6px 16px; border-radius: 999px; border: 1px solid var(--line); font-size: 14px; }
 .subtabs a.on { background: var(--text); color: var(--bg); border-color: var(--text); }
 
+/* ---------- folders: path bar, folder rows, station header, previous / next song */
+.crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin: 0 0 22px; font-size: 14px; color: var(--muted); }
+.crumbs a { color: var(--muted); text-decoration: none; padding: 2px 0; }
+.crumbs a:hover { color: var(--text); text-decoration: underline; }
+.crumbs .here { color: var(--text); font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.crumbs .sep { opacity: .55; }
+.crumbs .up { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; margin-right: 4px; border: 1px solid var(--line);
+  border-radius: 50%; color: var(--text); text-decoration: none !important; font-size: 15px; }
+.crumbs .up:hover { border-color: var(--muted); }
+.flist { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.frow { display: flex; align-items: center; gap: 14px; width: 100%; padding: 10px 8px; border: 0; border-bottom: 1px solid var(--line); background: none;
+  color: inherit; text-decoration: none; text-align: left; font: inherit; cursor: pointer; }
+.frow:hover { background: var(--soft); }
+.frow .fic { width: 48px; height: 48px; flex: none; display: flex; align-items: center; justify-content: center; font-size: 22px; border-radius: 8px; background: var(--soft); }
+.frow .fart { width: 48px; height: 48px; flex: none; border-radius: 8px; object-fit: cover; background: var(--soft); }
+.frow .tx { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.frow .tx b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.frow .tx span { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.frow .air { font-size: 11px; font-weight: 700; letter-spacing: .06em; color: var(--accent); flex: none; }
+.frow .fplay { flex: none; width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; font-size: 13px; }
+.frow .fplay:hover { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.frow .chev { flex: none; color: var(--muted); font-size: 22px; line-height: 1; width: 14px; text-align: center; }
+.lhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.lhead .label { margin: 0; }
+.lhead > label { display: inline-flex; align-items: center; gap: 8px; }
+.lhead select { width: auto; }
+.rows .row { cursor: pointer; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+.seg button { border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; padding: 4px 12px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--text); color: var(--bg); }
+.shead { display: flex; gap: 24px; align-items: center; }
+.shead .art { width: 132px; height: 132px; flex: none; border-radius: 50%; overflow: hidden; box-shadow: var(--shadow); }
+.shead .art img { width: 100%; height: 100%; object-fit: cover; }
+.shead h1 { font-size: 28px; line-height: 1.2; margin: 0 0 4px; font-weight: 600; }
+.shead .acts { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 6px; }
+.shead .onair { color: var(--accent); }
+@media (max-width: 560px) { .shead { flex-direction: column; align-items: flex-start; gap: 14px; } .shead .art { width: 96px; height: 96px; } }
+.aboutbox > summary { cursor: pointer; font-weight: 600; padding: 10px 0; border-top: 1px solid var(--line); }
+.aboutbox .about { margin-top: 8px; }
+.sibs { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; margin-top: 34px; padding-top: 16px; border-top: 1px solid var(--line); }
+.sibs a { display: flex; flex-direction: column; text-decoration: none; color: inherit; min-width: 0; }
+.sibs a b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sibs a.nx { text-align: right; }
+.sibs a:hover b { text-decoration: underline; }
+
 /* ---------- player bar */
 .bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 25; height: var(--bar-h); background: var(--card); border-top: 1px solid var(--line);
        box-shadow: 0 -6px 20px rgba(16,24,40,.06); display: grid; grid-template-columns: 1fr minmax(320px, 520px) 1fr; align-items: center; gap: 16px; padding: 0 20px; }
@@ -336,8 +381,7 @@ textarea { resize: vertical; max-height: 85vh; }
   <div data-b70-apps></div>
   <div class="tabs" role="tablist">
     <a href="#now" data-tab="now">Now Playing</a>
-    <a href="#collection" data-tab="collection">My Collection</a>
-    <a href="#browse" data-tab="browse">Browse</a>
+    <a href="#lib" data-tab="lib">Library</a>
   </div>
   <label class="search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
     <input type="search" id="q" placeholder="Search stations and songs" aria-label="Search stations and songs"></label>
@@ -716,7 +760,7 @@ async function loadHistory() {
   if (view.tab === "collection" && view.sub === "history") renderView();
 }
 async function loadPlaylist() { cache.playlist = (await api("/api/radio/playlist").catch(() => ({tracks: []}))).tracks; return cache.playlist; }
-async function loadStation(id) { cache.station[id] = (await api(`/api/radio/stations/${id}/history`).catch(() => ({tracks: []}))).tracks; return cache.station[id]; }
+async function loadStation(id) { cache.station[id] = (await api(`/api/radio/stations/${id}/history?limit=500&upcoming=1`).catch(() => ({tracks: []}))).tracks; return cache.station[id]; }
 
 async function refresh() {
   try {
@@ -731,7 +775,7 @@ async function refresh() {
     $("sideBadge").textContent = `📡 ${n}`; $("sideBadge").classList.toggle("live", n > 0);
     renderSideRadio(); syncNow();
     const sig = JSON.stringify([R.on, R.station, R.stations.map(s => [s.id, s.name, s.ready, s.stats.played, s.stats.kept, s.description, s.analysis.status]), R.reruns]);
-    if (sig !== shelfSig) { shelfSig = sig; if (view.tab === "browse" || (view.tab === "collection" && view.sub === "stations") || view.tab === "station") renderView(); if (!current) renderBar(); }
+    if (sig !== shelfSig) { shelfSig = sig; if (view.tab === "lib" || view.tab === "station") renderView(); if (!current) renderBar(); }
   } catch (e) { $("gpuChip").textContent = "radio unreachable"; }
 }
 function renderSideRadio() {
@@ -749,15 +793,31 @@ $("powerBtn").onclick = async () => {
   refresh();
 };
 
-// ---------------- views (hash routes): #now  #collection/playlist|history|stations  #browse  #station/<id>  #search/<q>
-const view = {tab: "now", sub: "playlist", id: null, q: ""};
+// ---------------- views, laid out like folders (hash routes):
+//   #now                         what's playing
+//   #lib                         Library: ♥ My playlist, 🕘 Listen history, and every station
+//   #lib/playlist  #lib/history  a song list
+//   #lib/<station id>            a station: all its songs, then "About this station"
+//   #lib/<folder>/<song id>      a song, inside the folder you opened it from (playlist, history or its station)
+//   #search/<q>
+// Older addresses (#browse, #collection/..., #station/<id>, #song/<id>) still work.
+const view = {tab: "now", sub: "playlist", id: null, parent: null, q: ""};
 function route() {
-  const [tab, arg] = decodeURIComponent(location.hash.slice(1) || "now").split("/");
-  view.tab = ["now", "collection", "browse", "station", "search", "song"].includes(tab) ? tab : "now";
-  if (view.tab === "collection") view.sub = ["playlist", "history", "stations"].includes(arg) ? arg : store.get("sub", "playlist");
-  if (view.tab === "station" || view.tab === "song") view.id = arg;
-  if (view.tab === "search") view.q = arg || "";
-  document.querySelectorAll(".tabs a").forEach(a => a.classList.toggle("on", a.dataset.tab === view.tab || (view.tab === "station" && a.dataset.tab === "browse")));
+  let [tab, a, b] = decodeURIComponent(location.hash.slice(1) || "now").split("/");
+  if (tab === "browse") { tab = "lib"; a = undefined; }
+  if (tab === "collection") { tab = "lib"; a = a === "stations" ? undefined : (a || "playlist"); }
+  if (tab === "station") { tab = "lib"; b = undefined; }
+  view.parent = null;
+  if (tab === "song") { view.tab = "song"; view.id = a; }
+  else if (tab === "lib") {
+    if (!a) view.tab = "lib";
+    else if (b) { view.tab = "song"; view.id = b; view.parent = a; }
+    else if (a === "playlist" || a === "history") { view.tab = "collection"; view.sub = a; }
+    else { view.tab = "station"; view.id = a; }
+  } else if (tab === "search") { view.tab = "search"; view.q = a || ""; }
+  else view.tab = "now";
+  const on = view.tab === "now" ? "now" : view.tab === "search" ? "" : "lib";
+  document.querySelectorAll(".tabs a").forEach(x => x.classList.toggle("on", x.dataset.tab === on));
   if (view.tab !== "search") $("q").value = "";
   window.scrollTo(0, 0); renderView();
 }
@@ -769,7 +829,7 @@ async function renderView() {
   if (document.querySelector(".row.previewing")) return;          // don't interrupt a preview
   let html = "";
   if (view.tab === "now") html = nowView();
-  else if (view.tab === "browse") html = browseView();
+  else if (view.tab === "lib") html = await libView();
   else if (view.tab === "station") html = await stationView(view.id);
   else if (view.tab === "collection") html = await collectionView();
   else if (view.tab === "search") html = await searchView(view.q);
@@ -778,11 +838,32 @@ async function renderView() {
   page.innerHTML = html;
   if (view.tab === "now") status(statusText);
 }
+
+// ---------- the path bar: Library › Station › Song, every step clickable, ↑ goes up one level
+const FOLDERS = {playlist: ["♥ My playlist", "#lib/playlist"], history: ["🕘 Listen history", "#lib/history"]};
+function folderCrumb(f) {
+  if (FOLDERS[f]) return FOLDERS[f];
+  const s = stOf(f);
+  return [s ? s.name : "Station", `#lib/${encodeURIComponent(f)}`];
+}
+function crumbs(...steps) {
+  const all = [["Library", "#lib"], ...steps], up = all.length > 1 ? all[all.length - 2][1] : null;
+  return `<nav class="crumbs" aria-label="Where you are">${up ? `<a class="up" href="${up}" title="Up to ${esc(all[all.length - 2][0])}" aria-label="Up one level">↑</a>` : ""}
+    ${all.map(([label, href], i) => i === all.length - 1 ? `<span class="here" aria-current="page">${esc(label)}</span>` : `<a href="${href}">${esc(label)}</a>`).join('<span class="sep" aria-hidden="true">›</span>')}</nav>`;
+}
+const songHref = (t, folder) => (folder || t.station) ? `#lib/${encodeURIComponent(folder || t.station)}/${encodeURIComponent(t.id)}` : `#song/${encodeURIComponent(t.id)}`;
+
 // ---------- song page: cover, lyrics, story, scores and actions for one song
 async function songView(id) {
   let t;
-  try { t = await api(`/api/radio/tracks/${encodeURIComponent(id)}`); } catch (e) { return `<p class="empty">${esc(e.message)}</p>`; }
-  const st = stOf(t.station), c = t.critic || {};
+  try { t = await api(`/api/radio/tracks/${encodeURIComponent(id)}`); } catch (e) { return crumbs(["Song", "#"]) + `<p class="empty">${esc(e.message)}</p>`; }
+  const folder = view.parent || t.station, st = stOf(t.station), c = t.critic || {};
+  // the songs around this one in the folder it was opened from, for ‹ previous / next ›
+  let sibs = [];
+  if (folder === "playlist") sibs = cache.playlist || await loadPlaylist();
+  else if (folder === "history") sibs = cache.listened || [];
+  else if (folder) sibs = cache.station[folder] || await loadStation(folder);
+  const k = sibs.findIndex(x => x.id === id), prev = k > 0 ? sibs[k - 1] : null, next = k >= 0 && k < sibs.length - 1 ? sibs[k + 1] : null;
   const facts = [
     t.story ? ["Story idea", t.story] : null,
     t.writer ? ["Written by", t.writer] : null,
@@ -791,10 +872,10 @@ async function songView(id) {
     t.played_at ? ["Last played", whenText(t.played_at) + (t.airings > 1 ? ` · aired ${t.airings} times` : "")] : ["Status", t.status === "approved" ? "Ready, not aired yet" : t.status || ""],
     t.requested ? ["Made", t.liked_from ? "On request — more like another song" : "On request"] : null,
   ].filter(Boolean);
-  return `<section class="songpage">
+  return crumbs(...(folder ? [folderCrumb(folder)] : []), [t.title, "#"]) + `<section class="songpage">
     <div class="cover"><img src="${trackArt(t)}" alt=""></div>
     <div class="info">
-      ${st ? `<a class="st" href="#station/${esc(st.id)}">${esc(st.name)}</a>` : ""}
+      ${st ? `<a class="st" href="#lib/${esc(st.id)}">📻 ${esc(st.name)}</a>` : ""}
       <h1>${esc(t.title)}</h1>
       <div class="style">${esc(t.style)}</div>
       <div class="acts">
@@ -808,21 +889,25 @@ async function songView(id) {
       </div>
       <dl class="facts">${facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>
       ${t.lyrics ? `<p class="label" style="margin-top:18px">Lyrics</p><pre class="ly songly">${esc(t.lyrics)}</pre>` : `<p class="small muted" style="margin-top:18px">Instrumental</p>`}
-    </div></section>`;
+    </div></section>
+    ${prev || next ? `<nav class="sibs" aria-label="Other songs in ${esc(folderCrumb(folder)[0])}">
+      ${prev ? `<a href="${songHref(prev, folder)}"><span class="small muted">‹ Previous</span><b>${esc(prev.title)}</b></a>` : "<span></span>"}
+      <span class="small muted">${k + 1} of ${sibs.length}</span>
+      ${next ? `<a class="nx" href="${songHref(next, folder)}"><span class="small muted">Next ›</span><b>${esc(next.title)}</b></a>` : "<span></span>"}</nav>` : ""}`;
 }
 function stationTile(s) {
   const air = R.on && R.station === s.id;
   const sub = s.id === RERUNS ? s.meta : s.kind === "folder" && s.analysis.status !== "done" ? "learning from your music" : `${s.ready} ready · ${s.stats.played} played`;
-  return `<a class="tile" href="#station/${esc(s.id)}"><div class="art"><img src="${stationArt(s)}" alt="" loading="lazy">${air ? '<span class="on">ON AIR</span>' : ""}</div>
+  return `<a class="tile" href="#lib/${esc(s.id)}"><div class="art"><img src="${stationArt(s)}" alt="" loading="lazy">${air ? '<span class="on">ON AIR</span>' : ""}</div>
     <div class="t1">${esc(s.name)}</div><div class="t2">${esc(sub)}</div></a>`;
 }
 const newTile = `<button class="tile" data-act="new"><div class="art"><div class="new">+</div></div><div class="t1">Create station</div><div class="t2">describe it, or learn from your music</div></button>`;
 function songRow(t, opts = {}) {
   const fb = t.feedback === "keep" ? "👍" : t.feedback === "dislike" ? "👎" : t.feedback === "skip" ? "⏭" : "";
-  const sub = [opts.when, t.station_name, opts.extra, t.style].filter(Boolean).join(" · ");
+  const sub = [opts.when, opts.noStation ? "" : t.station_name, opts.extra, t.style].filter(Boolean).join(" · ");
   return `<li class="row" data-id="${esc(t.id)}" data-audio="${esc(t.audio)}">
     <div class="thumb" data-act="preview" title="Preview this song"><img src="${trackArt(t)}" alt="" loading="lazy"><span class="pv">▶</span></div>
-    <div class="tx"><a class="a" href="#song/${esc(t.id)}" title="Open “${esc(t.title)}”">${esc(t.title)}</a><div class="b" title="${esc(t.style)}">${esc(sub)}</div></div>
+    <div class="tx"><a class="a" href="${songHref(t, opts.folder)}" title="Open “${esc(t.title)}”">${esc(t.title)}</a><div class="b" title="${esc(t.style)}">${esc(sub)}</div></div>
     <span class="fb">${fb}</span><span class="dur">${t.seconds ? mmss(t.seconds) : ""}</span>
     <span class="acts"><button class="plus ${t.in_playlist ? "in" : ""}" data-act="plus" data-on="${t.in_playlist ? 1 : 0}" title="${t.in_playlist ? "In your playlist — click to remove" : "Add to my playlist"}" aria-label="${t.in_playlist ? "Remove from playlist" : "Add to playlist"}">${t.in_playlist ? "✓" : "+"}</button>
       <a class="dl" href="${esc(t.audio)}?download=1" title="Download MP3" aria-label="Download">⤓</a></span></li>`;
@@ -839,79 +924,108 @@ function nowView() {
   if (!t && !lid) {
     const stations = [rerunStation(), ...R.stations];
     return `<section class="section"><p class="label">Start listening</p><h1 style="font-size:30px;margin:0 0 6px">Pick a station</h1>
-      <p class="muted" style="margin:0 0 24px">Every station writes and sings brand-new songs. Everyone listening hears the same broadcast.</p>
+      <p class="muted" style="margin:0 0 24px">Every station writes and sings brand-new songs. Everyone listening hears the same broadcast.
+        Press a station to play it, or open the <a href="#lib">Library</a> to look through stations and songs.</p>
       <div class="grid">${stations.map(s => stationTile(s).replace('class="tile"', `class="tile" data-play="${esc(s.id)}"`)).join("")}${newTile}</div></section>`;
   }
-  const chips = t ? [t.airing === "rerun" ? "Rerun" : t.airing === "runner-up" ? "Runner-up take" : null, t.seconds ? mmss(t.seconds) : null,
+  const chips = t ? [t.airing === "rerun" ? "Rerun" : t.airing === "runner-up" ? "Runner-up take" : t.airing === "history" ? "Replay" : null, t.seconds ? mmss(t.seconds) : null,
     t.mode === "instrumental" || !t.lyrics ? "Instrumental" : "Vocals"].filter(Boolean) : [];
+  const stId = t ? t.station : st && st.id;
   return `<section class="np">
     <div class="cover"><img src="${t ? trackArt(t) : stationArt(st)}" alt=""></div>
     <div>
-      <a class="st" href="#station/${esc(st ? st.id : "")}">${esc(t ? (t.station_name || (st && st.name)) : st ? st.name : "")}${t && t.airing === "rerun" ? " · via Reruns" : ""}</a>
-      <h1>${t ? `<a href="#song/${esc(t.id)}" style="color:inherit;text-decoration:none" title="Lyrics, story and details">${esc(t.title)}</a>` : "Next song on the way…"}</h1>
+      <a class="st" href="#lib/${esc(stId || "")}">📻 ${esc(t ? (t.station_name || (st && st.name)) : st ? st.name : "")}${t && t.airing === "rerun" ? " · via Reruns" : ""}</a>
+      <h1>${t ? `<a href="${songHref(t)}" style="color:inherit;text-decoration:none" title="Lyrics, story and details">${esc(t.title)}</a>` : "Next song on the way…"}</h1>
       <div class="style">${t ? esc(t.style) : ""}</div>
       <div class="meta">${chips.map(c => `<span class="chip">${esc(c)}</span>`).join("")}</div>
       <div class="acts">${t ? `<button class="pill ${t.in_playlist ? "primary" : ""}" data-act="np-plus">${t.in_playlist ? "✓ In my playlist" : "+ Add to my playlist"}</button>
+        <a class="pill" href="${songHref(t)}">Song details</a>
         <a class="pill" href="${esc(t.audio)}?download=1">⤓ Download</a>
         <button class="pill" data-act="np-art" title="Draw a new cover for this song">🎨 New cover</button>` : ""}
-        <a class="pill" href="#station/${esc(st ? st.id : "")}">Station details</a></div>
+        <a class="pill" href="#lib/${esc(stId || "")}">Open station</a></div>
       ${t && t.lyrics ? `<details><summary>Lyrics</summary><pre class="ly">${esc(t.lyrics)}</pre></details>` : ""}
       <div class="status" id="npStatus"></div>
     </div></section>
-    ${cache.listened && cache.listened.length ? `<section class="section"><p class="label">Recently played</p><ul class="rows">${cache.listened.slice(0, 5).map(x => songRow(x, {when: whenText(x.listened_at)})).join("")}</ul></section>` : ""}`;
+    ${cache.listened && cache.listened.length ? `<section class="section"><p class="label"><a href="#lib/history" style="color:inherit">Recently played ›</a></p><ul class="rows">${cache.listened.slice(0, 5).map(x => songRow(x, {when: whenText(x.listened_at), folder: "history"})).join("")}</ul></section>` : ""}`;
 }
-function browseView() {
-  return `<section class="section"><p class="label">Stations</p><div class="grid">${[rerunStation(), ...R.stations].map(stationTile).join("")}${newTile}</div></section>`;
+
+// ---------- Library: the top folder
+async function libView() {
+  const pl = cache.playlist || await loadPlaylist(), h = cache.listened || [], tiles = store.get("libTiles", false);
+  const sts = [rerunStation(), ...R.stations];
+  const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const stRow = (s) => {
+    const air = R.on && R.station === s.id, playing = air && lid;
+    const sub = s.id === RERUNS ? s.meta : s.kind === "folder" && s.analysis.status !== "done" ? "learning from your music"
+      : `${count(s.stats.played, "song", "songs")} played${s.ready ? ` · ${s.ready} ready` : ""}${s.stats.kept ? ` · 👍 ${s.stats.kept}` : ""}`;
+    return `<li><a class="frow" href="#lib/${esc(s.id)}"><img class="fart" src="${stationArt(s)}" alt="" loading="lazy">
+      <span class="tx"><b>${esc(s.name)}</b><span>${esc(sub)}</span></span>${air ? '<span class="air">ON AIR</span>' : ""}
+      <button class="fplay" data-play="${esc(s.id)}" title="${playing ? "Playing now" : "Play this station"}" aria-label="Play ${esc(s.name)}">${playing ? "≋" : "▶"}</button><span class="chev" aria-hidden="true">›</span></a></li>`;
+  };
+  return crumbs() + `<ul class="flist">
+      <li><a class="frow" href="#lib/playlist"><span class="fic">♥</span><span class="tx"><b>My playlist</b><span>${count(pl.length, "song", "songs")} you saved</span></span><span class="chev" aria-hidden="true">›</span></a></li>
+      <li><a class="frow" href="#lib/history"><span class="fic">🕘</span><span class="tx"><b>Listen history</b><span>${h.length ? `${count(h.length, "song", "songs")} played recently` : "nothing played yet"}</span></span><span class="chev" aria-hidden="true">›</span></a></li></ul>
+    <section class="section"><div class="lhead"><p class="label">📻 Stations · ${sts.length}</p>
+      <span class="seg" role="group" aria-label="Show stations as"><button data-act="lib-layout" data-v="0" aria-pressed="${!tiles}" title="List">☰ List</button><button data-act="lib-layout" data-v="1" aria-pressed="${tiles}" title="Covers">▦ Covers</button></span></div>
+      ${tiles ? `<div class="grid">${sts.map(stationTile).join("")}${newTile}</div>`
+        : `<ul class="flist">${sts.map(stRow).join("")}<li><button class="frow" data-act="new"><span class="fic">＋</span><span class="tx"><b>Create station</b><span>describe it, or learn from your music</span></span></button></li></ul>`}</section>`;
 }
+
+// ---------- a station: its songs first, then what it is and its settings
+const SORTS = {newest: "Newest first", top: "Your favourites first", played: "Most played"};
 async function stationView(id) {
-  const s = stOf(id); if (!s) return `<p class="empty">That station doesn't exist any more. <a href="#browse">Browse stations</a></p>`;
+  const s = stOf(id); if (!s) return crumbs(["Station", "#"]) + `<p class="empty">That station doesn't exist any more. <a href="#lib">Back to the Library</a></p>`;
   const tracks = id === RERUNS ? (cache.listened || []) : (cache.station[id] || await loadStation(id));
-  const loved = (t) => (t.feedback === "keep" ? 2 : 0) + (t.in_playlist ? 1 : 0);
-  const seen = new Set();
-  const top = [...tracks].filter(t => t.feedback !== "dislike").sort((a, b) => loved(b) - loved(a) || ((b.critic || {}).score || 0) - ((a.critic || {}).score || 0))
-    .filter(t => !seen.has(t.title) && seen.add(t.title)).slice(0, 8);
-  const latest = tracks[0], p = s.profile, air = R.on && R.station === id, playing = air && lid;
-  const sub = id === RERUNS ? s.meta : `${s.ready} ready · ${s.stats.played} played · 👍 ${s.stats.kept}`;
-  return `<section class="sp">
-    <div class="hero"><div class="art"><img src="${stationArt(s)}" alt=""></div>
-      <h1>${esc(s.name)}</h1><div class="muted small">${esc(sub)}</div>
-      <div class="ctrl">${id !== RERUNS ? `<button class="iconbtn" data-act="edit" title="Edit station" aria-label="Edit station">✎</button>` : ""}
-        <button class="iconbtn bigplay" data-play="${esc(id)}" title="${playing ? "Playing" : "Play this station"}" aria-label="Play this station">${playing ? "<b>≋</b>" : '<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>'}</button>
-        <a class="iconbtn" href="/radio/stream.mp3" target="_blank" title="Open the live stream in another player" aria-label="Open stream">📡</a></div>
-      ${air ? `<div class="chip" style="display:inline-block">On air now</div>` : `<div class="small muted">Playing it retunes the radio for everyone listening.</div>`}
+  const sort = SORTS[store.get("stSort", "newest")] ? store.get("stSort", "newest") : "newest";
+  const loved = (t) => (t.feedback === "keep" ? 2 : 0) + (t.in_playlist ? 1 : 0) - (t.feedback === "dislike" ? 3 : 0);
+  const list = sort === "top" ? [...tracks].sort((a, b) => loved(b) - loved(a) || ((b.critic || {}).score || 0) - ((a.critic || {}).score || 0))
+    : sort === "played" ? [...tracks].sort((a, b) => (b.airings || 0) - (a.airings || 0)) : tracks;
+  const p = s.profile, air = R.on && R.station === id, playing = air && lid;
+  const sub = id === RERUNS ? s.meta : `${tracks.filter(t => !t.up_next).length} songs · ${s.ready} ready to air · 👍 ${s.stats.kept}`;
+  const row = (t) => songRow(t, {folder: id === RERUNS ? "history" : id, noStation: id !== RERUNS,
+    when: t.up_next ? "up next" : t.played_at ? whenText(t.played_at) : "", extra: t.airings > 1 ? `played ${t.airings}×` : ""});
+  return crumbs([s.name, "#"]) + `<section class="shead">
+      <div class="art"><img src="${stationArt(s)}" alt=""></div>
+      <div class="tx"><h1>${esc(s.name)}</h1><div class="muted small">${esc(sub)}${air ? ' · <b class="onair">ON AIR</b>' : ""}</div>
+        <div class="acts">
+          <button class="pill primary" data-play="${esc(id)}">${playing ? "≋ Playing" : "▶ Play station"}</button>
+          ${id !== RERUNS ? `<button class="pill" data-act="make-song" title="Write and record a new song for this station right away">🎵 Create a song now</button>
+          <button class="pill" data-act="edit" title="Edit station">✎ Edit</button>` : ""}
+        </div>
+        <div class="small muted" id="mkStat" role="status"></div>
+        ${air ? "" : `<div class="small muted">Playing it retunes the radio for everyone listening.</div>`}</div>
+    </section>
+    <section class="section"><div class="lhead"><p class="label">Songs · ${tracks.length}</p>
+      <label class="small muted">Sort <select id="stSort" aria-label="Sort songs">${Object.entries(SORTS).map(([k, l]) => `<option value="${k}" ${k === sort ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
+      ${list.length ? `<ul class="rows">${list.map(row).join("")}</ul>` : `<p class="muted small">No songs yet — press play and the first one is written for you.</p>`}</section>
+    <details class="section aboutbox" ${tracks.length ? "" : "open"}><summary>About this station${id !== RERUNS ? " & settings" : ""}</summary>
+      <div class="about">
+        ${s.description ? `<p>${esc(s.description)}</p>` : ""}
+        ${s.theme ? `<p><b>Lyrics theme:</b> ${esc(s.theme)}</p>` : ""}
+        ${id !== RERUNS ? `<p><b>Vocals:</b> ${esc(s.vocals)}${s.language ? " · " + esc(s.language) : ""} · <b>${s.kind === "folder" ? "Learns from your music" : "Defined by its description"}</b></p>` : ""}
+        ${p ? `<p><b>Learned:</b> ${esc(p.top.genre.join(", "))} · ${esc(p.top.mood.join(", "))} · ${p.bpm_range ? p.bpm_range.join("–") + " BPM" : ""}</p>` : ""}
+        ${s.problem ? `<p class="err">${esc(s.problem)}</p>` : ""}
+      </div>
       ${id !== RERUNS ? `<div class="taste">${s.taste ? `<p class="label">What it has learned from you</p><pre>${esc(s.taste)}</pre>
           <button class="btn" data-act="forget-taste" title="Clear these notes and the thumbs behind them">Forget</button>` : `<p class="small muted">Thumbs up, thumbs down and playlist saves teach this station what you like.</p>`}
         ${s.banked ? `<p class="small muted">✍ ${s.banked} song${s.banked === 1 ? "" : "s"} pre-written by the GPU lyricist, ready to record</p>` : ""}</div>` : ""}
-      ${id !== RERUNS ? `<div style="margin-top:14px"><button class="btn" data-act="make-song" title="Write and record a new song for this station right away">🎵 Create a song now</button>
-        <div class="small muted" id="mkStat" role="status" style="margin-top:6px"></div></div>` : ""}
-    </div>
-    <div>
-      <div class="two">
-        <div><p class="label">Latest song</p>${latest ? `<button class="feature" data-act="preview-feature" data-audio="${esc(latest.audio)}"><div class="art"><img src="${trackArt(latest)}" alt=""></div>
-          <div><div class="t1">${esc(latest.title)}</div><div class="t2">${latest.seconds ? mmss(latest.seconds) : ""}${latest.played_at ? " · " + esc(whenText(latest.played_at)) : ""}</div><div class="t2">▶ preview</div></div></button>` : `<p class="muted small">No songs yet — press play and the first one is written for you.</p>`}</div>
-        <div><p class="label">About this station</p><div class="about">
-          ${s.description ? `<p style="margin-top:0">${esc(s.description)}</p>` : ""}
-          ${s.theme ? `<p><b>Lyrics theme:</b> ${esc(s.theme)}</p>` : ""}
-          ${id !== RERUNS ? `<p><b>Vocals:</b> ${esc(s.vocals)}${s.language ? " · " + esc(s.language) : ""} · <b>${s.kind === "folder" ? "Learns from your music" : "Defined by its description"}</b></p>` : ""}
-          ${p ? `<p><b>Learned:</b> ${esc(p.top.genre.join(", "))} · ${esc(p.top.mood.join(", "))} · ${p.bpm_range ? p.bpm_range.join("–") + " BPM" : ""}</p>` : ""}
-          ${s.problem ? `<p class="err">${esc(s.problem)}</p>` : ""}</div></div>
-      </div>
-      <div class="section"><p class="label">Top songs</p>${top.length ? `<ul class="rows">${top.map(t => songRow(t, {when: id === RERUNS && t.listened_at ? whenText(t.listened_at) : ""})).join("")}</ul>` : `<p class="muted small">Songs show up here once they've aired.</p>`}</div>
-      ${tracks.length > 1 && id !== RERUNS ? `<div class="section"><p class="label">Recent songs</p><div class="grid">${tracks.slice(0, 10).map(t => `<button class="tile" data-act="preview-feature" data-audio="${esc(t.audio)}"><div class="art"><img src="${trackArt(t)}" alt="" loading="lazy"></div><div class="t1">${esc(t.title)}</div><div class="t2">${t.played_at ? esc(whenText(t.played_at)) : ""}</div></button>`).join("")}</div></div>` : ""}
       ${s.kind === "folder" ? `<div class="section"><p class="label">Learn from your music</p>${folderTools(s)}</div>` : ""}
+      <p class="small"><a href="/radio/stream.mp3" target="_blank">📡 Open the live stream in another player</a></p>
       ${id !== RERUNS ? `<div class="section"><button class="pill danger" data-act="delete">Delete station</button></div>` : ""}
-    </div></section>`;
+    </details>`;
 }
+$("page").addEventListener("change", (e) => {
+  if (e.target.id === "stSort") { store.set("stSort", e.target.value); renderView(); }
+});
+
+// ---------- My playlist / Listen history
 async function collectionView() {
-  store.set("sub", view.sub);
-  const tabs = `<div class="subtabs">${[["playlist", "My playlist"], ["history", "Listen history"], ["stations", "Stations"]].map(([k, l]) => `<a href="#collection/${k}" class="${view.sub === k ? "on" : ""}">${l}</a>`).join("")}</div>`;
-  if (view.sub === "stations") return tabs + `<div class="grid">${[rerunStation(), ...R.stations].map(stationTile).join("")}${newTile}</div>`;
   if (view.sub === "history") {
     const h = cache.listened || [];
-    return tabs + (h.length ? `<p class="label">${h.length} recent songs</p><ul class="rows">${h.map(t => songRow(t, {when: whenText(t.listened_at), extra: t.via_reruns ? "rerun" : ""})).join("")}</ul>` : `<p class="empty">Nothing played yet.</p>`);
+    return crumbs(FOLDERS.history) + (h.length ? `<p class="label">${h.length} recent songs</p><ul class="rows">${h.map(t => songRow(t, {folder: "history", when: whenText(t.listened_at), extra: t.via_reruns ? "rerun" : ""})).join("")}</ul>` : `<p class="empty">Nothing played yet.</p>`);
   }
   const pl = cache.playlist || await loadPlaylist();
-  return tabs + (pl.length ? `<p class="label">${pl.length} song${pl.length === 1 ? "" : "s"}</p><ul class="rows">${pl.map(t => songRow(t, {when: "added " + whenText(t.added_at)})).join("")}</ul>`
+  return crumbs(FOLDERS.playlist) + (pl.length ? `<p class="label">${pl.length} song${pl.length === 1 ? "" : "s"}</p><ul class="rows">${pl.map(t => songRow(t, {folder: "playlist", when: "added " + whenText(t.added_at)})).join("")}</ul>`
     : `<p class="empty">Your playlist is empty. Press <b>⊕</b> in the player while a song plays, or <b>+</b> next to any song, to save it here.</p>`);
 }
 async function searchView(q) {
@@ -924,15 +1038,21 @@ async function searchView(q) {
     <section class="section"><p class="label">Songs</p>${songs.length ? `<ul class="rows">${songs.map(t => songRow(t)).join("")}</ul>` : `<p class="muted small">No songs match “${esc(q)}”.</p>`}</section>`;
 }
 let qT = 0;
-$("q").addEventListener("input", () => { clearTimeout(qT); qT = setTimeout(() => { const v = $("q").value; location.hash = v ? "#search/" + encodeURIComponent(v) : "#browse"; setTimeout(() => $("q").focus(), 0); }, 250); });
+$("q").addEventListener("input", () => { clearTimeout(qT); qT = setTimeout(() => { const v = $("q").value; location.hash = v ? "#search/" + encodeURIComponent(v) : "#lib"; setTimeout(() => $("q").focus(), 0); }, 250); });
 
 // page clicks: play a station, preview a song, playlist +, station actions
 $("page").addEventListener("click", async (e) => {
   const playEl = e.target.closest("[data-play]");
   if (playEl) { e.preventDefault(); return playStation(playEl.dataset.play); }
-  const a = e.target.closest("[data-act]"); if (!a) return;
+  const a = e.target.closest("[data-act]");
+  if (!a) {                                         // a click anywhere else on a song row opens the song, like a file
+    const r = e.target.closest(".row"), link = r && r.querySelector("a.a");
+    if (link && !e.target.closest("a, button, input, select")) location.hash = link.getAttribute("href");
+    return;
+  }
   const act = a.dataset.act, row = a.closest(".row");
   if (act === "new") return openNewStation();
+  if (act === "lib-layout") { store.set("libTiles", a.dataset.v === "1"); return renderView(); }
   if (act === "plus") { try { await setPlaylist(row.dataset.id, a.dataset.on !== "1"); } catch (err) { toast(err.message); } return; }
   if (act === "np-plus") return $("bAdd").click();
   if (act === "np-art" && current) { post("/api/radio/art", {track: current.id}).then(() => hint("Drawing a new cover — it appears in a minute or two (between songs).")).catch(e => hint(e.message)); return; }
@@ -954,7 +1074,7 @@ $("page").addEventListener("click", async (e) => {
     const s = stOf(view.id); if (!s || !confirm(`Delete “${s.name}” and its songs?`)) return;
     await api(`/api/radio/stations/${s.id}`, {method: "DELETE"}).catch(err => toast(err.message));
     if (selected === s.id) { selected = null; store.set("station", null); }
-    location.hash = "#browse"; refresh();
+    location.hash = "#lib"; refresh();
   }
 });
 function preview(src, row) {
@@ -970,7 +1090,7 @@ pv.addEventListener("ended", () => document.querySelectorAll(".row.previewing").
 // station dialogs need these names
 function openDialog(title, html) { $("dlgT").textContent = title; $("dlgB").innerHTML = html; $("dlg").showModal(); }
 $("dlgX").onclick = () => $("dlg").close();
-function openStation(id) { if ($("dlg").open) $("dlg").close(); location.hash = "#station/" + id; renderView(); }
+function openStation(id) { if ($("dlg").open) $("dlg").close(); location.hash = "#lib/" + id; renderView(); }
 function hint(t) { toast(t); }
 
 // ---------------- control sidebar: hide / pop out / pin (remembered per browser)
