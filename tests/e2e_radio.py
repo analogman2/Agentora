@@ -7,7 +7,7 @@ Usage: tests/e2e_radio.py [--radio http://127.0.0.1:7860] [--studio http://127.0
 --quick skips the broadcast tests (stream, skip, back, play next); --full adds the AI helpers and makes one song
 start to finish (lyrics, GPU recording, critic) - several minutes.
 """
-import argparse, json, subprocess, sys, threading, time, urllib.error, urllib.request
+import argparse, json, re, subprocess, sys, threading, time, urllib.error, urllib.request
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--radio", default="http://127.0.0.1:7860")
@@ -107,16 +107,37 @@ def broker_status():
     return f"priority {d['priority']}, " + ", ".join(f"GPU {x['index']} {x['free_mb'] // 1024} GB free" for x in d["devices"]) + f", {len(d['leases'])} leases"
 check("broker sees the GPU", broker_status)
 def broker_yield():   # a person waiting (a Studio lease) makes the radio step aside; releasing it lets the radio go on
-    other = [l for l in req(B, "/status")["leases"] if l["client"] in ("assistant", "studio")]
-    lease = req(B, "/lease", {"client": "studio", "kind": "interactive", "mem_mb": 1000, "wait_s": 0, "ttl_s": 30})
+    y0 = req(B, "/yield?client=radio")                 # (another lease may already hold the card)
+    lease = req(B, "/lease", {"client": "studio", "kind": "interactive", "mem_mb": 20000, "wait_s": 0, "ttl_s": 30})
     y1 = req(B, "/yield?client=radio")
     req(B, f"/lease/{lease['id']}", method="DELETE")
     y2 = req(B, "/yield?client=radio")
     must(lease["granted"] and y1["yield"], f"lease {lease}, yield while held {y1}")
-    must(other or not y2["yield"], f"radio still told to wait after release: {y2}")
+    must(y2["yield"] == y0["yield"], f"after release {y2}, before {y0}")
     return f"radio waits while the Studio holds the card ({y1['reason']}), and goes on after"
 check("leases make the radio step aside", broker_yield)
 check("Ollama proxy answers (Hermes's way in)", lambda: (lambda d: (must(any(m["id"] == "agentora-auto" for m in d["data"]), "no auto model"), f"{len(d['data'])} models incl. agentora-auto")[1])(req("http://127.0.0.1:11435", "/v1/models")))
+
+print("speech service (voice on the GPU under a lease, listening on the CPU)")
+SP = "http://127.0.0.1:7895"
+def speech_roundtrip():
+    sentence = "The quick brown fox jumps over the lazy dog."
+    r = urllib.request.Request(SP + "/v1/audio/speech", json.dumps({"input": sentence, "voice": "agentora", "response_format": "mp3"}).encode(),
+                               {"Content-Type": "application/json"})
+    t0 = time.time(); audio = urllib.request.urlopen(r, timeout=300).read(); spoke = time.time() - t0
+    must(len(audio) > 5000, f"only {len(audio)} bytes of audio")
+    boundary = "e2eboundary"
+    body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.mp3\"\r\nContent-Type: audio/mpeg\r\n\r\n").encode() \
+        + audio + f"\r\n--{boundary}--\r\n".encode()
+    r = urllib.request.Request(SP + "/v1/audio/transcriptions", body, {"Content-Type": f"multipart/form-data; boundary={boundary}"})
+    text = json.loads(urllib.request.urlopen(r, timeout=120).read())["text"]
+    words = lambda x: set(re.findall(r"[a-z]+", x.lower()))
+    overlap = len(words(text) & words(sentence)) / len(words(sentence))
+    must(overlap >= 0.8, f"heard {text!r}")
+    leased = any(l["client"] == "speech" for l in req("http://127.0.0.1:7890", "/status")["leases"])
+    must(leased, "the voice isn't holding a GPU lease")
+    return f"spoke in {spoke:.1f} s, heard back {overlap:.0%} of the words, voice under a GPU lease"
+check("speak, then listen (round trip)", speech_roundtrip)
 
 print("Image & Video Studio views of the radio")
 check("home summary", lambda: (lambda h: (must(h.get("radio") is not None, "no radio in /api/home"), f"radio on={h['radio']['on']}, {h['radio']['listeners']} listening")[1])(req(S, "/api/home")))

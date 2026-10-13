@@ -19,6 +19,9 @@ http://127.0.0.1:7860 (radio at /radio, classic deck at /radio/classic, music st
   Hermes on 127.0.0.1:11435; `GET :7890/status`). The radio asks `app.broker_yield()` before starting GPU work and
   reports `app.broker_holding()`; the Studio's `prepare_gpu()` takes a lease. Anything new that uses the GPU should
   take a lease (`POST :7890/lease`) instead of grabbing the card.
+- `studio/speech_server.py`: the **speech service**, user service `agentora-speech` on 127.0.0.1:7895, run with
+  `~/venv-speech` (not venv-yue2). OpenAI audio API: `/v1/audio/speech` (Qwen3-TTS voice design, GPU under a
+  broker lease "speech", unloads after 2 min) and `/v1/audio/transcriptions` (whisper small.en, CPU).
 - `studio/logsetup.py`: logging for every component (journal + `logs/<component>.log`); use `app.log(...)` or
   `logging.getLogger(__name__)`, never `print`.
 - `studio/art.py`: cover art via ComfyUI (Z-Image), drawn between songs only; scenes are name-free.

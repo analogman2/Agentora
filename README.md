@@ -75,6 +75,7 @@ The code, by job:
 | `studio/radio_library.py` | songs, history, playlist, feedback, next track and reruns, on/off |
 | `studio/stream_relay.py` | the stream relay (stdlib only) |
 | `studio/gpu_broker.py` | the GPU broker: leases for every GPU user, and the Ollama proxy Hermes talks to (stdlib only) |
+| `studio/speech_server.py` | the speech service: Qwen3-TTS voice (GPU, under a lease) and whisper listening (CPU), OpenAI-compatible |
 | `studio/art.py`, `studio/assistant.py`, `studio/settings.py` | cover art (ComfyUI), the chat panel (Hermes), ⚙ settings |
 | `studio/radio.html` + `studio/web/radio-*.js` | the radio page: core, player, library, panel, extras (plain scripts, no build step) |
 | `studio/index.html` | the Music Studio |
@@ -167,6 +168,24 @@ One 24 GB card serves the radio's music model (YuE2, about 10–13 GB while it r
 
 Using ComfyUI's own page (port 8188) directly bypasses the broker; everything the Studio sends goes through it.
 
+## Speech
+
+`studio/speech_server.py` (service `agentora-speech`, `127.0.0.1:7895`, in its own environment `~/venv-speech`) gives Hermes, the chat panels and any other tool a voice and ears, through the OpenAI audio API:
+
+- **Voice:** `POST /v1/audio/speech {input, voice?, instructions?, response_format?}`.
+  - It uses **Qwen3-TTS 1.7B VoiceDesign**, the voice engine of the Jim-o-Lantern talking pumpkin. A voice is *described in words*, and a fixed seed keeps it the same every time.
+  - Voices: `agentora` (default, warm and friendly), `narrator`, `bright`, `jack` (the pumpkin), or any description passed in `instructions`.
+  - It runs on the GPU under a broker lease (about 5 GB, which fits beside the radio) and unloads after 2 minutes unused (`SPEECH_IDLE`).
+  - The first sentence takes about 9 s to load; after that, a 7 s sentence takes about 2 s.
+- **Listening:** `POST /v1/audio/transcriptions` (multipart `file`, any format ffmpeg reads, including a browser's WebM recording) → `{text}`. It uses **whisper small.en** on the CPU (int8), about 2 s for a short phrase, so it never needs the card.
+- **Hermes** uses it for both directions: `tts.provider` and `stt.provider` are `openai` with `base_url: http://127.0.0.1:7895/v1`. Its speech tools are still switched off per platform (`hermes tools enable tts|stt --platform …`).
+
+```bash
+uv venv --python 3.12 ~/venv-speech
+uv pip install --python ~/venv-speech faster-qwen3-tts "qwen-tts-hf<0.2,>=0.1.1.post1" "transformers==5.15.1" "setuptools<81" faster-whisper soundfile numpy
+cp systemd/agentora-speech.service ~/.config/systemd/user/ && systemctl --user enable --now agentora-speech
+```
+
 ## Logs
 
 Every component logs the same way: a level and the component's name on every line, to the systemd journal and to a rotating file (5 MB × 5).
@@ -177,6 +196,7 @@ Every component logs the same way: a level and the component's name on every lin
 | YuE2 GPU workers | (same journal) | `logs/yue2-worker.log` |
 | Stream relay | `journalctl --user -u agentora-stream` | `logs/stream.log` |
 | GPU broker (leases, the Ollama proxy) | `journalctl --user -u agentora-gpu` | `logs/gpu-broker.log` |
+| Speech service | `journalctl --user -u agentora-speech` | `logs/speech.log` |
 | Image & Video Studio, Hermes gate (companion app) | `-u genstudio`, `-u hermes-gate` | `~/genstudio/logs/studio.log`, `hermes-gate.log` |
 | Tailscale/LAN relay | `-u tailnet-relay` | `~/.local/state/tailnet-relay/relay.log` |
 

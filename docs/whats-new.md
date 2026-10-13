@@ -116,6 +116,7 @@ A local [Hermes Agent](https://github.com/NousResearch/hermes-agent) answers in 
   - Idle models unload, and the order follows "Who goes first".
   - Hermes goes through the broker's Ollama proxy, which reloads a model squeezed onto the CPU as soon as there's room, and adds **✨ Auto**: the 27B model when the card is free within seconds, otherwise the 9B right away.
   - Ready for more tools and a second GPU. Measured: during a recording, Auto answered in 11 s fully on the GPU; AGI went from 45% to 87% on the GPU, and from 4 to 20 words per second.
+- **A voice and ears.** A speech service gives Hermes and the apps text-to-speech with Qwen3-TTS (the talking pumpkin's voice engine; voices are described in words; ~2 s per sentence once loaded, on the GPU under a lease that fits beside the radio) and speech-to-text with whisper on the CPU (~2 s), through the OpenAI audio API.
 - **Logging everywhere.** Every component (radio, GPU workers, stream relay, Image & Video Studio, Hermes gate, network relay) logs with a level and its name. Logs go to the systemd journal and to rotating files (`logs/`), and uncaught errors are logged with their traceback. See [Logs](../README.md#logs).
 - **End-to-end tests.**
   - `tests/e2e_radio.py` covers the pages, the API, the library, settings, playlist and thumbs, the stream, skip, back and play next. `--restart` restarts the radio mid-song and requires the stream not to stop. `--full` adds the AI helpers and one song made start to finish.

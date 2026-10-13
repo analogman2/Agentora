@@ -239,16 +239,24 @@ def drop(lid):
         log.info("%s lease %s released", l["client"], lid)
 
 
+BACKGROUND_MB = {"radio": 12000, "radio-art": 9000, "radio-llm": 18000}   # what each background client needs to work
+
+
 def should_yield(client):
-    """For background clients: step aside (finish the current piece, start nothing new, give the card back)?"""
+    """For background clients: step aside (finish the current piece, start nothing new, give the card back)? Yes while
+    someone ahead of it is waiting for the card, or holds so much of it that both wouldn't fit (a small model like the
+    speech service's voice shares the card with the radio)."""
     with lock:
         live = [l for l in leases.values() if l["client"] != client]
-    r = rank(client, "background")
+    r, mine = rank(client, "background"), BACKGROUND_MB.get(client, 12000)
+    total = max((d["total_mb"] for d in devices()), default=24000)
     for l in live:
-        if rank(l["client"], l["kind"]) < r:
-            who = {"assistant": "the assistant", "studio": "the Image & Video Studio"}.get(l["client"], l["client"])
-            state = "is using" if l["granted"] else "is waiting for"
-            return True, f"Waiting: {who} {state} the GPU"
+        if rank(l["client"], l["kind"]) >= r:
+            continue
+        if l["granted"] and l["mem_mb"] + mine + MARGIN_MB <= total:
+            continue                                     # both fit: carry on
+        who = {"assistant": "the assistant", "studio": "the Image & Video Studio", "speech": "the voice"}.get(l["client"], l["client"])
+        return True, f"Waiting: {who} {'is using' if l['granted'] else 'is waiting for'} the GPU"
     return False, None
 
 
