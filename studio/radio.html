@@ -929,7 +929,7 @@ function nowView() {
         Press a station to play it, or open the <a href="#lib">Library</a> to look through stations and songs.</p>
       <div class="grid">${stations.map(s => stationTile(s).replace('class="tile"', `class="tile" data-play="${esc(s.id)}"`)).join("")}${newTile}</div></section>`;
   }
-  const chips = t ? [t.airing === "rerun" ? "Rerun" : t.airing === "runner-up" ? "Runner-up take" : t.airing === "history" ? "Replay" : null, t.seconds ? mmss(t.seconds) : null,
+  const chips = t ? [t.airing === "rerun" ? "Rerun" : t.airing === "runner-up" ? "Runner-up take" : t.airing === "history" ? "Replay" : t.airing === "request" ? "Requested" : null, t.seconds ? mmss(t.seconds) : null,
     t.mode === "instrumental" || !t.lyrics ? "Instrumental" : "Vocals"].filter(Boolean) : [];
   const stId = t ? t.station : st && st.id;
   return `<section class="np">

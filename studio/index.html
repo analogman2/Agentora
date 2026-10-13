@@ -473,6 +473,7 @@ function renderLibrary(st) {
         ${files.has("audio.flac") ? `<a class="btn small" href="/files/${id}/audio.flac?download=1">⬇ FLAC</a>` : ""}
         <button class="btn small" data-act="details" data-id="${id}">Details</button>
         <button class="btn small accent" data-act="rewrite" data-id="${id}" title="Improve this song: its settings and lyrics load into the form, with AI suggestions">✏️ Rewrite</button>
+        ${files.has("song.mp3") ? `<button class="btn small" data-act="upnext" data-id="${id}" title="Play this song next on the radio, for everyone listening">📻 Play next</button>` : ""}
         <button class="btn small" data-act="reuse" data-id="${id}" title="Load these settings into the form">Reuse</button>
         <button class="btn small" data-act="take" data-id="${id}" title="Same settings, new seed">New take</button>
         ${files.has("score.abc") ? `<button class="btn small" data-act="edit" data-id="${id}" title="Edit the melody/chords and render again">Edit score</button>` : ""}
@@ -513,6 +514,13 @@ async function act(kind, id) {
   if (kind === "cancel") { await fetch(`/api/jobs/${id}/cancel`, {method: "POST"}); return tick(); }
   if (kind === "delete") { if (!confirm("Delete this song for everyone?")) return; await fetch(`/api/jobs/${id}`, {method: "DELETE"}); libSig = ""; return tick(); }
   if (kind === "rewrite") return startRewrite(id);
+  if (kind === "upnext") {
+    const b = document.querySelector(`[data-act="upnext"][data-id="${id}"]`);
+    const r = await fetch("/api/radio/upnext", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ids: [id]})});
+    const d = await r.json().catch(() => ({}));
+    if (b) { b.textContent = r.ok ? "✓ Plays next on the radio" : (d.error || "Couldn't queue it"); b.disabled = r.ok; }
+    return;
+  }
   const j = await getJob(id);
   if (kind === "reuse") return fillFrom(j);
   if (kind === "take") { fillFrom(j, {newSeed: true}); return submit(); }

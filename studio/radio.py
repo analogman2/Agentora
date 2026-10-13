@@ -113,7 +113,7 @@ def init(studio_module):
 
 def save_state():
     state["heartbeat"] = time.time()
-    (RADIO / "state.json").write_text(json.dumps({k: state.get(k) for k in ("station", "target_ahead", "on", "heartbeat")}))
+    (RADIO / "state.json").write_text(json.dumps({k: state.get(k) for k in ("station", "target_ahead", "on", "heartbeat", "upnext")}))
 
 
 def sdir(sid):
@@ -1261,7 +1261,7 @@ def _play_silence():
     while bc["listeners"]:
         for i in range(0, len(bc["silence"]), 8 * FRAME):
             _broadcast(bc["silence"][i:i + 8 * FRAME])
-        if nav["queued"] or (state["on"] and state["station"] and next_track(state["station"], mark=False)):   # ⏮, a new song, runner-up or rerun
+        if nav["queued"] or _upnext_job() or (state["on"] and state["station"] and next_track(state["station"], mark=False)):   # ⏮, a new song, runner-up or rerun
             return
 
 
@@ -1277,7 +1277,7 @@ def playout_loop():
             if BITRATE != ACTIVE_BITRATE:
                 _switch_format()
                 continue
-            t = (_take_queued() or _nav_next() or next_track(state["station"])) if state["on"] and state["station"] else None
+            t = (_take_queued() or _take_upnext() or _nav_next() or next_track(state["station"])) if state["on"] and state["station"] else None
             if t:
                 _play_track(t)
                 for _ in range(round(GAP / 1.152)):       # a little silence between songs
@@ -1421,6 +1421,54 @@ def _hist_track(i):
     return track_view(j) | {"airing": "history", "tuned": state["station"]}
 
 
+def _upnext_job(take=False):
+    """📻 Play next: the first song on the list that has finished recording (songs still recording wait their turn;
+    failed or deleted ones drop off). take=True removes it from the list."""
+    with lock:
+        ids = state.setdefault("upnext", [])
+        for jid in list(ids):
+            j = app.jobs.get(jid)                     # a plain dict read: no app.lock while holding ours
+            if not j or j.get("status") in ("failed", "cancelled"):
+                ids.remove(jid); save_state(); continue
+            if j.get("status") == "done" and (app.DATA / jid / "song.mp3").is_file():
+                if take:
+                    ids.remove(jid); save_state()
+                return j
+    return None
+
+
+def _take_upnext():
+    j = _upnext_job(take=True)
+    if j:
+        app.log(f"radio: playing next on request: {j['title']!r}")
+        return track_view(j) | {"airing": "request", "tuned": state["station"]}
+    return None
+
+
+def play_next(ids):
+    """Add songs (any song in the library, e.g. a Music Studio rewrite) to the front of the broadcast, in order."""
+    with app.lock:
+        ok = [i for i in ids if isinstance(i, str) and i in app.jobs]
+    if not ok:
+        raise app.BadRequest("No such song")
+    with lock:
+        lst = state.setdefault("upnext", [])
+        lst.extend(i for i in ok if i not in lst)
+        save_state()
+    bc["wake"].set()
+    return {"ok": True, "upnext": upnext_view()}
+
+
+def upnext_view():
+    out = []
+    for jid in state.get("upnext") or []:
+        with app.lock:
+            j = app.jobs.get(jid)
+        if j:
+            out.append({"id": jid, "title": j["title"], "ready": j.get("status") == "done", "status": j.get("status")})
+    return out
+
+
 def _take_queued():
     with nav_lock:
         t, nav["queued"] = nav["queued"], None
@@ -1509,7 +1557,7 @@ def api_state(listener=None):
                   for j in app.jobs.values() if j.get("source") == "radio" and j["status"] in ("queued", "running")]
         judging = sum(1 for j in app.jobs.values() if j.get("radio_status") == "judging")
     return {"on": state["on"], "station": state["station"], "target_ahead": state["target_ahead"], "stations": st,
-            "making": making, "judging": judging, "gpu": app.state()["gpu"], "stream": stream_view(listener),
+            "making": making, "judging": judging, "upnext": upnext_view(), "gpu": app.state()["gpu"], "stream": stream_view(listener),
             "reruns": rerun_library()}
 
 
@@ -1933,6 +1981,8 @@ def handle(h, method, path):
             return h.send(200, {"tracks": listened(min(500, int(q.get("limit") or 100)))}) or True
         if method == "GET" and path == "/api/radio/state":
             return h.send(200, api_state(q.get("listener"))) or True
+        if method == "POST" and path == "/api/radio/upnext":
+            b = h.body(); return h.send(200, play_next(b.get("ids") or [])) or True
         if method == "POST" and path == "/api/radio/back":
             b = h.body(); return h.send(200, back(b.get("track"), int(b.get("steps") or 0))) or True
         if method == "POST" and path == "/api/radio/skip":
