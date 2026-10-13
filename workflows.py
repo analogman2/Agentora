@@ -44,7 +44,8 @@ http: aiohttp.ClientSession = None
 settings = {}                                # hf_token / civitai_token (set by the server)
 _registry, _object_info = {}, {"t": 0, "data": {}}
 tasks = {}                                   # install task id -> progress
-log = print
+def log(*a):                        # replaced by server.py with the "workflows" logger; plain print when used alone
+    print(*a, flush=True)
 
 
 class WorkflowError(Exception):

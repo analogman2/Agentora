@@ -154,4 +154,7 @@ app.router.add_post("/gate/login", login)
 app.router.add_route("*", "/{path:.*}", proxy)
 
 if __name__ == "__main__":
-    web.run_app(app, host="127.0.0.1", port=PORT, access_log=None, print=lambda *_: print(f"Hermes dashboard gate on :{PORT}", flush=True))
+    import logging, logsetup
+    from pathlib import Path
+    logsetup.setup("hermes-gate", Path(__file__).resolve().parent / "logs")
+    web.run_app(app, host="127.0.0.1", port=PORT, access_log=None, print=lambda *_: logging.getLogger("hermes-gate").info(f"Hermes dashboard gate on :{PORT}"))

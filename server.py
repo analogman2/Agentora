@@ -8,8 +8,11 @@ import asyncio, base64, copy, hmac, io, json, os, random, re, shutil, time, uuid
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
+import logging
 import aiohttp
 from aiohttp import web
+
+import logsetup                     # logging for every component: journal + logs/<component>.log
 from PIL import Image
 
 import auth
@@ -821,7 +824,7 @@ async def on_startup(app):
     global http
     http = aiohttp.ClientSession()
     W.http = http
-    W.log = lambda *a: print(*a, flush=True)
+    W.log = lambda *a: (lambda m: logging.getLogger("workflows").log(logsetup.level_of(m), m))(" ".join(str(x) for x in a))
     W.settings.update(hf_token=S["hf_token"], civitai_token=S["civitai_token"])
     app["watcher"] = asyncio.create_task(watch_comfy(app))
     R.load()
@@ -836,7 +839,7 @@ async def rate_models_forever():
         try:
             await R.refresh()
         except Exception as e:
-            print(f"ratings: {e}", flush=True)
+            logging.getLogger("ratings").warning("ratings: %s", e)
         await asyncio.sleep(600)
 
 
@@ -1619,9 +1622,11 @@ def main():
     app.router.add_get("/input/{name}", input_file)
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)
-    print(f"Image & Video Studio on http://{HOST}:{PORT}/ (ComfyUI at {COMFY})", flush=True)
+    logging.getLogger("studio").info(f"Image & Video Studio on http://{HOST}:{PORT}/ (ComfyUI at {COMFY})")
     web.run_app(app, host=HOST, port=PORT, print=None)
 
 
 if __name__ == "__main__":
+    logsetup.setup("studio", Path(__file__).resolve().parent / "logs")
+    logging.getLogger("aiohttp.access").setLevel(logging.DEBUG if os.environ.get("LOG_LEVEL", "").upper() == "DEBUG" else logging.WARNING)
     main()

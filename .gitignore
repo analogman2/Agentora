@@ -11,3 +11,4 @@ workflows/
 *.bak-*
 *.orig
 __pycache__/
+logs/
