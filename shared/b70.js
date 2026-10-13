@@ -127,7 +127,9 @@
                       making: (st.making || []).length, gpu: (st.gpu || {}).detail || (st.gpu || {}).owner},
               vram: g.total_mb ? [g.used_mb, g.total_mb, g.name] : null, priority: p.priority, choices: p.choices, waiting: p.waiting, disk: d};
     }
-    const [h, p, d] = await Promise.all([get("/api/home"), get("/api/gpu-priority").catch(() => ({})), get("/api/disk").catch(() => null)]);   // signed out: no priority or disk details
+    const signedIn = await get("/api/session").then(x => !!x.user).catch(() => false);   // priority and disk details need a sign-in
+    const [h, p, d] = await Promise.all([get("/api/home"), signedIn ? get("/api/gpu-priority").catch(() => ({})) : {},
+                                         signedIn ? get("/api/disk").catch(() => null) : null]);
     const r = h.radio, sy = h.system || {};
     return {radio: r && {on: r.on, station: r.station && r.station.name, now: r.now && r.now.title, listeners: r.listeners || 0,
                          making: r.making || 0, gpu: r.detail || r.gpu},
