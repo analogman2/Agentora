@@ -502,6 +502,7 @@ const store = { get(k, d) { try { const v = localStorage.getItem("radio." + k); 
                 set(k, v) { try { localStorage.setItem("radio." + k, JSON.stringify(v)); } catch {} } };
 const RERUNS = "__reruns__";
 const met = {stalls: 0, reconnects: 0};
+const lp = {t: null, queue: [], i: -1};          // a song playing from the Library (see 'playing from the Library')
 let R = null, current = null, wantPlay = false, actx = null, devNodes = null, shelfSig = "";
 let selected = store.get("station", null);
 const audio = $("audio"), pv = $("pv");
@@ -661,6 +662,7 @@ setInterval(() => {
 }, 2000);
 async function playStation(id) {
   ensureAudioGraph(); if (actx && actx.state === "suspended") await actx.resume();
+  if (lp.t) lpStop(true);                          // back to the live broadcast
   pv.pause(); document.querySelectorAll(".row.previewing").forEach(r => r.classList.remove("previewing"));
   if (!id) return toast("Pick a station first.");
   selected = id; store.set("station", id);
@@ -673,6 +675,7 @@ async function playStation(id) {
   location.hash = "#now"; refresh();
 }
 async function togglePlay() {
+  if (lp.t) { pv.paused ? pv.play().catch(e => toast(e.message)) : pv.pause(); return; }   // a library song is in the player
   ensureAudioGraph(); if (actx && actx.state === "suspended") await actx.resume();
   if (lid) { wantPlay = false; disconnect(); return; }
   playStation(selected || (R && R.station) || (R && R.stations[0] && R.stations[0].id));
@@ -684,13 +687,20 @@ document.addEventListener("keydown", e => {
 
 // ---------------- player bar + now playing
 function setPlayingUI() {
-  const playing = !!lid && !audio.paused;
-  $("bPlayIcon").innerHTML = lid ? '<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>' : '<path d="M8 5v14l11-7z"/>';
-  $("bPlay").setAttribute("aria-label", lid ? "Pause" : "Play");
+  const playing = !!lid && !audio.paused, on = lp.t ? !pv.paused : !!lid;
+  $("bPlayIcon").innerHTML = on ? '<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>' : '<path d="M8 5v14l11-7z"/>';
+  $("bPlay").setAttribute("aria-label", on ? "Pause" : "Play");
   $("favicon").href = playing && hearing() ? "/icons/radio-live.svg" : "/icons/radio.svg";
   updateMediaSession();
 }
 function syncNow() {
+  if (lp.t) {                                      // a library song: the bar follows it, not the broadcast
+    if (current !== lp.t) { current = lp.t; shownId = undefined; renderBar(); if (view.tab === "now") renderView(); setPlayingUI(); }
+    const el = pv.currentTime || 0, dur = pv.duration || lp.t.seconds || 0;
+    $("bEl").textContent = mmss(el); $("bDur").textContent = dur ? mmss(dur) : "—";
+    $("bProg").style.width = dur ? Math.min(100, 100 * el / dur) + "%" : "0";
+    return;
+  }
   const h = hearing(), id = h ? h.id : null;
   if (id !== shownId) { shownId = id; current = h ? {...h} : null; renderBar(); if (view.tab === "now") renderView(); setPlayingUI(); loadHistory(); }
   if (current && lid) {
@@ -705,7 +715,7 @@ function renderBar() {
   $("bCover").src = t ? trackArt(t) : stationArt(st);
   $("bLink").href = t ? (t.station ? `#lib/${encodeURIComponent(t.station)}/${encodeURIComponent(t.id)}` : `#song/${encodeURIComponent(t.id)}`) : "#now";
   $("bTitle").textContent = t ? t.title : lid ? "Next song on the way…" : st ? st.name : "Pick a station";
-  $("bStation").textContent = t ? (t.station_name || (st && st.name) || "") + (t.airing === "rerun" ? " · rerun" : t.airing === "runner-up" ? " · runner-up" : "") : st ? (lid ? "tuning in…" : "press play") : "Agentora";
+  $("bStation").textContent = lp.t ? `${t.station_name || "Music Studio"} · from your library` : t ? (t.station_name || (st && st.name) || "") + (t.airing === "rerun" ? " · rerun" : t.airing === "runner-up" ? " · runner-up" : "") : st ? (lid ? "tuning in…" : "press play") : "Agentora";
   $("bUp").classList.toggle("on-up", !!t && t.feedback === "keep");
   setAddKey(!!t && !!t.in_playlist);
   ["bUp", "bDown", "bAdd", "bSkip", "bBack"].forEach(k => $(k).disabled = !t);
@@ -746,8 +756,11 @@ async function skipNow(kind) {
   try { const r = await post("/api/radio/skip", {track: current ? current.id : null, kind}); followCut(r.cut); }
   catch (e) { toast(e.message); }
 }
-$("bDown").onclick = () => { toast("👎 Noted — fewer like this. Skipping…"); skipNow("dislike"); };
-$("bSkip").onclick = () => { toast("Skipping for everyone listening…"); skipNow("skip"); };
+$("bDown").onclick = () => {
+  if (lp.t) { post("/api/radio/feedback", {track: lp.t.id, kind: "dislike"}).catch(() => {}); toast("👎 Noted — fewer like this."); return lpPlay(lp.i + 1); }
+  toast("👎 Noted — fewer like this. Skipping…"); skipNow("dislike");
+};
+$("bSkip").onclick = () => { if (lp.t) return lpPlay(lp.i + 1); toast("Skipping for everyone listening…"); skipNow("skip"); };
 // ⏮ like any player: more than a few seconds into a song it restarts it; near the start (or pressed again quickly) it goes
 // to the previous song, and so on back through the history
 let backAt = 0;
@@ -765,7 +778,7 @@ async function backNow() {
     if (r.error) toast(r.error); else { followCut(r.cut); if (again) toast(`⏮ ${r.title}${r.first ? " — the oldest song in this session's history" : ""}`); }
   } catch (e) { toast(e.message); }
 }
-$("bBack").onclick = backNow;
+$("bBack").onclick = () => lp.t ? lpBack() : backNow();
 function setAddKey(on) {
   $("bAdd").classList.toggle("inlist", on); $("bAdd").setAttribute("aria-pressed", on);
   $("bAdd").title = on ? "In your playlist — press to remove" : "Add to my playlist";
@@ -784,10 +797,10 @@ const ms = "mediaSession" in navigator ? navigator.mediaSession : null;
 let msKey = null;
 function updateMediaSession() {
   if (!ms) return;
-  ms.playbackState = !lid ? "none" : audio.paused ? "paused" : "playing";
-  const t = current, st = R && stOf(selected), key = [lid && "on", t && t.id, t && t.cover, st && st.name, st && st.art].join("|");
+  ms.playbackState = lp.t ? (pv.paused ? "paused" : "playing") : !lid ? "none" : audio.paused ? "paused" : "playing";
+  const t = current, st = R && stOf(selected), key = [(lid || lp.t) && "on", t && t.id, t && t.cover, st && st.name, st && st.art].join("|");
   if (key === msKey) return; msKey = key;
-  if (!lid) { ms.metadata = null; return; }
+  if (!lid && !lp.t) { ms.metadata = null; return; }
   ms.metadata = new MediaMetadata({title: t ? t.title : "Next song on the way…", artist: (t && t.station_name) || (st && st.name) || "Agentora",
     album: "Agentora", artwork: t && t.cover ? [{src: location.origin + t.cover, sizes: "768x768", type: "image/jpeg"}]
       : st && st.art ? [{src: location.origin + stationArt(st), sizes: "768x768", type: "image/jpeg"}] : [{src: "/icons/radio-180.png", sizes: "180x180", type: "image/png"}]});
@@ -795,10 +808,10 @@ function updateMediaSession() {
 if (ms) {
   const act = (a, f) => { try { ms.setActionHandler(a, f); } catch {} };
   act("play", () => { if (!lid) return togglePlay(); wantPlay = true; audio.paused ? connect() : audio.play(); });   // live: rejoin, don't resume stale audio
-  act("pause", () => { if (lid) togglePlay(); });
-  act("stop", () => { if (lid) togglePlay(); });
+  act("pause", () => { if (lid || lp.t) togglePlay(); });
+  act("stop", () => { if (lp.t) return lpStop(); if (lid) togglePlay(); });
   act("nexttrack", () => $("bSkip").click());
-  act("previoustrack", backNow);
+  act("previoustrack", () => lp.t ? lpBack() : backNow());
 }
 
 // ---------------- data
@@ -888,6 +901,7 @@ async function renderView() {
   const typing = document.activeElement && document.activeElement.classList.contains("lfilter") ? document.activeElement : null;
   const caret = typing && [typing.dataset.list, typing.selectionStart, typing.selectionEnd];
   page.innerHTML = html;
+  lpMark();                                        // the row of the library song that's playing
   if (caret) {                                     // a refresh while typing in a list's search box keeps the cursor
     const f = page.querySelector(`.lfilter[data-list="${CSS.escape(caret[0])}"]`);
     if (f) { f.focus(); f.setSelectionRange(caret[1], caret[2]); }
@@ -1209,14 +1223,14 @@ $("page").addEventListener("click", async (e) => {
   if (act === "plus") { try { await setPlaylist(row.dataset.id, a.dataset.on !== "1"); } catch (err) { toast(err.message); } return; }
   if (act === "np-plus") return $("bAdd").click();
   if (act === "np-art" && current) { post("/api/radio/art", {track: current.id}).then(() => hint("Drawing a new cover — it appears in a minute or two (between songs).")).catch(e => hint(e.message)); return; }
-  if (act === "preview" || act === "preview-feature") return preview(row ? row.dataset.audio : a.dataset.audio, row);
+  if (act === "preview" || act === "preview-feature") return preview(row ? row.dataset.audio : a.dataset.audio, row, row ? row.dataset.id : a.dataset.id);
   if (act === "edit") return editStation(stOf(view.id));
   if (act === "forget-taste") { if (!confirm("Forget what this station has learned from your thumbs?")) return; await api(`/api/radio/stations/${encodeURIComponent(view.id)}/taste`, {method: "DELETE"}).catch(e => toast(e.message)); await refresh(); renderView(); return; }
   if (act === "song-fb") { await post("/api/radio/feedback", {track: view.id, kind: a.dataset.kind}).catch(e => toast(e.message)); toast(a.dataset.kind === "keep" ? "👍 Noted — the station learns from this." : a.dataset.kind === "dislike" ? "👎 Noted — fewer like this." : "Cleared."); renderView(); return; }
   if (act === "song-plus") { try { await setPlaylist(view.id, a.dataset.on !== "1"); } catch (err) { toast(err.message); } renderView(); return; }
   if (act === "song-art") { post("/api/radio/art", {track: view.id}).then(() => toast("Drawing a new cover — it appears in a minute or two.")).catch(e => toast(e.message)); return; }
   if (act === "song-more") { post(`/api/radio/stations/${encodeURIComponent(a.dataset.station)}/song`, {like: view.id}).then(() => toast("Writing a new song in the spirit of this one — it's recorded next.")).catch(e => toast(e.message)); return; }
-  if (act === "song-play") return preview(a.dataset.audio, null);
+  if (act === "song-play") return preview(a.dataset.audio, null, view.id);
   if (act === "song-rewrite") { if (window.b70Open) { e.preventDefault(); b70Open("music", "#rewrite=" + a.dataset.id); } return; }
   if (act === "make-song") {
     a.disabled = true;
@@ -1231,15 +1245,52 @@ $("page").addEventListener("click", async (e) => {
     location.hash = "#lib"; refresh();
   }
 });
-function preview(src, row) {
-  const same = pv.getAttribute("src") === src && !pv.paused;
-  document.querySelectorAll(".row.previewing").forEach(r => { r.classList.remove("previewing"); r.querySelector(".pv").textContent = "▶"; });
-  if (same) { pv.pause(); return; }
-  if (lid) { wantPlay = false; disconnect(); toast("Radio paused while you preview — press play to rejoin the broadcast."); }
-  pv.src = src; pv.play().catch(err => toast(err.message));
-  if (row) { row.classList.add("previewing"); row.querySelector(".pv").textContent = "❚❚"; }
+// ---------------- playing from the Library: the song (and the rest of its list) plays in the player bar; ⏮ ⏭ move
+// through that list, ▶ on a station goes back to the live broadcast
+function lpTrack(id) {
+  for (const list of [cache.all, cache.playlist, cache.listened, ...Object.values(cache.station)]) {
+    const t = (list || []).find(x => x.id === id); if (t) return t;
+  }
+  return null;
 }
-pv.addEventListener("ended", () => document.querySelectorAll(".row.previewing").forEach(r => { r.classList.remove("previewing"); r.querySelector(".pv").textContent = "▶"; }));
+function lpQueueFrom(row) {                        // the songs you can see in that list, in the order shown
+  const ul = row && row.closest(".rows");
+  return ul ? [...ul.querySelectorAll(".row:not([hidden])")].map(r => lpTrack(r.dataset.id)
+    || {id: r.dataset.id, audio: r.dataset.audio, title: r.querySelector("a.a").textContent}) : [];
+}
+function lpMark() {
+  document.querySelectorAll(".row").forEach(r => {
+    const on = !!lp.t && r.dataset.id === lp.t.id && !pv.paused;
+    r.classList.toggle("previewing", on); const b = r.querySelector(".pv"); if (b) b.textContent = on ? "❚❚" : "▶";
+  });
+}
+function lpPlay(i) {
+  const t = lp.queue[i]; if (!t) return lpStop();
+  lp.i = i; lp.t = t;
+  if (lid) { wantPlay = false; disconnect(); toast("Playing from your library — press ▶ on a station to go back to the radio."); }
+  pv.src = t.audio; pv.play().catch(err => toast(err.message));
+  syncNow(); lpMark();
+}
+function lpBack() { if (pv.currentTime > 3 || lp.i <= 0) { pv.currentTime = 0; pv.play().catch(() => {}); } else lpPlay(lp.i - 1); }
+function lpStop(quiet) {
+  lp.t = null; lp.queue = []; lp.i = -1; pv.pause(); pv.removeAttribute("src");
+  current = null; shownId = undefined; lpMark();
+  if (!quiet) { syncNow(); renderBar(); setPlayingUI(); if (view.tab === "now") renderView(); }
+}
+async function preview(src, row, id) {
+  id = id || (row && row.dataset.id);
+  if (lp.t && lp.t.id === id) { pv.paused ? pv.play().catch(e => toast(e.message)) : pv.pause(); return; }   // same song: play / pause
+  let queue = lpQueueFrom(row);
+  if (!queue.length) {                             // a song page or a tile: just that song
+    let t = lpTrack(id);
+    if (!t && id) t = await api(`/api/radio/tracks/${encodeURIComponent(id)}`).catch(() => null);
+    queue = [t || {id, audio: src, title: "Song"}];
+  }
+  lp.queue = queue; lpPlay(Math.max(0, queue.findIndex(t => t.id === id)));
+}
+pv.addEventListener("play", () => { setPlayingUI(); lpMark(); });
+pv.addEventListener("pause", () => { setPlayingUI(); lpMark(); });
+pv.addEventListener("ended", () => { if (lp.t) lpPlay(lp.i + 1); });   // on to the next song in the list
 
 // station dialogs need these names
 function openDialog(title, html) { $("dlgT").textContent = title; $("dlgB").innerHTML = html; $("dlg").showModal(); }
