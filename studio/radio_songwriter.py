@@ -320,7 +320,8 @@ def edit_lyrics(s, title, style, lyrics, base, model, label):
 
 def lyricist_may_run():
     """The 27B lyricist needs most of the card: only when nothing else is on it."""
-    if app.gpu["owner"] in ("studio", "switching", "waiting") or art.inflight or app.comfy_busy() or app.assistant_on_gpu():
+    if app.gpu["owner"] in ("studio", "switching", "waiting") or art.inflight or app.comfy_busy() or app.assistant_on_gpu() \
+            or app.broker_yield("radio-llm"):           # someone is waiting for the card (GPU broker)
         return False
     used = app.gpu_free_mib(0)
     return used is not None and used < 6000

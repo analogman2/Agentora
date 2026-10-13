@@ -74,6 +74,7 @@ The code, by job:
 | `studio/radio_broadcast.py` | playout, pacing, the feed to the relay, ⏭ ⏮ 📻 play next, listening signals |
 | `studio/radio_library.py` | songs, history, playlist, feedback, next track and reruns, on/off |
 | `studio/stream_relay.py` | the stream relay (stdlib only) |
+| `studio/gpu_broker.py` | the GPU broker: leases for every GPU user, and the Ollama proxy Hermes talks to (stdlib only) |
 | `studio/art.py`, `studio/assistant.py`, `studio/settings.py` | cover art (ComfyUI), the chat panel (Hermes), ⚙ settings |
 | `studio/radio.html` + `studio/web/radio-*.js` | the radio page: core, player, library, panel, extras (plain scripts, no build step) |
 | `studio/index.html` | the Music Studio |
@@ -107,9 +108,10 @@ printf 'FROM qwen3.6:35b-a3b\nPARAMETER num_ctx 8192\nPARAMETER num_gpu 0\n' > M
 printf 'FROM qwen3.6:27b\nPARAMETER num_ctx 65536\n' > Modelfile && ollama create qwen3.6-agent -f Modelfile
 printf 'FROM qwen3.5:9b\nPARAMETER num_ctx 65536\n' > Modelfile && ollama create qwen3.5-agent-fast -f Modelfile
 
-# 3. the stream relay (keeps listeners connected through a restart of the radio)
-cp ~/yue2-xpu-radio/systemd/agentora-stream.service ~/.config/systemd/user/
-systemctl --user daemon-reload && systemctl --user enable --now agentora-stream
+# 3. the stream relay (keeps listeners connected through a restart of the radio) and the GPU broker
+cp ~/yue2-xpu-radio/systemd/agentora-{stream,gpu}.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now agentora-stream agentora-gpu
+# point Hermes (or any OpenAI-compatible tool) at the broker's Ollama proxy: base_url http://127.0.0.1:11435/v1
 
 # 4. run the radio (or install systemd/yue2-studio.service)
 ~/yue2-xpu-radio/start-local.sh
@@ -151,6 +153,20 @@ Most radio and audio settings (bitrate, loudness, EQ, quality steps, takes, writ
 | `POST /api/radio/stations/<id>/song` `{like}` | write and record a song now (optionally "more like" a song) |
 | `POST /api/rewrite/suggest` `{id, ask}` | ✏️ ideas for rewriting a song, or turn a request into edits |
 
+## Sharing the GPU
+
+One 24 GB card serves the radio's music model (YuE2, about 10–13 GB while it records), ComfyUI (pictures, videos, cover art), and the chat models (the 27B "AGI" needs about 18–21 GB with its 64k context). Not everything fits at once, and a model that loads into whatever is left runs partly on the CPU, several times slower, for as long as it stays loaded. **The GPU broker** (`studio/gpu_broker.py`, service `agentora-gpu`) decides who gets the card:
+
+- **Every GPU user takes a lease**: who it is, roughly how much memory it needs, and whether a person is waiting (the assistant, the Image & Video Studio) or it's background work (the radio's recordings, cover art, the lyricist). The radio and the Studio ask the broker directly. Hermes reaches Ollama through the broker's **Ollama proxy** (`127.0.0.1:11435`), which takes leases on its behalf, so the chat panels, the Hermes dashboard, the terminal and cron jobs are all covered.
+- **To grant a lease, the broker makes room** using real measurements (`nvidia-smi`): background work stops starting new pieces and gives the card back (the radio finishes the take in progress, then unloads YuE2; the music keeps playing from its spool of ready songs), an idle ComfyUI unloads, and idle Ollama models unload.
+- **The order follows "Who goes first"** in the ☰ panel. With *Shared*, a person waiting beats background work; *Radio*, *Image & Video Studio* or *Assistant* puts that one first.
+- **A chat keeps the card for 3 minutes after its last message** (`BROKER_ASSISTANT_IDLE`), then the radio carries on. A Studio job keeps it while ComfyUI is busy.
+- **Models squeezed partly onto the CPU are reloaded fully** as soon as there's room, only when more room has appeared since the last try.
+- **✨ Auto** (the chat's middle setting) uses the 27B model when it can have the card within about 3 seconds, and otherwise answers right away with the 9B model, which always fits.
+- **More GPUs, more tools:** devices come from `nvidia-smi` and leases are per device, so a second card is picked up automatically. A new tool takes a lease with `POST :7890/lease {client, kind, mem_mb, wait_s}`. `GET :7890/status` shows the cards, leases and who is being asked to wait.
+
+Using ComfyUI's own page (port 8188) directly bypasses the broker; everything the Studio sends goes through it.
+
 ## Logs
 
 Every component logs the same way: a level and the component's name on every line, to the systemd journal and to a rotating file (5 MB × 5).
@@ -160,6 +176,7 @@ Every component logs the same way: a level and the component's name on every lin
 | Radio + Music Studio (and each module: `radio_spool`, `radio_broadcast`, `art`…) | `journalctl --user -u yue2-studio` | `logs/radio.log` |
 | YuE2 GPU workers | (same journal) | `logs/yue2-worker.log` |
 | Stream relay | `journalctl --user -u agentora-stream` | `logs/stream.log` |
+| GPU broker (leases, the Ollama proxy) | `journalctl --user -u agentora-gpu` | `logs/gpu-broker.log` |
 | Image & Video Studio, Hermes gate (companion app) | `-u genstudio`, `-u hermes-gate` | `~/genstudio/logs/studio.log`, `hermes-gate.log` |
 | Tailscale/LAN relay | `-u tailnet-relay` | `~/.local/state/tailnet-relay/relay.log` |
 

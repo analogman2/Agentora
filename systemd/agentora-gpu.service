@@ -1,0 +1,12 @@
+[Unit]
+Description=Agentora GPU broker: decides who gets the graphics card (leases on 7890, Ollama proxy for Hermes on 11435)
+After=network.target ollama.service
+
+[Service]
+ExecStart=%h/venv-yue2/bin/python %h/yue2-xpu-radio/studio/gpu_broker.py --port 7890 --ollama-port 11435
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

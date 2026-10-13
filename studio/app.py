@@ -167,8 +167,39 @@ def comfy_busy():
         return False
 
 
+BROKER = os.environ.get("GPU_BROKER", "http://127.0.0.1:7890")   # gpu_broker.py: who gets the card (leases)
+_broker = {"t": 0.0, "v": {}}
+
+
+def broker_yield(client="radio"):
+    """The GPU broker's answer for a background client: a reason to wait (someone is waiting for or using the card
+    ahead of us), or None. If the broker isn't running, the radio decides on its own as before."""
+    if time.time() - _broker["t"] > 1 or client not in _broker["v"]:
+        try:
+            with urllib.request.urlopen(f"{BROKER}/yield?client={client}", timeout=2) as r:
+                d = json.loads(r.read())
+            _broker["v"][client] = d["reason"] if d.get("yield") else None
+        except Exception:
+            _broker["v"][client] = None
+        _broker["t"] = time.time()
+    return _broker["v"][client]
+
+
+def broker_holding(holding, mem_mb=12000, device=0, client="radio"):
+    """Tell the broker the radio has (or no longer has) YuE2 on a card."""
+    try:
+        urllib.request.urlopen(urllib.request.Request(f"{BROKER}/holding", json.dumps(
+            {"client": client, "holding": holding, "mem_mb": mem_mb, "device": device}).encode(),
+            {"Content-Type": "application/json"}), timeout=2).read()
+    except Exception:
+        pass
+
+
 def gpu_yield_reason():
     """Why the radio should not take the GPU right now under the chosen priority, or None."""
+    why = broker_yield("radio")
+    if why:
+        return why
     p = gpu_priority()
     if p == "studio" and comfy_busy():
         return "Waiting: the Image & Video Studio has GPU priority and is making something"
@@ -825,6 +856,7 @@ class Worker(threading.Thread):
             if not self.holding():
                 raise RuntimeError("Could not start YuE2 on any GPU")
         self.set_gpu("studio", "YuE2 loaded")
+        broker_holding(True, device=next((sl.index for sl in self.slots if sl.ready), 0))
         return True
 
     def release(self):
@@ -835,6 +867,7 @@ class Worker(threading.Thread):
         for sl in self.slots:
             # on a shared CUDA card the songwriter LLM stays resident, so "freed" means below ~12 GB (desktop + songwriter)
             self.wait_vram(sl.index, 12 * 1024 if DEVICE.startswith("cuda") else 1024, 60, "the YuE2 process to free GPU memory")
+        broker_holding(False)
         with lock:
             gpu["release_requested"] = gpu["release_on_idle"] = False; gpu["idle_since"] = None
         if LLM_UNIT and not llm_active():

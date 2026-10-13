@@ -111,6 +111,11 @@ A local [Hermes Agent](https://github.com/NousResearch/hermes-agent) answers in 
 
 - **The music survives a restart.** The live stream now runs as its own small service, the **stream relay** (port 7861). It holds every listener's connection, the 15 s cushion and the stream position. The radio feeds it audio. When the radio restarts for an update, listeners stay connected and a silence bridge covers the few seconds until the next song. Before, every restart cut the stream for everyone.
 - **Broken into modules by job.** The 2,000-line `radio.py` is now `radio_state`, `radio_stations`, `radio_songwriter`, `radio_spool`, `radio_broadcast` and `radio_library`. The radio page's 1,250-line script is now five files in `studio/web/` (core, player, library, panel, extras). There's no change in behaviour: the same end-to-end tests pass before and after.
+- **GPU sharing that works.** A GPU broker hands out the card by leases.
+  - A chat or a picture you're waiting for makes the radio step aside after its current take, with music still playing from the ready songs.
+  - Idle models unload, and the order follows "Who goes first".
+  - Hermes goes through the broker's Ollama proxy, which reloads a model squeezed onto the CPU as soon as there's room, and adds **✨ Auto**: the 27B model when the card is free within seconds, otherwise the 9B right away.
+  - Ready for more tools and a second GPU. Measured: during a recording, Auto answered in 11 s fully on the GPU; AGI went from 45% to 87% on the GPU, and from 4 to 20 words per second.
 - **Logging everywhere.** Every component (radio, GPU workers, stream relay, Image & Video Studio, Hermes gate, network relay) logs with a level and its name. Logs go to the systemd journal and to rotating files (`logs/`), and uncaught errors are logged with their traceback. See [Logs](../README.md#logs).
 - **End-to-end tests.**
   - `tests/e2e_radio.py` covers the pages, the API, the library, settings, playlist and thumbs, the stream, skip, back and play next. `--restart` restarts the radio mid-song and requires the stream not to stop. `--full` adds the AI helpers and one song made start to finish.

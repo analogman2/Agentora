@@ -15,6 +15,10 @@ http://127.0.0.1:7860 (radio at /radio, classic deck at /radio/classic, music st
   127.0.0.1:7862 for the radio's feed). It holds the listeners, the burst buffer and the stream position, and bridges
   with silence when the feed stops, so restarting `yue2-studio` no longer disconnects anyone. Restarting
   `agentora-stream` itself does.
+- `studio/gpu_broker.py`: the **GPU broker**, user service `agentora-gpu` (leases on 127.0.0.1:7890, Ollama proxy for
+  Hermes on 127.0.0.1:11435; `GET :7890/status`). The radio asks `app.broker_yield()` before starting GPU work and
+  reports `app.broker_holding()`; the Studio's `prepare_gpu()` takes a lease. Anything new that uses the GPU should
+  take a lease (`POST :7890/lease`) instead of grabbing the card.
 - `studio/logsetup.py`: logging for every component (journal + `logs/<component>.log`); use `app.log(...)` or
   `logging.getLogger(__name__)`, never `print`.
 - `studio/art.py`: cover art via ComfyUI (Z-Image), drawn between songs only; scenes are name-free.

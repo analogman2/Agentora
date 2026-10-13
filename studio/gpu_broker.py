@@ -1,0 +1,508 @@
+#!/usr/bin/env python3
+"""Agentora GPU broker: one place that decides who uses the graphics card(s), so a chat or a picture doesn't end up
+half on the CPU because the radio got there first.
+
+Every GPU user takes a *lease*: who it is, roughly how much memory it needs, and whether a person is waiting
+("interactive": the assistant, the Image & Video Studio) or not ("background": the radio's recordings, cover art,
+the lyricist). To grant a lease the broker makes room with real measurements (nvidia-smi): it tells background
+clients to step aside (they ask GET /yield before starting new work), asks an idle ComfyUI to unload, and unloads
+idle Ollama models. The order follows the "Who goes first" setting (~/.config/ai-gpu-priority.json): shared = a
+person waiting beats background work; radio / studio / assistant = that one first.
+
+Tools that can't ask for a lease themselves get a proxy: the Ollama proxy (127.0.0.1:11435) takes an "assistant"
+lease for every chat request from Hermes, reloads a model that was squeezed half onto the CPU once there is room,
+and maps the virtual model "agentora-auto" to the strongest model that can have the card right now.
+
+API (127.0.0.1:7890, JSON):
+  POST /lease {client, kind: interactive|background, mem_mb, wait_s, ttl_s, device?} -> {granted, id, device, ...}
+  POST /lease/<id>/renew {ttl_s?}     DELETE /lease/<id>
+  GET  /yield?client=radio            -> {yield, reason}   (background clients: wait before starting new work)
+  POST /holding {client, device, mem_mb, holding}       (a background client says it has its model on a card)
+  GET  /status
+Multi-GPU: devices come from nvidia-smi and leases are per device (the one with the most room unless asked).
+Stdlib only. Usage: gpu_broker.py [--port 7890] [--ollama-port 11435]
+"""
+import argparse, http.client, json, logging, os, re, subprocess, threading, time, urllib.request, uuid
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+import logsetup
+
+ap = argparse.ArgumentParser()
+ap.add_argument("--port", type=int, default=7890)
+ap.add_argument("--ollama-port", type=int, default=11435)
+ap.add_argument("--ollama", default="http://127.0.0.1:11434")
+ap.add_argument("--comfy", default="http://127.0.0.1:8188")
+A = ap.parse_args()
+log = logging.getLogger("gpu-broker")
+
+PRIORITY_FILE = Path.home() / ".config" / "ai-gpu-priority.json"
+STATE_FILE = Path.home() / ".config" / "agentora-gpu-broker.json"     # learned model sizes
+INTERACTIVE = {"assistant", "studio"}
+MARGIN_MB = 600                                   # keep this much free beyond the estimate (CUDA context, fragmentation)
+ASSISTANT_IDLE_S = int(os.environ.get("BROKER_ASSISTANT_IDLE", "180"))   # a chat keeps the card this long after its last call
+AUTO = {"agentora-auto": ("qwen3.6-agent", "qwen3.5-agent-fast")}       # strongest first, then the one that always fits
+AUTO_WAIT_S = 3.0                                 # how long "auto" waits for room for the strong model
+STRONG_WAIT_S = 45.0                              # a model asked for by name waits this long for room, then loads anyway
+DEFAULT_MB = {"qwen3.6-agent": 18000, "qwen3.5-agent-fast": 9000}
+
+lock = threading.RLock()
+leases = {}                                       # id -> {client, kind, mem_mb, device, granted, since, expires, note}
+holders = {}                                      # client -> {device, mem_mb, since}   (background models on a card)
+sizes = {}                                        # model -> full size in MiB (learned from Ollama)
+try:
+    _saved = json.loads(STATE_FILE.read_text())
+    sizes.update(_saved.get("sizes", {}))
+    leases.update({k: v for k, v in _saved.get("leases", {}).items() if v.get("expires", 0) > time.time() and v.get("granted")})
+except (OSError, ValueError):
+    pass
+
+
+# ---------------------------------------------------------------- facts
+_dev = {"t": 0, "v": []}
+
+
+def devices():
+    """[{index, name, total_mb, used_mb, free_mb}] from nvidia-smi (cached for a second)."""
+    if time.time() - _dev["t"] > 1:
+        try:
+            out = subprocess.run(["nvidia-smi", "--query-gpu=index,name,memory.total,memory.used", "--format=csv,noheader,nounits"],
+                                 capture_output=True, text=True, timeout=10).stdout
+            v = []
+            for line in out.strip().splitlines():
+                i, name, total, used = [x.strip() for x in line.split(",")]
+                v.append({"index": int(i), "name": name, "total_mb": int(total), "used_mb": int(used), "free_mb": int(total) - int(used)})
+            _dev.update(t=time.time(), v=v)
+        except Exception as e:
+            log.warning("nvidia-smi failed: %s", e)
+    return _dev["v"]
+
+
+def priority():
+    try:
+        return json.loads(PRIORITY_FILE.read_text()).get("priority", "shared")
+    except (OSError, ValueError):
+        return "shared"
+
+
+def rank(client, kind):
+    """Lower goes first."""
+    p = priority()
+    if client == p or (p == "studio" and client == "studio") or (p == "radio" and client.startswith("radio")):
+        return 0
+    return 1 if kind == "interactive" else 2
+
+
+def ollama_json(path, body=None, timeout=10):
+    r = urllib.request.Request(A.ollama + path, json.dumps(body).encode() if body is not None else None,
+                               {"Content-Type": "application/json"}, method="POST" if body is not None else "GET")
+    with urllib.request.urlopen(r, timeout=timeout) as resp:
+        return json.loads(resp.read() or b"{}")
+
+
+def ollama_loaded():
+    try:
+        return {m["name"].removesuffix(":latest"): m for m in ollama_json("/api/ps").get("models", [])}
+    except Exception:
+        return {}
+
+
+def save_sizes():
+    """Learned sizes and the live leases survive a restart of the broker (else the radio could grab the card mid-chat)."""
+    try:
+        with lock:
+            data = json.dumps({"sizes": sizes, "leases": {k: v for k, v in leases.items() if v.get("granted")}})
+        tmp = STATE_FILE.with_suffix(".tmp"); tmp.write_text(data); tmp.replace(STATE_FILE)
+    except OSError:
+        pass
+
+
+def model_mb(model):
+    return sizes.get(model) or DEFAULT_MB.get(model) or 10000
+
+
+def ollama_gpu_mb():
+    """GPU memory Ollama's runners really hold (nvidia-smi per process: weights + KV cache + compute buffers; Ollama's
+    own size_vram leaves the buffers out)."""
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-compute-apps=pid,used_memory", "--format=csv,noheader,nounits"],
+                             capture_output=True, text=True, timeout=10).stdout
+        total = 0
+        for line in out.strip().splitlines():
+            pid, mb = [x.strip() for x in line.split(",")]
+            try:
+                cmd = Path(f"/proc/{pid}/cmdline").read_bytes()
+            except OSError:
+                continue
+            if b"ollama" in cmd:
+                total += int(mb)
+        return total
+    except Exception:
+        return 0
+
+
+# ---------------------------------------------------------------- making room
+def comfy_idle():
+    try:
+        with urllib.request.urlopen(A.comfy + "/queue", timeout=3) as r:
+            q = json.loads(r.read())
+        return not q.get("queue_running") and not q.get("queue_pending")
+    except Exception:
+        return False
+
+
+def make_room(for_client):
+    """Free what isn't needed right now: idle ComfyUI models, Ollama models nobody holds a lease for. Background
+    clients (the radio) see the waiting lease through /yield and step aside on their own."""
+    freed = []
+    if not any(l["client"] == "studio" and l["granted"] for l in leases.values()) and comfy_idle():
+        try:
+            urllib.request.urlopen(urllib.request.Request(A.comfy + "/free", json.dumps({"unload_models": True, "free_memory": True}).encode(),
+                                                          {"Content-Type": "application/json"}), timeout=10).read()
+            freed.append("ComfyUI")
+        except Exception:
+            pass
+    leased = {l.get("model") for l in leases.values() if l["granted"] and l["client"] == "assistant"}
+    for name, m in ollama_loaded().items():
+        if m.get("size_vram") and name not in leased and not (for_client == "assistant" and name == leases_model_wanted()):
+            try:
+                ollama_json("/api/generate", {"model": name, "keep_alive": 0}, timeout=30)
+                freed.append(name)
+            except Exception:
+                pass
+    if freed:
+        log.info("made room for %s: unloaded %s", for_client, ", ".join(freed))
+
+
+def leases_model_wanted():
+    with lock:
+        return next((l.get("model") for l in leases.values() if l["client"] == "assistant" and not l["granted"]), None)
+
+
+def pick_device(mem_mb, want=None):
+    ds = devices()
+    if not ds:
+        return None, 0
+    if want is not None:
+        ds = [d for d in ds if d["index"] == want] or ds
+    d = max(ds, key=lambda d: d["free_mb"])
+    return d["index"], d["free_mb"]
+
+
+def ahead_of(lease):
+    """Waiting leases that go before this one (better rank, or same rank and older)."""
+    r = rank(lease["client"], lease["kind"])
+    return [l for l in leases.values() if not l["granted"] and l is not lease and
+            (rank(l["client"], l["kind"]), l["since"]) < (r, lease["since"])]
+
+
+def acquire(client, kind, mem_mb, wait_s, ttl_s, device=None, model=None, extra_mb=0):
+    """Wait (up to wait_s) until the card has room for mem_mb, making room meanwhile. Granted either way when
+    time runs out - the caller then knows it may run partly on the CPU (`roomy` is False)."""
+    lid = uuid.uuid4().hex[:10]
+    lease = {"id": lid, "client": client, "kind": kind, "mem_mb": mem_mb, "device": None, "granted": False,
+             "since": time.time(), "expires": time.time() + ttl_s, "model": model, "roomy": False}
+    with lock:
+        leases[lid] = lease
+    t0, made = time.time(), 0.0
+    while True:
+        with lock:
+            first = not ahead_of(lease)
+        dev, free = pick_device(mem_mb, device)
+        if first and free - MARGIN_MB >= mem_mb - extra_mb:
+            lease.update(granted=True, device=dev, roomy=True, expires=time.time() + ttl_s)
+            break
+        if time.time() - t0 >= wait_s:
+            lease.update(granted=True, device=dev, roomy=False, expires=time.time() + ttl_s)
+            break
+        if first and time.time() - made > 4:
+            make_room(client); made = time.time()
+        time.sleep(0.5)
+    waited = time.time() - t0
+    (log.info if lease["roomy"] else log.warning)("%s lease %s: %s MiB on GPU %s after %.1f s%s", client, lid, mem_mb, lease["device"],
+                                                   waited, "" if lease["roomy"] else " (not enough room: it may run partly on the CPU)")
+    return lease | {"waited_s": round(waited, 1)}
+
+
+def renew(lid, ttl_s):
+    with lock:
+        if lid in leases:
+            leases[lid]["expires"] = time.time() + ttl_s
+            return True
+    return False
+
+
+def drop(lid):
+    with lock:
+        l = leases.pop(lid, None)
+    if l:
+        log.info("%s lease %s released", l["client"], lid)
+
+
+def should_yield(client):
+    """For background clients: step aside (finish the current piece, start nothing new, give the card back)?"""
+    with lock:
+        live = [l for l in leases.values() if l["client"] != client]
+    r = rank(client, "background")
+    for l in live:
+        if rank(l["client"], l["kind"]) < r:
+            who = {"assistant": "the assistant", "studio": "the Image & Video Studio"}.get(l["client"], l["client"])
+            state = "is using" if l["granted"] else "is waiting for"
+            return True, f"Waiting: {who} {state} the GPU"
+    return False, None
+
+
+def reaper():
+    """Expire leases; a Studio lease lives on while ComfyUI is busy (its jobs can take minutes). Saves the state."""
+    while True:
+        time.sleep(2)
+        save_sizes()
+        now = time.time()
+        with lock:
+            for lid, l in list(leases.items()):
+                if l["client"] == "studio" and l["granted"] and not comfy_idle():
+                    l["expires"] = max(l["expires"], now + 10)
+                if now > l["expires"]:
+                    leases.pop(lid, None)
+                    log.info("%s lease %s expired", l["client"], lid)
+
+
+def status():
+    with lock:
+        ls = [dict(l, age_s=round(time.time() - l["since"]), expires_in_s=round(l["expires"] - time.time())) for l in leases.values()]
+    return {"priority": priority(), "devices": devices(), "leases": ls, "holders": holders, "sizes": sizes,
+            "yield": {c: should_yield(c)[1] for c in ("radio", "radio-art", "radio-llm")}}
+
+
+# ---------------------------------------------------------------- the lease API
+class Api(BaseHTTPRequestHandler):
+    def log_message(self, fmt, *a):
+        log.debug("api %s", fmt % a)
+
+    def reply(self, code, obj):
+        b = json.dumps(obj).encode()
+        self.send_response(code); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(b)))
+        self.end_headers(); self.wfile.write(b)
+
+    def body(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        return json.loads(self.rfile.read(n) or b"{}") if n else {}
+
+    def do_GET(self):
+        path, _, q = self.path.partition("?")
+        args = dict(x.split("=", 1) for x in q.split("&") if "=" in x)
+        if path == "/status":
+            return self.reply(200, status())
+        if path == "/yield":
+            y, why = should_yield(args.get("client", "radio"))
+            return self.reply(200, {"yield": y, "reason": why})
+        self.reply(404, {"error": "not found"})
+
+    def do_POST(self):
+        b = self.body()
+        if self.path == "/lease":
+            kind = b.get("kind") if b.get("kind") in ("interactive", "background") else ("interactive" if b.get("client") in INTERACTIVE else "background")
+            return self.reply(200, acquire(str(b.get("client", "unknown"))[:40], kind, int(b.get("mem_mb") or 4000),
+                                           min(float(b.get("wait_s") or 0), 300), float(b.get("ttl_s") or 120), b.get("device")))
+        m = re.fullmatch(r"/lease/(\w+)/renew", self.path)
+        if m:
+            return self.reply(200, {"ok": renew(m.group(1), float(b.get("ttl_s") or 120))})
+        if self.path == "/holding":
+            c = str(b.get("client", "unknown"))[:40]
+            with lock:
+                if b.get("holding"):
+                    holders[c] = {"device": b.get("device"), "mem_mb": b.get("mem_mb"), "since": time.time()}
+                else:
+                    holders.pop(c, None)
+            return self.reply(200, {"ok": True})
+        self.reply(404, {"error": "not found"})
+
+    def do_DELETE(self):
+        m = re.fullmatch(r"/lease/(\w+)", self.path)
+        if m:
+            drop(m.group(1)); return self.reply(200, {"ok": True})
+        self.reply(404, {"error": "not found"})
+
+
+# ---------------------------------------------------------------- the Ollama proxy (for Hermes)
+GPU_PATHS = ("/v1/chat/completions", "/v1/completions", "/v1/responses", "/api/chat", "/api/generate")
+assistant = {"lease": None, "model": None}        # the assistant's current lease (one model on the card at a time)
+_mine = [l for l in leases.values() if l["client"] == "assistant"]   # restored after a restart of the broker
+if _mine:
+    assistant.update(lease=_mine[-1], model=_mine[-1].get("model"))
+alock = threading.Lock()
+
+
+def cpu_only(model):
+    """Models created with num_gpu 0 (the radio's CPU songwriter) never need the card."""
+    try:
+        return bool(re.search(r"^num_gpu\s+0\s*$", ollama_json("/api/show", {"model": model}).get("parameters", ""), re.M))
+    except Exception:
+        return False
+
+
+reloads = {}                                      # model -> the room it had at its last reload
+
+
+def reload_if_split(model):
+    """A model squeezed partly onto the CPU stays that way until it's reloaded: once the card has room for all of it,
+    unload it so the next request loads it fully (a reload from the page cache takes seconds; a split model is slow
+    for the whole conversation)."""
+    m = ollama_loaded().get(model)
+    if not m or m["size_vram"] >= m["size"] * 0.97:
+        return False
+    full = model_mb(model)                           # its size when fully on the GPU (a split model reports more)
+    _, free = pick_device(full)
+    room = free + ollama_gpu_mb()                    # unloading gives back everything Ollama holds on the card
+    if room - MARGIN_MB < full:
+        return False
+    last = reloads.get(model)
+    if last and room <= last["room"] + 1024:         # it was reloaded with this much room and still didn't fit: that's
+        return False                                 # the most this card can take - don't reload on every message
+    on_gpu = 100 * m["size_vram"] // m["size"]
+    log.info("%s is %d%% on the GPU and there is room now: reloading it fully", model, on_gpu)
+    reloads[model] = {"room": room, "t": time.time()}
+    try:
+        ollama_json("/api/generate", {"model": model, "keep_alive": 0}, timeout=30)
+        for _ in range(40):                              # wait until it's really gone, so the next load sees the room
+            if model not in ollama_loaded():
+                break
+            time.sleep(0.25)
+    except Exception:
+        pass
+    return True
+
+
+def assistant_lease(model, wait_s):
+    """Hold the card for the assistant's model; reload it if it had been squeezed partly onto the CPU."""
+    with alock:
+        cur = assistant["lease"]
+        if cur and cur["id"] in leases and assistant["model"] == model and cur.get("roomy"):
+            renew(cur["id"], ASSISTANT_IDLE_S)
+            reload_if_split(model)
+            return cur
+        if cur:
+            drop(cur["id"])
+        need = model_mb(model)
+        extra = ollama_gpu_mb() if model in ollama_loaded() else 0     # what it already holds on the card counts as room
+        lease = acquire("assistant", "interactive", need, wait_s, ASSISTANT_IDLE_S, model=model, extra_mb=extra)
+        if lease["roomy"]:
+            reload_if_split(model)
+        assistant.update(lease=leases.get(lease["id"], lease), model=model)
+        return lease
+
+
+def choose_model(model):
+    """'agentora-auto': the strong model if the card can be had for it within a few seconds, else the one that fits."""
+    if model not in AUTO:
+        if cpu_only(model):
+            return model, None                       # runs on the CPU: no lease needed
+        return model, assistant_lease(model, STRONG_WAIT_S)
+    strong, light = AUTO[model]
+    cur = assistant["lease"]
+    if cur and cur["id"] in leases and assistant["model"] in (strong, light) and cur.get("roomy"):
+        renew(cur["id"], ASSISTANT_IDLE_S)               # stay on the model the conversation is already using
+        reload_if_split(assistant["model"])
+        return assistant["model"], cur
+    lease = assistant_lease(strong, AUTO_WAIT_S)
+    if lease["roomy"]:
+        return strong, lease
+    log.info("auto: no room for %s right now, answering with %s", strong, light)
+    return light, assistant_lease(light, 10)
+
+
+def learn_size(model):
+    m = ollama_loaded().get(model)
+    if m and m.get("size") and m["size_vram"] >= m["size"] * 0.97:   # only a full load tells its real size
+        mb = m["size"] >> 20
+        if abs(sizes.get(model, 0) - mb) > 200:
+            sizes[model] = mb; save_sizes()
+
+
+class OllamaProxy(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.0"                 # stream replies until the connection closes (SSE and NDJSON alike)
+
+    def log_message(self, fmt, *a):
+        log.debug("ollama proxy %s", fmt % a)
+
+    def forward(self, method):
+        n = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(n) if n else None
+        model = None
+        if method == "POST" and self.path.split("?")[0] in GPU_PATHS and body:
+            try:
+                j = json.loads(body)
+                model = j.get("model", "").removesuffix(":latest")
+                if model:
+                    real, lease = choose_model(model)
+                    if real != model:
+                        j["model"] = real; body = json.dumps(j).encode()
+                    model = real
+            except ValueError:
+                pass
+        u = A.ollama.split("://", 1)[1]
+        conn = http.client.HTTPConnection(u, timeout=900)
+        hdrs = {k: v for k, v in self.headers.items() if k.lower() not in ("host", "content-length", "connection")}
+        if body is not None:
+            hdrs["Content-Length"] = str(len(body))
+        try:
+            conn.request(method, self.path, body=body, headers=hdrs)
+            r = conn.getresponse()
+            self.send_response(r.status)
+            for k, v in r.getheaders():
+                if k.lower() not in ("transfer-encoding", "connection", "content-length"):
+                    self.send_header(k, v)
+            self.send_header("Connection", "close")
+            self.end_headers()
+            while True:
+                chunk = r.read1(65536)
+                if not chunk:
+                    break
+                self.wfile.write(chunk); self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception as e:
+            log.warning("ollama proxy %s %s failed: %s", method, self.path, e)
+            try:
+                self.send_error(502, "Ollama didn't answer")
+            except Exception:
+                pass
+        finally:
+            conn.close()
+            if model:
+                cur = assistant["lease"]
+                if cur and cur["id"] in leases:
+                    renew(cur["id"], ASSISTANT_IDLE_S)         # the conversation keeps the card for a while after each reply
+                threading.Thread(target=learn_size, args=(model,), daemon=True).start()
+
+    def do_GET(self):
+        if self.path.split("?")[0] in ("/v1/models", "/api/tags"):        # list the virtual "auto" model too
+            try:
+                d = ollama_json(self.path)
+                if "data" in d:
+                    d["data"] += [{"id": k, "object": "model", "owned_by": "agentora"} for k in AUTO]
+                b = json.dumps(d).encode()
+                self.send_response(200); self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b); return
+            except Exception:
+                pass
+        self.forward("GET")
+
+    def do_POST(self):
+        self.forward("POST")
+
+    def do_DELETE(self):
+        self.forward("DELETE")
+
+
+class Server(logsetup.QuietBrokenPipes, ThreadingHTTPServer):
+    daemon_threads = True
+
+
+if __name__ == "__main__":
+    logsetup.setup("gpu-broker")
+    threading.Thread(target=reaper, daemon=True, name="reaper").start()
+    threading.Thread(target=Server(("127.0.0.1", A.ollama_port), OllamaProxy).serve_forever, daemon=True, name="ollama-proxy").start()
+    log.info("leases on 127.0.0.1:%d, Ollama proxy on 127.0.0.1:%d -> %s; devices: %s", A.port, A.ollama_port, A.ollama,
+             ", ".join(f"{d['index']}: {d['name']} {d['total_mb'] // 1024} GB" for d in devices()) or "none found")
+    Server(("127.0.0.1", A.port), Api).serve_forever()

@@ -81,7 +81,7 @@ def handle(h, method, path):
         if not text:
             return h.send(400, {"error": "Write a message first"}) or True
         prev = b.get("previous") if re.fullmatch(r"resp_[\w-]{6,80}", str(b.get("previous") or "")) else None
-        chat(h, text, prev, b.get("model") if b.get("model") in ("lemming", "agi") else "agi")
+        chat(h, text, prev, b.get("model") if b.get("model") in ("lemming", "auto", "agi") else "auto")
         return True
     return h.send(404, {"error": "not found"}) or True
 
@@ -99,7 +99,7 @@ def _tool_names(item):
     return [n.replace("mcp__local_apps__", "").replace("_", " ") for n in names if n]
 
 
-def chat(h, text, prev, model="agi"):
+def chat(h, text, prev, model="auto"):
     """Stream a Hermes turn to the browser as simple server-sent events: tool / delta / done / error."""
     body = {"model": model, "input": text, "instructions": INSTRUCTIONS, "store": True, "stream": True}
     if prev:

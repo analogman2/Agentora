@@ -100,6 +100,24 @@ def feedback_roundtrip():   # a Music Studio song with no station: no taste note
     must(kept and cleared, f"kept={kept} cleared={cleared}"); return t["title"]
 check("thumbs up + clear", feedback_roundtrip)
 
+print("GPU broker")
+B = "http://127.0.0.1:7890"
+def broker_status():
+    d = req(B, "/status"); must(d["devices"], "no GPUs seen")
+    return f"priority {d['priority']}, " + ", ".join(f"GPU {x['index']} {x['free_mb'] // 1024} GB free" for x in d["devices"]) + f", {len(d['leases'])} leases"
+check("broker sees the GPU", broker_status)
+def broker_yield():   # a person waiting (a Studio lease) makes the radio step aside; releasing it lets the radio go on
+    other = [l for l in req(B, "/status")["leases"] if l["client"] in ("assistant", "studio")]
+    lease = req(B, "/lease", {"client": "studio", "kind": "interactive", "mem_mb": 1000, "wait_s": 0, "ttl_s": 30})
+    y1 = req(B, "/yield?client=radio")
+    req(B, f"/lease/{lease['id']}", method="DELETE")
+    y2 = req(B, "/yield?client=radio")
+    must(lease["granted"] and y1["yield"], f"lease {lease}, yield while held {y1}")
+    must(other or not y2["yield"], f"radio still told to wait after release: {y2}")
+    return f"radio waits while the Studio holds the card ({y1['reason']}), and goes on after"
+check("leases make the radio step aside", broker_yield)
+check("Ollama proxy answers (Hermes's way in)", lambda: (lambda d: (must(any(m["id"] == "agentora-auto" for m in d["data"]), "no auto model"), f"{len(d['data'])} models incl. agentora-auto")[1])(req("http://127.0.0.1:11435", "/v1/models")))
+
 print("Image & Video Studio views of the radio")
 check("home summary", lambda: (lambda h: (must(h.get("radio") is not None, "no radio in /api/home"), f"radio on={h['radio']['on']}, {h['radio']['listeners']} listening")[1])(req(S, "/api/home")))
 check("now-playing bar", lambda: str(req(S, "/api/nowplaying").get("on")))
