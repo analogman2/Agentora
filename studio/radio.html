@@ -598,19 +598,48 @@ function hearing() {
   let e = null; for (const a of s.aired) if (a.start_pos <= pos + 0.05) e = a;
   return e && e.id ? e : null;
 }
+// A broken stream (radio restarting, network drop) is retried with backoff until it plays again; a real pause (Bluetooth
+// off, a call, ⏸) has a loaded stream and no error, and is left alone.
+let retry = {n: 0, at: 0};
 function connect() {
   lid = Math.random().toString(36).slice(2, 12);
   audio.src = `/radio/stream.mp3?l=${lid}`;
-  audio.play().catch(e => toast("Press play to start audio (" + e.message + ")"));
+  audio.play().then(() => { retry.n = 0; }).catch(e => {
+    if (e.name === "NotAllowedError") { status("Tap ▶ to resume — the phone blocked playing in the background."); toast("Tap ▶ to resume the radio."); }
+    else scheduleRetry();                                  // the stream didn't load (e.g. the radio is restarting)
+  });
   setTimeout(refresh, 400);
 }
-function disconnect() { lid = null; audio.pause(); audio.removeAttribute("src"); audio.load(); setPlayingUI(); }
-const reconnect = () => { if (wantPlay && lid) { met.reconnects++; status("Stream dropped — reconnecting…"); setTimeout(() => { if (wantPlay) connect(); }, 2000); } };
+// While the stream reconnects, a looping silent clip keeps the page "playing", so a phone doesn't freeze the background
+// tab (and its retries) or drop the lock-screen controls.
+const bridge = new Audio();
+bridge.loop = true; bridge.volume = 0.01;
+bridge.src = (() => {                                     // 1 s of silence as a tiny WAV
+  const n = 8000, b = new ArrayBuffer(44 + n), v = new DataView(b), w = (o, t) => [...t].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  w(0, "RIFF"); v.setUint32(4, 36 + n, true); w(8, "WAVE"); w(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true); w(36, "data"); v.setUint32(40, n, true);
+  for (let i = 0; i < n; i++) v.setUint8(44 + i, 128);
+  return URL.createObjectURL(new Blob([b], {type: "audio/wav"}));
+})();
+function bridgeOn() { if (bridge.paused) bridge.play().catch(() => {}); }
+function bridgeOff() { if (!bridge.paused) bridge.pause(); }
+function scheduleRetry() {
+  if (!wantPlay || !lid) return;
+  bridgeOn();
+  const wait = Math.min(30000, 2000 * 2 ** retry.n);
+  if (Date.now() < retry.at) return;                      // one retry at a time
+  retry.n++; retry.at = Date.now() + wait; met.reconnects++;
+  status(`Stream dropped — reconnecting${retry.n > 1 ? ` (try ${retry.n})` : ""}…`);
+  setTimeout(() => { retry.at = 0; if (wantPlay && lid) connect(); }, wait);
+}
+function disconnect() { lid = null; bridgeOff(); audio.pause(); audio.removeAttribute("src"); audio.load(); setPlayingUI(); }
+const reconnect = () => scheduleRetry();
 audio.addEventListener("error", () => { if (audio.getAttribute("src")) reconnect(); });
 audio.addEventListener("ended", reconnect);
 audio.addEventListener("play", setPlayingUI); audio.addEventListener("pause", setPlayingUI);
 let pausedAt = 0;                                  // the phone paused us (Bluetooth dropped, a call, the car's ⏸)
 audio.addEventListener("pause", () => { pausedAt = Date.now(); });
+audio.addEventListener("playing", () => { retry.n = 0; retry.at = 0; bridgeOff(); });
 audio.addEventListener("play", () => {
   if (actx && actx.state !== "running") actx.resume().catch(() => {});
   if (wantPlay && lid && pausedAt && Date.now() - pausedAt > 8000) { pausedAt = 0; connect(); }   // stale or dead connection: rejoin live
@@ -619,6 +648,7 @@ audio.addEventListener("play", () => {
 let stallT = -1, stallSince = Date.now();          // phones can leave a dead stream "playing" with no error
 setInterval(() => {
   if (actx && wantPlay && lid && !audio.paused && actx.state !== "running") actx.resume().catch(() => {});   // Bluetooth route change
+  if (wantPlay && lid && (audio.error || (audio.paused && audio.readyState === 0 && audio.networkState !== 2))) scheduleRetry();   // broken, not paused
   if (!wantPlay || !lid || audio.paused || audio.currentTime !== stallT) { stallT = audio.currentTime; stallSince = Date.now(); return; }
   if (Date.now() - stallSince > 12000) { stallSince = Date.now(); met.reconnects++; status("Stream stalled — reconnecting…"); connect(); }
 }, 2000);
