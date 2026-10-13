@@ -309,17 +309,25 @@ Reply with a single JSON object and nothing else:
 - lyrics (when not instrumental): sections tagged [Verse] [Pre-Chorus] [Chorus] [Bridge] [Outro] on their own lines, one sung phrase per line, chorus repeated word for word. Only sung words. Size it for about 2.5-3 minutes: 24-34 sung lines in total (e.g. Verse 6, Chorus 4, Verse 6, Chorus 4, Bridge 4, Chorus 4), and always finish with a short [Outro] of 2-3 lines so the song comes to a real ending.
 - lyrics (instrumental): only section tags, e.g. "[Intro]\\n\\n[Verse]\\n\\n[Chorus]\\n\\n[Verse]\\n\\n[Chorus]\\n\\n[Outro]".
 - Stay inside the station's sound, but vary subgenre, tempo, key feel, instrumentation, topic and title from song to song so the station never sounds repetitive.
-LYRIC CRAFT (this matters most - write like a real working songwriter, not a greeting card):
-- Every song is about ONE concrete situation: a specific person, a place, a moment, something that happened. Show it with physical
-  details - named objects, places, times, small actions, things said out loud - instead of naming feelings ("I'm so lost" is weak;
-  "your coat's still on the hook by the door" is strong). Each verse adds NEW details and moves the story forward.
-- The chorus is a short, singable hook (2-4 lines) that contains the title and could be shouted along to. Keep one point of view and tense.
+LYRIC CRAFT (this matters most - write like a real working songwriter, not a greeting card and not a poetry generator):
+- First decide, privately, in one sentence: who is singing, to whom, what happened, and how they feel about it. Every line must
+  serve that one story, and a listener must be able to retell it after one listen. Verse 1 sets the scene, verse 2 moves it on,
+  the bridge turns it, the chorus says what it all means.
+- Every line must make literal sense on its own and follow from the line before. Plain, conversational English, the way people
+  really talk - clarity beats cleverness. No mixed metaphors, no surreal or impossible images ("a bowl of cold light", "cast iron
+  butter"), no lists of random objects, no lines that only sound poetic.
+- Show the story with a few well-chosen real details (2-3 per verse: a place, an object, a small action, something said out loud)
+  rather than naming feelings ("I'm so lost" is weak; "your coat's still on the hook by the door" is strong). Every detail must
+  belong to this story and be something that really happens in it.
+- The chorus is a short, singable hook (2-4 lines) that says the emotional point plainly, contains the title and could be shouted
+  along to. Keep one point of view and tense.
 - Rhyme naturally: mix perfect and slant rhymes; never bend a line just to rhyme, never use filler words to fit the meter.
 - Lines a singer can breathe: about 6-10 syllables, plain spoken words, no tongue-twisters, no stacked adjectives.
 - Avoid stock imagery and clichés: shadows, darkness, fire/flames/ignite, rise/rising, break free, chains, scars, broken pieces,
   demons, ghosts, echoes, whispers, neon, hollow, the void, storms and thunder as metaphors, ashes, phoenix, wings, "stand tall",
   "hold on", "let go", "light the way", "heart of gold", "against the tide". If one slips in, replace it with something specific.
-- Titles: concrete and particular ("Laundromat on 9th", "Two Coffees, One Spoon"), not abstract ("Echoes of the Soul")."""
+- Titles: a natural phrase from the chorus that a person would actually say ("Laundromat on 9th", "Two Coffees, One Spoon",
+  "Leave the Porch Light On"), never an odd pairing of objects and never abstract ("Echoes of the Soul")."""
 
 
 STORY_SEEDS = [
@@ -472,8 +480,8 @@ def write_spec(s, short=False, fast=False, writers=None, like=None):
             u.append(f"The listener LOVED this song and asked for more like it: {like['title']} [{like['style'][:160]}]. Same feel, new song.")
     elif not want_inst:                                   # a concrete starting point, so songs aren't all the same anthem
         story = random.choice(STORY_SEEDS)
-        u.append("Story idea for THIS song (adapt it to the station's world and lyrics theme, or invent something just as "
-                 "specific): " + story + ".")
+        u.append("Optional story idea: " + story + ". Use it only if it fits naturally with this station's sound, era and lyrics "
+                 "theme (the kind of story its listeners would expect). If it doesn't fit, ignore it and invent a story that does.")
     taste = (s.get("taste") or {}).get("notes")
     if taste:
         u.append("WHAT THIS LISTENER HAS TAUGHT THE STATION (follow it closely): " + taste)
@@ -492,9 +500,9 @@ def write_spec(s, short=False, fast=False, writers=None, like=None):
     u.append("For variety, this time: " + random.choice(VARIATIONS) + ".")
     banned = overused_words(attempt_titles + [f["title"] for f in likes])
     if attempt_titles:
-        u.append("Titles of the latest songs (yours must not reuse any of their words): " + "; ".join(attempt_titles[:10]))
+        u.append("Titles of the latest songs (don't repeat their main words or ideas): " + "; ".join(attempt_titles[:10]))
     if banned:
-        u.append("These title words are overused - do NOT use them anywhere in the title: " + ", ".join(banned) + ".")
+        u.append("Overused lately, avoid in the title: " + ", ".join(banned) + ".")
     if dislikes:
         u.append("The listener DISLIKED these, steer away from them: " + "; ".join(f"{f['title']} [{f['style'][:80]}]" for f in dislikes))
     if skips:
@@ -518,6 +526,11 @@ def write_spec(s, short=False, fast=False, writers=None, like=None):
             ltitle, lyrics = app.normalize_lyrics(str(spec.get("lyrics", "")))
             if not style:
                 raise ValueError("spec without a style")
+            if not inst and sung_lines(lyrics) < (8 if short else 14):
+                u_hint = "IMPORTANT: write the complete lyrics - every section needs its sung lines, not just the section tags."
+                if u[-1] != u_hint:
+                    u.append(u_hint)
+                raise ValueError(f"only {sung_lines(lyrics)} sung lines in the lyrics")
             title = str(spec.get("title") or spec.get("name") or ltitle or "").strip()
             if not title:
                 first = next((l for l in lyrics.splitlines() if l.strip() and not l.startswith("[")), "")
@@ -544,15 +557,21 @@ CLICHES = ["shadow", "darkness", "the dark", "fire", "flame", "ignite", "we rise
            "tears like rain", "set me free", "burning bright", "lost in the", "thunder", "the storm"]
 
 
+def sung_lines(lyrics):
+    return sum(1 for l in (lyrics or "").splitlines() if l.strip() and not l.strip().startswith("["))
+
+
 def cliche_hits(lyrics):
     low = lyrics.lower()
     return [c for c in CLICHES if re.search(r"\b" + re.escape(c), low)]
 
 
-EDIT_SYSTEM = """You are a demanding lyric editor. You get a draft song. First think briefly about its weakest lines: clichés and
-stock images, vague abstract lines that name feelings instead of showing details, forced or filler rhymes, lines too long to sing,
-a chorus hook that isn't memorable or doesn't contain the title, verses that repeat instead of moving the story on.
-Then rewrite the lyrics fixing all of that. Keep the same section tags and order, keep about the same number of lines,
+EDIT_SYSTEM = """You are a demanding lyric editor. You get a draft song. First check that it tells ONE clear story a listener could
+retell, and that every line makes literal sense and follows from the one before. Then find its weakest lines: lines that don't make
+sense, surreal or mixed metaphors, random objects that don't belong to the story, clichés and stock images, vague lines that name
+feelings, forced or filler rhymes, lines too long to sing, a chorus hook that isn't memorable or doesn't contain the title,
+verses that repeat instead of moving the story on. Then rewrite the lyrics fixing all of that in plain, natural language -
+when in doubt, choose the clearer line over the more colourful one. Keep the same section tags and order, keep about the same number of lines,
 keep the chorus identical every time it appears, keep the language, and keep everything that already works.
 Reply with JSON only: {"notes": "one short line on what you changed", "title": "...", "lyrics": "..."}"""
 
@@ -576,7 +595,7 @@ def edit_lyrics(s, title, style, lyrics, base, model, label):
             out = parse_json_reply(r["choices"][0]["message"]["content"])
             _, new = app.normalize_lyrics(str(out.get("lyrics", "")))
             tags = lambda t: re.findall(r"^\[[^\]]+\]", t, re.M)
-            if not new.strip() or tags(new) != tags(best[0]) or len(new.splitlines()) < 0.6 * len(best[0].splitlines()):
+            if not new.strip() or tags(new) != tags(best[0]) or sung_lines(new) < 0.6 * sung_lines(best[0]):
                 raise ValueError("the edit changed the song's shape")
             if len(cliche_hits(new)) > len(hits):
                 raise ValueError("the edit added clichés")
@@ -819,6 +838,9 @@ def produce(sid, on_request=False, like=None):
                                                         key=lambda j: -j["created"])[:12]]
             if spec and similar_title(spec["title"], recent_titles, last=recent_titles[:5]):
                 spec = None                               # too close to something just played: write a fresh one
+            elif spec and not spec.get("instrumental") and sung_lines(spec.get("lyrics")) < 14:
+                app.log(f"radio: dropping banked song {spec['title']!r}: its lyrics are missing")
+                spec = None
             if spec:
                 app.log(f"radio: using banked song {spec['title']!r} ({spec['writer']})")
         if not spec:
@@ -1519,7 +1541,8 @@ def _rerun_pick():
     now = time.time()
     with app.lock:
         pool = [j for j in app.jobs.values() if j.get("source") == "radio" and j["status"] == "done" and j.get("played_at")
-                and j.get("radio_feedback") not in ("skip", "dislike") and (app.DATA / j["id"] / "song.mp3").is_file()]
+                and j.get("radio_feedback") not in ("skip", "dislike") and (app.DATA / j["id"] / "song.mp3").is_file()
+                and (j.get("mode") == "instrumental" or not j.get("lyrics") or sung_lines(j["lyrics"]) >= 8)]   # not the tags-only ones
     if not pool:
         return None
     fresh = [j for j in pool if now - j["played_at"] > 3 * 3600]
