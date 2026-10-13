@@ -1,5 +1,5 @@
 [Unit]
-Description=Agentora speech service: Qwen3-TTS voice (GPU, via the GPU broker) and whisper listening (CPU) on 127.0.0.1:7895
+Description=Agentora speech service: Qwen3-TTS voice (GPU, via the GPU broker) and whisper listening (GPU, CPU fallback) on 127.0.0.1:7895
 After=network.target agentora-gpu.service
 Wants=agentora-gpu.service
 

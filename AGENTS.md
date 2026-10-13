@@ -21,7 +21,8 @@ http://127.0.0.1:7860 (radio at /radio, classic deck at /radio/classic, music st
   take a lease (`POST :7890/lease`) instead of grabbing the card.
 - `studio/speech_server.py`: the **speech service**, user service `agentora-speech` on 127.0.0.1:7895, run with
   `~/venv-speech` (not venv-yue2). OpenAI audio API: `/v1/audio/speech` (Qwen3-TTS voice design, GPU under a
-  broker lease "speech", unloads after 2 min) and `/v1/audio/transcriptions` (whisper small.en, CPU).
+  broker lease "speech", unloads after 2 min) and `/v1/audio/transcriptions` (whisper small.en on the GPU under lease "speech-ears", ~1 GB,
+  CPU fallback; CTranslate2 needs CUDA 12 cuBLAS, kept in `~/venv-speech/cu12` and loaded by path).
 - `studio/logsetup.py`: logging for every component (journal + `logs/<component>.log`); use `app.log(...)` or
   `logging.getLogger(__name__)`, never `print`.
 - `studio/art.py`: cover art via ComfyUI (Z-Image), drawn between songs only; scenes are name-free.

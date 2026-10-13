@@ -4,7 +4,8 @@
   Voice:     Qwen3-TTS 1.7B VoiceDesign (the voice is described in words; a fixed seed keeps it consistent), on the
              GPU under a GPU-broker lease. It loads on first use and unloads after SPEECH_IDLE seconds, so it never
              sits on the card.
-  Listening: faster-whisper small.en on the CPU (int8): quick for spoken phrases and never needs the card.
+  Listening: faster-whisper small.en on the GPU (float16, ~1 GB, ~0.1 s a phrase) under its own lease, unloaded after
+             SPEECH_IDLE seconds like the voice. Falls back to the CPU (int8, ~2 s) when the card can't be had.
 
 OpenAI-compatible, so anything that speaks OpenAI audio can use it (Hermes: tts/stt provider "openai" with this
 base_url):
@@ -14,7 +15,7 @@ base_url):
 `voice` is one of VOICES (or an OpenAI name, which maps to the default); `instructions` describes a voice in words.
 Runs in ~/venv-speech (faster-qwen3-tts, faster-whisper). Usage: speech_server.py [--port 7895]
 """
-import argparse, json, logging, os, subprocess, threading, time, urllib.request
+import argparse, ctypes, glob, json, logging, os, subprocess, threading, time, urllib.request
 from email.parser import BytesParser
 from email.policy import HTTP
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -31,6 +32,8 @@ log = logging.getLogger("speech")
 BROKER = os.environ.get("GPU_BROKER", "http://127.0.0.1:7890")
 IDLE_S = int(os.environ.get("SPEECH_IDLE", "120"))            # unload the voice after this long unused
 TTS_MB = int(os.environ.get("SPEECH_TTS_MB", "5500"))        # its footprint on the card (Qwen3-TTS 1.7B, bf16: ~5 GB measured)
+STT_MB = int(os.environ.get("SPEECH_STT_MB", "1200"))        # whisper small.en, float16: ~0.9 GB measured
+STT_DEVICE = os.environ.get("SPEECH_STT_DEVICE", "cuda")     # "cpu" to keep listening off the card
 SEED = 1234
 VOICES = {   # name -> description (Qwen3-TTS voice design). "agentora" is the default.
     "agentora": "A warm, friendly, clear adult voice with a natural, relaxed pace and gentle expression, like a "
@@ -46,7 +49,17 @@ FORMATS = {"mp3": ("mp3", "audio/mpeg"), "wav": ("wav", "audio/wav"), "opus": ("
 
 tts = {"model": None, "lease": None, "used": 0.0}
 tts_lock = threading.Lock()
-stt = {"model": None}
+stt = {"model": None, "lease": None, "used": 0.0, "device": None}
+stt_lock = threading.Lock()
+
+
+def cuda12_for_whisper():
+    """faster-whisper's CTranslate2 is built for CUDA 12 while torch here is CUDA 13. CUDA 12's cuBLAS sits beside the venv
+    (~/venv-speech/cu12, installed with `uv pip install --target`) and is loaded by full path: the sonames differ (.so.12 /
+    .so.13), so both coexist in one process without touching LD_LIBRARY_PATH."""
+    for n in ("libcublasLt.so.12", "libcublas.so.12"):
+        for f in glob.glob(os.path.expanduser(f"~/venv-speech/cu12/nvidia/*/lib/{n}")):
+            ctypes.CDLL(f, mode=ctypes.RTLD_GLOBAL)
 
 
 # ---------------------------------------------------------------- the GPU broker
@@ -57,33 +70,47 @@ def broker(method, path, body=None, timeout=30):
         return json.loads(resp.read() or b"{}")
 
 
-def take_lease():
+def take_lease(client, mb, wait_s=10, need_room=False):
+    """A lease id; None when the broker isn't running (load anyway). With need_room, False (and no lease) when the broker
+    found no room in wait_s, so the caller can use the CPU instead."""
     try:
-        d = broker("POST", "/lease", {"client": "speech", "kind": "interactive", "mem_mb": TTS_MB, "wait_s": 10, "ttl_s": IDLE_S + 30}, 25)
+        d = broker("POST", "/lease", {"client": client, "kind": "interactive", "mem_mb": mb, "wait_s": wait_s, "ttl_s": IDLE_S + 30}, wait_s + 15)
+        if need_room and not d.get("roomy", True):
+            drop_lease({"lease": d.get("id")})
+            return False
         return d.get("id")
     except Exception as e:
-        log.warning("GPU broker not reachable (%s): loading the voice anyway", e)
+        log.warning("GPU broker not reachable (%s): loading %s anyway", e, client)
         return None
 
 
-def renew_lease():
-    if tts["lease"]:
+def renew_lease(holder):
+    if holder["lease"]:
         try:
-            broker("POST", f"/lease/{tts['lease']}/renew", {"ttl_s": IDLE_S + 30}, 5)
+            broker("POST", f"/lease/{holder['lease']}/renew", {"ttl_s": IDLE_S + 30}, 5)
         except Exception:
             pass
+
+
+def drop_lease(holder):
+    if holder["lease"]:
+        try:
+            broker("DELETE", f"/lease/{holder['lease']}", timeout=5)
+        except Exception:
+            pass
+    holder["lease"] = None
 
 
 # ---------------------------------------------------------------- voice
 def load_tts():
     if tts["model"] is None:
-        tts["lease"] = take_lease()
+        tts["lease"] = take_lease("speech", TTS_MB) or None
         t0 = time.time()
         from faster_qwen3_tts import FasterQwen3TTS
         tts["model"] = FasterQwen3TTS.from_pretrained(A.tts_model)
         log.info("voice loaded on the GPU in %.1f s (%s)", time.time() - t0, A.tts_model)
     tts["used"] = time.time()
-    renew_lease()
+    renew_lease(tts)
     return tts["model"]
 
 
@@ -95,13 +122,14 @@ def unload_when_idle():
                 import torch
                 tts["model"] = None
                 import gc; gc.collect(); torch.cuda.empty_cache()
-                if tts["lease"]:
-                    try:
-                        broker("DELETE", f"/lease/{tts['lease']}", timeout=5)
-                    except Exception:
-                        pass
-                tts["lease"] = None
+                drop_lease(tts)
                 log.info("voice unloaded after %d s unused: the GPU is free again", IDLE_S)
+        with stt_lock:
+            if stt["model"] is not None and stt["device"] == "cuda" and time.time() - stt["used"] > IDLE_S:
+                stt["model"] = None
+                import gc; gc.collect()
+                drop_lease(stt)
+                log.info("listening model unloaded after %d s unused", IDLE_S)
 
 
 def synth(text, description):
@@ -132,11 +160,32 @@ def encode(samples, sr, fmt, speed=1.0):
 
 # ---------------------------------------------------------------- listening
 def load_stt():
-    if stt["model"] is None:
-        from faster_whisper import WhisperModel
-        t0 = time.time()
-        stt["model"] = WhisperModel(A.stt_model, device=os.environ.get("SPEECH_STT_DEVICE", "cpu"), compute_type="int8")
-        log.info("listening model %s ready on the CPU in %.1f s", A.stt_model, time.time() - t0)
+    """Whisper on the GPU under a lease when it can be had (~0.7 s to load), else on the CPU. A CPU copy is swapped for a
+    GPU one at the next phrase once the card frees up."""
+    from faster_whisper import WhisperModel
+    if stt["model"] is not None and (stt["device"] == "cuda" or STT_DEVICE != "cuda" or time.time() - stt.get("cpu_since", 0) < 30):
+        stt["used"] = time.time()
+        renew_lease(stt)
+        return stt["model"]
+    t0 = time.time()
+    if STT_DEVICE == "cuda":
+        lease = take_lease("speech-ears", STT_MB, wait_s=3, need_room=True)
+        if lease is not False:
+            try:
+                cuda12_for_whisper()
+                stt["model"], stt["device"], stt["lease"] = WhisperModel(A.stt_model, device="cuda", compute_type="float16"), "cuda", lease
+                log.info("listening model %s ready on the GPU in %.1f s", A.stt_model, time.time() - t0)
+            except Exception as e:
+                stt["lease"] = lease; drop_lease(stt)
+                log.warning("whisper couldn't start on the GPU (%s): using the CPU", e)
+        else:
+            log.info("the GPU is busy: listening on the CPU for now")
+    if stt["model"] is None or stt["device"] != "cuda":
+        if stt["device"] != "cpu":
+            stt["model"], stt["device"] = WhisperModel(A.stt_model, device="cpu", compute_type="int8"), "cpu"
+            log.info("listening model %s ready on the CPU in %.1f s", A.stt_model, time.time() - t0)
+        stt["cpu_since"] = time.time()
+    stt["used"] = time.time()
     return stt["model"]
 
 
@@ -150,9 +199,11 @@ def transcribe(data, language=None):
     if out.returncode or not out.stdout:
         raise ValueError("couldn't read that audio: " + out.stderr.decode()[:200])
     audio = np.frombuffer(out.stdout, dtype=np.float32)
-    segments, info = load_stt().transcribe(audio, language=language or "en", vad_filter=True, beam_size=1)
-    text = " ".join(s.text.strip() for s in segments).strip()
-    log.info("transcribed %.1f s of audio in %.1f s", info.duration, time.time() - t0)
+    with stt_lock:
+        segments, info = load_stt().transcribe(audio, language=language or "en", vad_filter=True, beam_size=1)
+        text = " ".join(s.text.strip() for s in segments).strip()
+        stt["used"] = time.time()
+    log.info("transcribed %.1f s of audio in %.2f s on the %s", info.duration, time.time() - t0, "GPU" if stt["device"] == "cuda" else "CPU")
     return text, info
 
 
@@ -172,7 +223,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?")[0]
         if path in ("/health", "/v1/health"):
-            return self.send(200, {"ok": True, "voice_loaded": tts["model"] is not None, "listening_loaded": stt["model"] is not None})
+            return self.send(200, {"ok": True, "voice_loaded": tts["model"] is not None, "listening_loaded": stt["model"] is not None,
+                                   "listening_device": stt["device"]})
         if path == "/v1/voices":
             return self.send(200, {"default": "agentora", "voices": VOICES})
         if path == "/v1/models":
@@ -220,7 +272,10 @@ class Server(logsetup.QuietBrokenPipes, ThreadingHTTPServer):
 
 if __name__ == "__main__":
     logsetup.setup("speech")
+    import signal
+    def bye(*_):                                         # hand the card back straight away, not when the leases expire
+        drop_lease(tts); drop_lease(stt); os._exit(0)
+    signal.signal(signal.SIGTERM, bye)
     threading.Thread(target=unload_when_idle, daemon=True, name="unloader").start()
-    threading.Thread(target=load_stt, daemon=True, name="stt-load").start()
-    log.info("speech service on http://127.0.0.1:%d (voice: Qwen3-TTS on the GPU when used; listening: whisper %s on the CPU)", A.port, A.stt_model)
+    log.info("speech service on http://127.0.0.1:%d (voice: Qwen3-TTS, listening: whisper %s; both load on the GPU when used)", A.port, A.stt_model)
     Server(("127.0.0.1", A.port), Handler).serve_forever()

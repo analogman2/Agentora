@@ -75,7 +75,7 @@ The code, by job:
 | `studio/radio_library.py` | songs, history, playlist, feedback, next track and reruns, on/off |
 | `studio/stream_relay.py` | the stream relay (stdlib only) |
 | `studio/gpu_broker.py` | the GPU broker: leases for every GPU user, and the Ollama proxy Hermes talks to (stdlib only) |
-| `studio/speech_server.py` | the speech service: Qwen3-TTS voice (GPU, under a lease) and whisper listening (CPU), OpenAI-compatible |
+| `studio/speech_server.py` | the speech service: Qwen3-TTS voice (GPU, under a lease) and whisper listening (GPU, CPU fallback), both under leases, OpenAI-compatible |
 | `studio/art.py`, `studio/assistant.py`, `studio/settings.py` | cover art (ComfyUI), the chat panel (Hermes), ⚙ settings |
 | `studio/radio.html` + `studio/web/radio-*.js` | the radio page: core, player, library, panel, extras (plain scripts, no build step) |
 | `studio/index.html` | the Music Studio |
@@ -177,7 +177,7 @@ Using ComfyUI's own page (port 8188) directly bypasses the broker; everything th
   - Voices: `agentora` (default, warm and friendly), `narrator`, `bright`, `jack` (the pumpkin), or any description passed in `instructions`.
   - It runs on the GPU under a broker lease (about 5 GB, which fits beside the radio) and unloads after 2 minutes unused (`SPEECH_IDLE`).
   - The first sentence takes about 9 s to load; after that, a 7 s sentence takes about 2 s.
-- **Listening:** `POST /v1/audio/transcriptions` (multipart `file`, any format ffmpeg reads, including a browser's WebM recording) → `{text}`. It uses **whisper small.en** on the CPU (int8), about 2 s for a short phrase, so it never needs the card.
+- **Listening:** `POST /v1/audio/transcriptions` (multipart `file`, any format ffmpeg reads, including a browser's WebM recording) → `{text}`. It uses **whisper small.en** on the GPU (float16, about 1 GB, its own lease `speech-ears`): about 0.1 s for a short phrase once loaded, about 1 s for the first one. It unloads after 2 minutes unused, like the voice. If the card has no room it listens on the CPU instead (int8, about 2 s) and moves back to the GPU once there is room. Whisper's CTranslate2 is built for CUDA 12 while the voice's torch is CUDA 13, so CUDA 12's cuBLAS is installed beside the venv (`uv pip install --python ~/venv-speech/bin/python --target ~/venv-speech/cu12 nvidia-cublas-cu12`) and loaded by path; `SPEECH_STT_DEVICE=cpu` keeps listening off the card.
 - **Hermes** uses it for both directions: `tts.provider` and `stt.provider` are `openai` with `base_url: http://127.0.0.1:7895/v1`. Its speech tools are still switched off per platform (`hermes tools enable tts|stt --platform …`).
 
 ```bash
