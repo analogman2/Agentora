@@ -189,6 +189,11 @@ pre.ly { white-space: pre-wrap; font: 14px/1.7 system-ui, sans-serif; margin: 10
 .frow .chev { flex: none; color: var(--muted); font-size: 22px; line-height: 1; width: 14px; text-align: center; }
 .lhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
 .lhead .label { margin: 0; }
+.selbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 0 0 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--soft); }
+.selbar .pill:disabled { opacity: .45; cursor: default; }
+.selbar label { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; cursor: pointer; }
+.selbar input, .row .selbox { width: 18px; height: 18px; accent-color: var(--accent); margin: 0; flex: none; cursor: pointer; }
+.row.picked { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .lhead > label { display: inline-flex; align-items: center; gap: 8px; }
 .lhead select { width: auto; }
 .rows .row { cursor: pointer; }
@@ -392,7 +397,7 @@ textarea { resize: vertical; max-height: 85vh; }
 
 <!-- player bar -->
 <footer class="bar" id="bar">
-  <a class="np-mini" href="#now"><img id="bCover" alt="" width="54" height="54"><div class="tx"><div class="a" id="bTitle">Pick a station</div><div class="b" id="bStation">b70 radio</div></div></a>
+  <a class="np-mini" id="bLink" href="#now" title="Open this song"><img id="bCover" alt="" width="54" height="54"><div class="tx"><div class="a" id="bTitle">Pick a station</div><div class="b" id="bStation">b70 radio</div></div></a>
   <div class="mid">
     <div class="ctl">
       <button class="cbtn" id="bDown" title="Thumbs down — fewer like this (skips it)" aria-label="Thumbs down"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M17 14V3h3v11h-3ZM17 14l-4.5 7a2 2 0 0 1-2.5-2.4L11 15H5.3a2 2 0 0 1-2-2.3l1.2-7.6A2.5 2.5 0 0 1 7 3h10"/></svg></button>
@@ -661,6 +666,7 @@ function syncNow() {
 function renderBar() {
   const t = current, st = stOf(selected);
   $("bCover").src = t ? trackArt(t) : stationArt(st);
+  $("bLink").href = t ? (t.station ? `#lib/${encodeURIComponent(t.station)}/${encodeURIComponent(t.id)}` : `#song/${encodeURIComponent(t.id)}`) : "#now";
   $("bTitle").textContent = t ? t.title : lid ? "Next song on the way…" : st ? st.name : "Pick a station";
   $("bStation").textContent = t ? (t.station_name || (st && st.name) || "") + (t.airing === "rerun" ? " · rerun" : t.airing === "runner-up" ? " · runner-up" : "") : st ? (lid ? "tuning in…" : "press play") : "b70 radio";
   $("bUp").classList.toggle("on-up", !!t && t.feedback === "keep");
@@ -807,7 +813,7 @@ function route() {
   if (tab === "browse") { tab = "lib"; a = undefined; }
   if (tab === "collection") { tab = "lib"; a = a === "stations" ? undefined : (a || "playlist"); }
   if (tab === "station") { tab = "lib"; b = undefined; }
-  view.parent = null;
+  view.parent = null; sel.on = false; sel.ids.clear();
   if (tab === "song") { view.tab = "song"; view.id = a; }
   else if (tab === "lib") {
     if (!a) view.tab = "lib";
@@ -903,10 +909,42 @@ function stationTile(s) {
     <div class="t1">${esc(s.name)}</div><div class="t2">${esc(sub)}</div></a>`;
 }
 const newTile = `<button class="tile" data-act="new"><div class="art"><div class="new">+</div></div><div class="t1">Create station</div><div class="t2">describe it, or learn from your music</div></button>`;
+// ☑ Select: tick songs in a list (or all of them) and act on them together
+const sel = {on: false, ids: new Set(), list: []};
+function selBar(list) {
+  sel.list = list.map(t => t.id);
+  if (!sel.on) return `<button class="pill" data-act="sel-on" title="Tick songs to play next, add to your playlist or delete together">☑ Select</button>`;
+  const n = sel.ids.size, all = list.length > 0 && list.every(t => sel.ids.has(t.id)), off = n ? "" : "disabled";
+  return `<div class="selbar"><label><input type="checkbox" data-act="sel-all" ${all ? "checked" : ""}> Select all</label>
+    <span class="small muted">${n} selected</span>
+    <button class="pill" data-act="sel-next" ${off} title="Play these next on the radio, for everyone listening">📻 Play next</button>
+    <button class="pill" data-act="sel-plus" ${off}>+ Playlist</button>
+    <button class="pill" data-act="sel-minus" ${off}>− Playlist</button>
+    <button class="pill danger" data-act="sel-del" ${off}>Delete</button>
+    <button class="pill" data-act="sel-off">Done</button></div>`;
+}
+async function selAction(act) {
+  const ids = sel.list.filter(id => sel.ids.has(id));           // in the order shown
+  if (!ids.length) return;
+  try {
+    if (act === "sel-next") { await post("/api/radio/upnext", {ids}); toast(`📻 ${ids.length} song${ids.length === 1 ? "" : "s"} will play next.`); }
+    if (act === "sel-plus" || act === "sel-minus") {
+      for (const id of ids) await post("/api/radio/playlist", {track: id, on: act === "sel-plus"});
+      cache.playlist = null; toast(act === "sel-plus" ? `Added ${ids.length} to your playlist.` : `Removed ${ids.length} from your playlist.`);
+    }
+    if (act === "sel-del") {
+      if (!confirm(`Delete ${ids.length} song${ids.length === 1 ? "" : "s"} for good? This removes the recordings too.`)) return;
+      for (const id of ids) await api(`/api/jobs/${encodeURIComponent(id)}`, {method: "DELETE"});
+      cache.station = {}; cache.playlist = null; sel.ids.clear(); toast(`Deleted ${ids.length} song${ids.length === 1 ? "" : "s"}.`);
+    }
+  } catch (e) { toast(e.message); }
+  loadHistory(); refresh(); renderView();
+}
 function songRow(t, opts = {}) {
   const fb = t.feedback === "keep" ? "👍" : t.feedback === "dislike" ? "👎" : t.feedback === "skip" ? "⏭" : "";
   const sub = [opts.when, opts.noStation ? "" : t.station_name, opts.extra, t.style].filter(Boolean).join(" · ");
-  return `<li class="row" data-id="${esc(t.id)}" data-audio="${esc(t.audio)}">
+  return `<li class="row${sel.on && sel.ids.has(t.id) ? " picked" : ""}" data-id="${esc(t.id)}" data-audio="${esc(t.audio)}">
+    ${sel.on && opts.select !== false ? `<input type="checkbox" class="selbox" data-act="sel-one" aria-label="Select “${esc(t.title)}”" ${sel.ids.has(t.id) ? "checked" : ""}>` : ""}
     <div class="thumb" data-act="preview" title="Preview this song"><img src="${trackArt(t)}" alt="" loading="lazy"><span class="pv">▶</span></div>
     <div class="tx"><a class="a" href="${songHref(t, opts.folder)}" title="Open “${esc(t.title)}”">${esc(t.title)}</a><div class="b" title="${esc(t.style)}">${esc(sub)}</div></div>
     <span class="fb">${fb}</span><span class="dur">${t.seconds ? mmss(t.seconds) : ""}</span>
@@ -998,7 +1036,7 @@ async function stationView(id) {
     </section>
     <section class="section"><div class="lhead"><p class="label">Songs · ${tracks.length}</p>
       <label class="small muted">Sort <select id="stSort" aria-label="Sort songs">${Object.entries(SORTS).map(([k, l]) => `<option value="${k}" ${k === sort ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
-      ${list.length ? `<ul class="rows">${list.map(row).join("")}</ul>` : `<p class="muted small">No songs yet — press play and the first one is written for you.</p>`}</section>
+      ${list.length ? selBar(list) + `<ul class="rows">${list.map(row).join("")}</ul>` : `<p class="muted small">No songs yet — press play and the first one is written for you.</p>`}</section>
     <details class="section aboutbox" ${tracks.length ? "" : "open"}><summary>About this station${id !== RERUNS ? " & settings" : ""}</summary>
       <div class="about">
         ${s.description ? `<p>${esc(s.description)}</p>` : ""}
@@ -1023,10 +1061,10 @@ $("page").addEventListener("change", (e) => {
 async function collectionView() {
   if (view.sub === "history") {
     const h = cache.listened || [];
-    return crumbs(FOLDERS.history) + (h.length ? `<p class="label">${h.length} recent songs</p><ul class="rows">${h.map(t => songRow(t, {folder: "history", when: whenText(t.listened_at), extra: t.via_reruns ? "rerun" : ""})).join("")}</ul>` : `<p class="empty">Nothing played yet.</p>`);
+    return crumbs(FOLDERS.history) + (h.length ? `<p class="label">${h.length} recent songs</p>${selBar(h)}<ul class="rows">${h.map(t => songRow(t, {folder: "history", when: whenText(t.listened_at), extra: t.via_reruns ? "rerun" : ""})).join("")}</ul>` : `<p class="empty">Nothing played yet.</p>`);
   }
   const pl = cache.playlist || await loadPlaylist();
-  return crumbs(FOLDERS.playlist) + (pl.length ? `<p class="label">${pl.length} song${pl.length === 1 ? "" : "s"}</p><ul class="rows">${pl.map(t => songRow(t, {folder: "playlist", when: "added " + whenText(t.added_at)})).join("")}</ul>`
+  return crumbs(FOLDERS.playlist) + (pl.length ? `<p class="label">${pl.length} song${pl.length === 1 ? "" : "s"}</p>${selBar(pl)}<ul class="rows">${pl.map(t => songRow(t, {folder: "playlist", when: "added " + whenText(t.added_at)})).join("")}</ul>`
     : `<p class="empty">Your playlist is empty. Press <b>⊕</b> in the player while a song plays, or <b>+</b> next to any song, to save it here.</p>`);
 }
 async function searchView(q) {
@@ -1048,11 +1086,19 @@ $("page").addEventListener("click", async (e) => {
   const a = e.target.closest("[data-act]");
   if (!a) {                                         // a click anywhere else on a song row opens the song, like a file
     const r = e.target.closest(".row"), link = r && r.querySelector("a.a");
+    if (sel.on && r && !e.target.closest("button, input, select, .thumb")) {   // select mode: a row click ticks it
+      e.preventDefault(); sel.ids.has(r.dataset.id) ? sel.ids.delete(r.dataset.id) : sel.ids.add(r.dataset.id); return renderView();
+    }
     if (link && !e.target.closest("a, button, input, select")) location.hash = link.getAttribute("href");
     return;
   }
   const act = a.dataset.act, row = a.closest(".row");
   if (act === "new") return openNewStation();
+  if (act === "sel-on") { sel.on = true; return renderView(); }
+  if (act === "sel-off") { sel.on = false; sel.ids.clear(); return renderView(); }
+  if (act === "sel-all") { const all = sel.list.every(id => sel.ids.has(id)); sel.list.forEach(id => all ? sel.ids.delete(id) : sel.ids.add(id)); return renderView(); }
+  if (act === "sel-one") { const id = row.dataset.id; sel.ids.has(id) ? sel.ids.delete(id) : sel.ids.add(id); return renderView(); }
+  if (act.startsWith("sel-")) return selAction(act);
   if (act === "lib-layout") { store.set("libTiles", a.dataset.v === "1"); return renderView(); }
   if (act === "plus") { try { await setPlaylist(row.dataset.id, a.dataset.on !== "1"); } catch (err) { toast(err.message); } return; }
   if (act === "np-plus") return $("bAdd").click();
