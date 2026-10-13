@@ -1167,6 +1167,8 @@ def _play_track(t):
     proc = subprocess.Popen(["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(src), *audio_filters(t.get("seconds")),
                              *ENCODE], stdout=subprocess.PIPE, stdin=subprocess.DEVNULL)
     bc["skip"].clear()
+    if t.get("tuned", t.get("station")) == state["station"]:
+        bc["retuned"] = False                  # the new station's own song is on: nothing left to cut over
     if bc["cut_next"]:                     # skipped or retuned: drop the old song's buffered audio and refill LEAD at once,
         with bc_lock:                      # so players that reconnect start right on this song with a full cushion
             bc["buf"].clear(); bc["epoch"] = time.time() - bc["bytes"] / BPS
@@ -1201,8 +1203,9 @@ def _play_track(t):
                             j.update(radio_status="approved", played_at=None); app.save_job(j)
                 break
             if time.time() - checked > 1:          # retuned to another station: cut over once it has a song ready
-                checked = time.time()
-                if t.get("tuned", t.get("station")) != state["station"] and station_tracks(state["station"]):
+                checked = time.time()               # (only a real retune: a filler rerun plays to its end when a new song is ready)
+                if bc.get("retuned") and t.get("tuned", t.get("station")) != state["station"] and station_tracks(state["station"]):
+                    bc["retuned"] = False
                     bc["cut_next"] = True
                     break
     finally:
@@ -1687,6 +1690,7 @@ def set_power(on, sid=None):
             if sid not in stations and sid != RERUNS:
                 raise app.BadRequest("No such station")
             if sid != state["station"]:
+                bc["retuned"] = True               # the song on air cuts over once the new station has one ready
                 with nav_lock:
                     nav["hist"].clear(); nav["cursor"] = None; nav["queued"] = None
             state["station"] = sid
