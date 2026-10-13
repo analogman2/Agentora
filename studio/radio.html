@@ -189,6 +189,13 @@ pre.ly { white-space: pre-wrap; font: 14px/1.7 system-ui, sans-serif; margin: 10
 .frow .chev { flex: none; color: var(--muted); font-size: 22px; line-height: 1; width: 14px; text-align: center; }
 .lhead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
 .lhead .label { margin: 0; }
+.lctl { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 0 0 8px; }
+.lctl .lsearch { flex: 1 1 260px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--soft); }
+.lctl .lsearch input { flex: 1; min-width: 0; border: 0; background: none; color: inherit; font: inherit; padding: 8px 0; outline: none; }
+.lctl > label.small { display: inline-flex; align-items: center; gap: 8px; }
+.lctl select { width: auto; }
+.lctl .selbar { flex: 1 1 100%; margin: 0; }
+.lcount { margin: 0 0 8px; }
 .selbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 0 0 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--soft); }
 .selbar .pill:disabled { opacity: .45; cursor: default; }
 .selbar label { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; cursor: pointer; }
@@ -802,6 +809,7 @@ async function loadHistory() {
   if (view.tab === "collection" && view.sub === "history") renderView();
 }
 async function loadPlaylist() { cache.playlist = (await api("/api/radio/playlist").catch(() => ({tracks: []}))).tracks; return cache.playlist; }
+async function loadAll() { cache.all = (await api("/api/radio/songs").catch(() => ({tracks: []}))).tracks; return cache.all; }
 async function loadStation(id) { cache.station[id] = (await api(`/api/radio/stations/${id}/history?limit=500&upcoming=1`).catch(() => ({tracks: []}))).tracks; return cache.station[id]; }
 
 async function refresh() {
@@ -854,7 +862,7 @@ function route() {
   else if (tab === "lib") {
     if (!a) view.tab = "lib";
     else if (b) { view.tab = "song"; view.id = b; view.parent = a; }
-    else if (a === "playlist" || a === "history") { view.tab = "collection"; view.sub = a; }
+    else if (a === "playlist" || a === "history" || a === "all") { view.tab = "collection"; view.sub = a; }
     else { view.tab = "station"; view.id = a; }
   } else if (tab === "search") { view.tab = "search"; view.q = a || ""; }
   else view.tab = "now";
@@ -877,12 +885,18 @@ async function renderView() {
   else if (view.tab === "search") html = await searchView(view.q);
   else if (view.tab === "song") html = await songView(view.id);
   if (seq !== renderSeq) return;
+  const typing = document.activeElement && document.activeElement.classList.contains("lfilter") ? document.activeElement : null;
+  const caret = typing && [typing.dataset.list, typing.selectionStart, typing.selectionEnd];
   page.innerHTML = html;
+  if (caret) {                                     // a refresh while typing in a list's search box keeps the cursor
+    const f = page.querySelector(`.lfilter[data-list="${CSS.escape(caret[0])}"]`);
+    if (f) { f.focus(); f.setSelectionRange(caret[1], caret[2]); }
+  }
   if (view.tab === "now") status(statusText);
 }
 
 // ---------- the path bar: Library › Station › Song, every step clickable, ↑ goes up one level
-const FOLDERS = {playlist: ["♥ My playlist", "#lib/playlist"], history: ["🕘 Listen history", "#lib/history"]};
+const FOLDERS = {all: ["🎵 All songs", "#lib/all"], playlist: ["♥ My playlist", "#lib/playlist"], history: ["🕘 Listen history", "#lib/history"]};
 function folderCrumb(f) {
   if (FOLDERS[f]) return FOLDERS[f];
   const s = stOf(f);
@@ -902,9 +916,13 @@ async function songView(id) {
   const folder = view.parent || t.station, st = stOf(t.station), c = t.critic || {};
   // the songs around this one in the folder it was opened from, for ‹ previous / next ›
   let sibs = [];
-  if (folder === "playlist") sibs = cache.playlist || await loadPlaylist();
+  if (folder === "all") sibs = cache.all || await loadAll();
+  else if (folder === "playlist") sibs = cache.playlist || await loadPlaylist();
   else if (folder === "history") sibs = cache.listened || [];
   else if (folder) sibs = cache.station[folder] || await loadStation(folder);
+  const lkey = folder === "all" || folder === "playlist" || folder === "history" ? folder : "station:" + folder;
+  const lsort = store.get("sort." + lkey, "as-is");
+  if (lsort !== "as-is" && LIST_SORTS[lsort]) sibs = [...sibs].sort(LIST_SORTS[lsort][1]);   // the order you sorted the list in
   const k = sibs.findIndex(x => x.id === id), prev = k > 0 ? sibs[k - 1] : null, next = k >= 0 && k < sibs.length - 1 ? sibs[k + 1] : null;
   const facts = [
     t.story ? ["Story idea", t.story] : null,
@@ -971,7 +989,7 @@ async function selAction(act) {
     if (act === "sel-del") {
       if (!confirm(`Delete ${ids.length} song${ids.length === 1 ? "" : "s"} for good? This removes the recordings too.`)) return;
       for (const id of ids) await api(`/api/jobs/${encodeURIComponent(id)}`, {method: "DELETE"});
-      cache.station = {}; cache.playlist = null; sel.ids.clear(); toast(`Deleted ${ids.length} song${ids.length === 1 ? "" : "s"}.`);
+      cache.station = {}; cache.playlist = null; cache.all = null; sel.ids.clear(); toast(`Deleted ${ids.length} song${ids.length === 1 ? "" : "s"}.`);
     }
   } catch (e) { toast(e.message); }
   loadHistory(); refresh(); renderView();
@@ -1037,7 +1055,10 @@ async function libView() {
       <span class="tx"><b>${esc(s.name)}</b><span>${esc(sub)}</span></span>${air ? '<span class="air">ON AIR</span>' : ""}
       <button class="fplay" data-play="${esc(s.id)}" title="${playing ? "Playing now" : "Play this station"}" aria-label="Play ${esc(s.name)}">${playing ? "≋" : "▶"}</button><span class="chev" aria-hidden="true">›</span></a></li>`;
   };
+  const all = cache.all;
+  if (!all) loadAll().then(() => { if (view.tab === "lib") renderView(); });   // fill in the count
   return crumbs() + `<ul class="flist">
+      <li><a class="frow" href="#lib/all"><span class="fic">🎵</span><span class="tx"><b>All songs</b><span>${all ? `${count(all.length, "song", "songs")} · every station and the Music Studio` : "every song from every station and the Music Studio"}</span></span><span class="chev" aria-hidden="true">›</span></a></li>
       <li><a class="frow" href="#lib/playlist"><span class="fic">♥</span><span class="tx"><b>My playlist</b><span>${count(pl.length, "song", "songs")} you saved</span></span><span class="chev" aria-hidden="true">›</span></a></li>
       <li><a class="frow" href="#lib/history"><span class="fic">🕘</span><span class="tx"><b>Listen history</b><span>${h.length ? `${count(h.length, "song", "songs")} played recently` : "nothing played yet"}</span></span><span class="chev" aria-hidden="true">›</span></a></li></ul>
     <section class="section"><div class="lhead"><p class="label">📻 Stations · ${sts.length}</p>
@@ -1047,14 +1068,9 @@ async function libView() {
 }
 
 // ---------- a station: its songs first, then what it is and its settings
-const SORTS = {newest: "Newest first", top: "Your favourites first", played: "Most played"};
 async function stationView(id) {
   const s = stOf(id); if (!s) return crumbs(["Station", "#"]) + `<p class="empty">That station doesn't exist any more. <a href="#lib">Back to the Library</a></p>`;
   const tracks = id === RERUNS ? (cache.listened || []) : (cache.station[id] || await loadStation(id));
-  const sort = SORTS[store.get("stSort", "newest")] ? store.get("stSort", "newest") : "newest";
-  const loved = (t) => (t.feedback === "keep" ? 2 : 0) + (t.in_playlist ? 1 : 0) - (t.feedback === "dislike" ? 3 : 0);
-  const list = sort === "top" ? [...tracks].sort((a, b) => loved(b) - loved(a) || ((b.critic || {}).score || 0) - ((a.critic || {}).score || 0))
-    : sort === "played" ? [...tracks].sort((a, b) => (b.airings || 0) - (a.airings || 0)) : tracks;
   const p = s.profile, air = R.on && R.station === id, playing = air && lid;
   const sub = id === RERUNS ? s.meta : `${tracks.filter(t => !t.up_next).length} songs · ${s.ready} ready to air · 👍 ${s.stats.kept}`;
   const row = (t) => songRow(t, {folder: id === RERUNS ? "history" : id, noStation: id !== RERUNS,
@@ -1070,9 +1086,9 @@ async function stationView(id) {
         <div class="small muted" id="mkStat" role="status"></div>
         ${air ? "" : `<div class="small muted">Playing it retunes the radio for everyone listening.</div>`}</div>
     </section>
-    <section class="section"><div class="lhead"><p class="label">Songs · ${tracks.length}</p>
-      <label class="small muted">Sort <select id="stSort" aria-label="Sort songs">${Object.entries(SORTS).map(([k, l]) => `<option value="${k}" ${k === sort ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
-      ${list.length ? selBar(list) + `<ul class="rows">${list.map(row).join("")}</ul>` : `<p class="muted small">No songs yet — press play and the first one is written for you.</p>`}</section>
+    <section class="section"><p class="label">Songs</p>
+      ${tracks.length ? songList("station:" + id, tracks, row, [["as-is", "Newest first"], "oldest", "top", "played", "title"])
+        : `<p class="muted small">No songs yet — press play and the first one is written for you.</p>`}</section>
     <details class="section aboutbox" ${tracks.length ? "" : "open"}><summary>About this station${id !== RERUNS ? " & settings" : ""}</summary>
       <div class="about">
         ${s.description ? `<p>${esc(s.description)}</p>` : ""}
@@ -1090,17 +1106,68 @@ async function stationView(id) {
     </details>`;
 }
 $("page").addEventListener("change", (e) => {
-  if (e.target.id === "stSort") { store.set("stSort", e.target.value); renderView(); }
+  if (e.target.classList.contains("lsort")) { store.set("sort." + e.target.dataset.list, e.target.value); renderView(); }
 });
+$("page").addEventListener("input", (e) => { if (e.target.classList.contains("lfilter")) filterList(e.target); });
 
-// ---------- My playlist / Listen history
+// ---------- the controls on every song list: search these songs, sort them, ☑ Select
+const songWhen = (t) => t.listened_at || t.added_at || t.played_at || t.created || 0;
+const songLove = (t) => (t.feedback === "keep" ? 2 : 0) + (t.in_playlist ? 1 : 0) - (t.feedback === "dislike" ? 3 : 0);
+const LIST_SORTS = {
+  newest: ["Newest first", (a, b) => songWhen(b) - songWhen(a)],
+  oldest: ["Oldest first", (a, b) => songWhen(a) - songWhen(b)],
+  top: ["Your favourites first", (a, b) => songLove(b) - songLove(a) || ((b.critic || {}).score || 0) - ((a.critic || {}).score || 0)],
+  played: ["Most played", (a, b) => (b.airings || 0) - (a.airings || 0)],
+  title: ["Title A–Z", (a, b) => a.title.localeCompare(b.title)],
+  station: ["By station", (a, b) => (a.station_name || "~").localeCompare(b.station_name || "~") || songWhen(b) - songWhen(a)],
+};
+const listQ = {};                                  // what's typed in each list's search box (kept while you browse)
+const songText = (t) => [t.title, t.station_name, t.style, t.story].filter(Boolean).join(" ").toLowerCase();
+// sorts: keys of LIST_SORTS, or ["as-is", label] for the list's own order (listening order, date added...)
+function sortedSongs(key, tracks, keys) {
+  const sort = keys.includes(store.get("sort." + key, keys[0])) ? store.get("sort." + key, keys[0]) : keys[0];
+  return [sort, sort === "as-is" ? tracks : [...tracks].sort(LIST_SORTS[sort][1])];
+}
+function songList(key, tracks, row, sorts) {
+  const [sort, list] = sortedSongs(key, tracks, sorts.map(x => Array.isArray(x) ? x[0] : x));
+  const q = (listQ[key] || "").trim().toLowerCase();
+  const rows = list.map(t => row(t).replace('<li class="row', `<li data-s="${esc(songText(t))}"${q && !songText(t).includes(q) ? " hidden" : ""} class="row`));
+  const shown = q ? list.filter(t => songText(t).includes(q)).length : list.length;
+  return `<div class="lctl">
+      <label class="lsearch"><span aria-hidden="true">🔍</span><input type="search" class="lfilter" data-list="${esc(key)}" value="${esc(listQ[key] || "")}"
+        placeholder="Search these ${list.length} songs" aria-label="Search these songs"></label>
+      <label class="small muted">Sort <select class="lsort" data-list="${esc(key)}" aria-label="Sort songs">${sorts.map(x => {
+        const [k, l] = Array.isArray(x) ? x : [x, LIST_SORTS[x][0]];
+        return `<option value="${k}" ${k === sort ? "selected" : ""}>${l}</option>`; }).join("")}</select></label>
+      ${selBar(list)}</div>
+    <p class="small muted lcount" data-list="${esc(key)}">${q ? `${shown} of ${list.length} songs match` : `${list.length} song${list.length === 1 ? "" : "s"}`}</p>
+    <ul class="rows">${rows.join("")}</ul>`;
+}
+function filterList(input) {
+  const key = input.dataset.list, q = input.value.trim().toLowerCase(); listQ[key] = input.value;
+  let shown = 0, total = 0;
+  document.querySelectorAll(".rows .row[data-s]").forEach(r => { total++; r.hidden = !!q && !r.dataset.s.includes(q); if (!r.hidden) shown++; });
+  const c = document.querySelector(`.lcount[data-list="${CSS.escape(key)}"]`);
+  if (c) c.textContent = q ? (shown ? `${shown} of ${total} songs match` : `No songs match “${input.value.trim()}”`) : `${total} song${total === 1 ? "" : "s"}`;
+}
+
+// ---------- 🎵 All songs / ♥ My playlist / 🕘 Listen history
 async function collectionView() {
+  if (view.sub === "all") {
+    const all = cache.all || await loadAll();
+    return crumbs(FOLDERS.all) + (all.length ? songList("all", all, t => songRow(t, {folder: "all",
+        when: t.up_next ? "up next" : t.played_at ? whenText(t.played_at) : t.created ? whenText(t.created) : "",
+        extra: t.source !== "radio" ? "Music Studio" : t.airings > 1 ? `played ${t.airings}×` : ""}),
+      [["as-is", "Newest first"], "oldest", "top", "played", "title", "station"]) : `<p class="empty">No songs yet.</p>`);
+  }
   if (view.sub === "history") {
     const h = cache.listened || [];
-    return crumbs(FOLDERS.history) + (h.length ? `<p class="label">${h.length} recent songs</p>${selBar(h)}<ul class="rows">${h.map(t => songRow(t, {folder: "history", when: whenText(t.listened_at), extra: t.via_reruns ? "rerun" : ""})).join("")}</ul>` : `<p class="empty">Nothing played yet.</p>`);
+    return crumbs(FOLDERS.history) + (h.length ? songList("history", h, t => songRow(t, {folder: "history", when: whenText(t.listened_at), extra: t.via_reruns ? "rerun" : ""}),
+      [["as-is", "Order played"], "top", "title", "station"]) : `<p class="empty">Nothing played yet.</p>`);
   }
   const pl = cache.playlist || await loadPlaylist();
-  return crumbs(FOLDERS.playlist) + (pl.length ? `<p class="label">${pl.length} song${pl.length === 1 ? "" : "s"}</p>${selBar(pl)}<ul class="rows">${pl.map(t => songRow(t, {folder: "playlist", when: "added " + whenText(t.added_at)})).join("")}</ul>`
+  return crumbs(FOLDERS.playlist) + (pl.length ? songList("playlist", pl, t => songRow(t, {folder: "playlist", when: "added " + whenText(t.added_at)}),
+      [["as-is", "Recently added"], "oldest", "top", "played", "title", "station"])
     : `<p class="empty">Your playlist is empty. Press <b>⊕</b> in the player while a song plays, or <b>+</b> next to any song, to save it here.</p>`);
 }
 async function searchView(q) {
@@ -1132,7 +1199,10 @@ $("page").addEventListener("click", async (e) => {
   if (act === "new") return openNewStation();
   if (act === "sel-on") { sel.on = true; return renderView(); }
   if (act === "sel-off") { sel.on = false; sel.ids.clear(); return renderView(); }
-  if (act === "sel-all") { const all = sel.list.every(id => sel.ids.has(id)); sel.list.forEach(id => all ? sel.ids.delete(id) : sel.ids.add(id)); return renderView(); }
+  if (act === "sel-all") {                       // the songs you can see (a search narrows it)
+    const vis = [...document.querySelectorAll(".rows .row:not([hidden])")].map(r => r.dataset.id), all = vis.every(id => sel.ids.has(id));
+    vis.forEach(id => all ? sel.ids.delete(id) : sel.ids.add(id)); return renderView();
+  }
   if (act === "sel-one") { const id = row.dataset.id; sel.ids.has(id) ? sel.ids.delete(id) : sel.ids.add(id); return renderView(); }
   if (act.startsWith("sel-")) return selAction(act);
   if (act === "lib-layout") { store.set("libTiles", a.dataset.v === "1"); return renderView(); }

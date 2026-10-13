@@ -1747,6 +1747,16 @@ def loved(j):
     return j.get("radio_feedback") == "keep" or bool(j.get("playlist_at"))
 
 
+def all_songs(limit=3000):
+    """🎵 All songs: every finished song with audio - aired or waiting radio songs from every station, and Music Studio songs."""
+    with app.lock:
+        js = [j for j in app.jobs.values() if j.get("status") == "done" and (app.DATA / j["id"] / "song.mp3").is_file()
+              and (j.get("source") != "radio" or j.get("radio_status") in ("approved", "played"))]
+    js.sort(key=lambda j: -(j.get("played_at") or j.get("finished") or j.get("created") or 0))
+    return [track_view(j) | {"created": j.get("created"), "airings": j.get("airings", 0), "source": j.get("source", "studio"),
+                             "up_next": j.get("source") == "radio" and j.get("radio_status") == "approved"} for j in js[:limit]]
+
+
 def playlist():
     """Songs saved with +, any station, most recently added first."""
     with app.lock:
@@ -1965,6 +1975,8 @@ def handle(h, method, path):
     try:
         if method == "GET" and path == "/api/radio/favorites":
             return h.send(200, {"tracks": favorites()}) or True
+        if method == "GET" and path == "/api/radio/songs":
+            return h.send(200, {"tracks": all_songs()}) or True
         if method == "GET" and path == "/api/radio/playlist":
             return h.send(200, {"tracks": playlist()}) or True
         if method == "POST" and path == "/api/radio/playlist":
