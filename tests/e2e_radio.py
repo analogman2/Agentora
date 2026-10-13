@@ -15,6 +15,7 @@ ap.add_argument("--studio", default="http://127.0.0.1:7870")
 ap.add_argument("--quick", action="store_true")
 ap.add_argument("--allow-listeners", action="store_true")
 ap.add_argument("--full", action="store_true", help="also the AI helpers and one song made start to finish (several minutes)")
+ap.add_argument("--restart", action="store_true", help="restart the radio while listening: the stream must not stop")
 A = ap.parse_args()
 R, S = A.radio, A.studio
 results = []
@@ -172,6 +173,45 @@ if A.full:
             time.sleep(15)
         raise AssertionError("no song was judged within 25 minutes")
     check("a song: lyrics -> GPU takes -> critic", whole_song)
+
+if A.restart:
+    print("restart the radio while listening (the stream relay keeps it going)")
+    def survives_restart():
+        times, state = [], {"closed": None}
+        def listen():
+            try:
+                r = urllib.request.urlopen(R + "/radio/stream.mp3?l=e2erestart", timeout=60)
+                while not state.get("stop"):
+                    chunk = r.read(4096)
+                    if not chunk:
+                        state["closed"] = "server closed the stream"; return
+                    times.append((time.time(), len(chunk)))
+            except Exception as e:
+                state["closed"] = repr(e)
+        th = threading.Thread(target=listen, daemon=True); th.start()
+        time.sleep(20)                                     # past the initial burst: steady real time
+        t_restart = time.time()
+        subprocess.run(["systemctl", "--user", "restart", "yue2-studio"], check=True)
+        time.sleep(45)
+        state["stop"] = True
+        after = [t for t, n in times if t > t_restart]
+        gaps = [b - a for a, b in zip(after, after[1:])]
+        got = sum(n for t, n in times if t > t_restart)
+        must(state["closed"] is None, f"listener disconnected: {state['closed']}")
+        must(after and max(gaps or [0]) < 3, f"audio stopped for {max(gaps or [99]):.1f} s")
+        kbps = got * 8 / 1000 / (time.time() - t_restart)
+        must(kbps > 150, f"only {kbps:.0f} kbit/s during the restart")
+        for _ in range(60):                                # and the radio is back on air
+            try:
+                if ((req(R, "/api/radio/state").get("stream") or {}).get("now") or {}).get("title"):
+                    break
+            except Exception:
+                pass
+            time.sleep(2)
+        else:
+            raise AssertionError("nothing on air 2 minutes after the restart")
+        return f"stayed connected, longest pause {max(gaps or [0]):.1f} s, {kbps:.0f} kbit/s through the restart"
+    check("stream survives a radio restart", survives_restart)
 
 print("server log")
 def log_clean():

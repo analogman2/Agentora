@@ -48,14 +48,37 @@ The **radio and Music Studio** are in this repository (`studio/`). The **Image &
                                                                            │ approved
                                                                            v
    ComfyUI Z-Image ──> cover art        spool (6 ahead) ──> playout (real-time, 15 s lead, clean cuts)
+                                                                           │ MP3 feed (127.0.0.1:7862)
+            radio service (port 7860, restartable) ────────────────────────┼──────────────────────────────
+                                                                           v
+            stream relay (port 7861, its own service): listeners, 15 s cushion, stream position, silence bridge
                                                                            │
-                                     /radio/stream.mp3 ──> radio page · phones · VLC (same audio)
+                                     /stream.mp3 ──> radio page · phones · VLC (same audio)
 ```
 
-- `studio/app.py`: the HTTP server (Python stdlib), job queue, GPU worker and hand-off, lyrics writer, ✏️ rewrite suggestions, MP3 library.
-- `studio/radio.py`: stations, songwriter and lyric editor, lyric bank, taste learning, critic, broadcast/playout, history navigation, play next, `/api/radio/*`.
-- `studio/art.py`: cover art through ComfyUI. `studio/assistant.py`: the radio's chat panel, relayed to Hermes.
-- `studio/radio.html`, `studio/index.html`: the radio and the Music Studio (no build step, no dependencies).
+Two services, so the music keeps playing through a restart of the radio:
+
+- **The radio** (`yue2-studio`, port 7860) writes, records, judges and chooses songs, paces the audio in real time and feeds it to the relay. It also serves the pages and the API.
+- **The stream relay** (`agentora-stream`, port 7861) holds every listener's connection, the burst buffer a new listener starts with, and the stream position. If the feed pauses for most of a cushion (the radio restarting takes about 10 s), it plays silence so no player runs dry. `/radio/stream.mp3` on port 7860 redirects to it, so old links and players keep working.
+
+The code, by job:
+
+| File | What it does |
+|---|---|
+| `studio/app.py` | HTTP server (stdlib), job queue, GPU worker processes and hand-off, lyrics writer, ✏️ rewrite suggestions |
+| `studio/radio.py` | starts the radio, routes `/api/radio/*`, and forwards `radio.NAME` to the module that owns it |
+| `studio/radio_state.py` | shared state and every setting (changed live by `settings.py`); other modules read them as `rs.NAME` |
+| `studio/radio_stations.py` | create / edit / analyze stations (CLAP + librosa), ✨ Improve / 💡 Suggest |
+| `studio/radio_songwriter.py` | song specs, the lyric editor, the GPU lyricist's bank, taste notes from thumbs |
+| `studio/radio_spool.py` | keeps songs ready: queues takes, the CLAP critic, audio checks |
+| `studio/radio_broadcast.py` | playout, pacing, the feed to the relay, ⏭ ⏮ 📻 play next, listening signals |
+| `studio/radio_library.py` | songs, history, playlist, feedback, next track and reruns, on/off |
+| `studio/stream_relay.py` | the stream relay (stdlib only) |
+| `studio/art.py`, `studio/assistant.py`, `studio/settings.py` | cover art (ComfyUI), the chat panel (Hermes), ⚙ settings |
+| `studio/radio.html` + `studio/web/radio-*.js` | the radio page: core, player, library, panel, extras (plain scripts, no build step) |
+| `studio/index.html` | the Music Studio |
+| `studio/logsetup.py` | logging for every component |
+| `tests/e2e_radio.py`, `tests/e2e_ui.py` | end-to-end tests (below) |
 
 ## Hardware and software
 
@@ -84,9 +107,15 @@ printf 'FROM qwen3.6:35b-a3b\nPARAMETER num_ctx 8192\nPARAMETER num_gpu 0\n' > M
 printf 'FROM qwen3.6:27b\nPARAMETER num_ctx 65536\n' > Modelfile && ollama create qwen3.6-agent -f Modelfile
 printf 'FROM qwen3.5:9b\nPARAMETER num_ctx 65536\n' > Modelfile && ollama create qwen3.5-agent-fast -f Modelfile
 
-# 3. run it (or install systemd/yue2-studio.service as a user service)
+# 3. the stream relay (keeps listeners connected through a restart of the radio)
+cp ~/yue2-xpu-radio/systemd/agentora-stream.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now agentora-stream
+
+# 4. run the radio (or install systemd/yue2-studio.service)
 ~/yue2-xpu-radio/start-local.sh
 ```
+
+Players connect to the relay on port 7861, so open that port wherever you expose 7860 (here: the Tailscale/LAN relay).
 
 Open `http://<host>:7860/radio` (radio) or `http://<host>:7860/` (Music Studio). `nvidia-local.patch` holds the changes to `app.py` that make it run on CUDA; it's already applied on this branch.
 
@@ -103,6 +132,8 @@ Optional, and it makes the 27B model fit fully on a 24 GB card: `OLLAMA_KV_CACHE
 | `RADIO_TAKES` / `RADIO_AHEAD` | `2` / `6` | takes per song (the critic keeps the best); songs kept ready |
 | `RADIO_BURST_SECONDS` | `15` | how far the stream runs ahead, i.e. each player's cushion |
 | `STUDIO_DATA` | `~/yue2-xpu-radio/library` | the song library; radio state lives next to it |
+| `RADIO_RELAY_PORT` / `RADIO_RELAY_FEED` | `7861` / `7862` | where players connect / where the radio feeds the relay |
+| `LOG_LEVEL` / `LOG_DIR` | `INFO` / `logs/` | log level (`DEBUG` adds every web request) and where the log files go |
 
 Most radio and audio settings (bitrate, loudness, EQ, quality steps, takes, writers, cover art) can also be changed live on the radio page under ☰ → Settings.
 
@@ -110,7 +141,7 @@ Most radio and audio settings (bitrate, loudness, EQ, quality steps, takes, writ
 
 | | |
 |---|---|
-| `GET /radio/stream.mp3` | the live broadcast |
+| `GET :7861/stream.mp3` | the live broadcast, from the stream relay (`/radio/stream.mp3` on :7860 redirects there) |
 | `GET /api/radio/state` | stations, what's on air, what's being made, GPU owner, play-next list |
 | `POST /api/radio/power` `{on, station}` | switch on/off or retune |
 | `POST /api/radio/skip` `{track, kind}` / `POST /api/radio/back` `{track, steps}` | ⏭ / ⏮ (steps 0 = restart the song, 1 = previous) |
@@ -120,6 +151,33 @@ Most radio and audio settings (bitrate, loudness, EQ, quality steps, takes, writ
 | `POST /api/radio/stations/<id>/song` `{like}` | write and record a song now (optionally "more like" a song) |
 | `POST /api/rewrite/suggest` `{id, ask}` | ✏️ ideas for rewriting a song, or turn a request into edits |
 
+## Logs
+
+Every component logs the same way: a level and the component's name on every line, to the systemd journal and to a rotating file (5 MB × 5).
+
+| Component | Journal | File |
+|---|---|---|
+| Radio + Music Studio (and each module: `radio_spool`, `radio_broadcast`, `art`…) | `journalctl --user -u yue2-studio` | `logs/radio.log` |
+| YuE2 GPU workers | (same journal) | `logs/yue2-worker.log` |
+| Stream relay | `journalctl --user -u agentora-stream` | `logs/stream.log` |
+| Image & Video Studio, Hermes gate (companion app) | `-u genstudio`, `-u hermes-gate` | `~/genstudio/logs/studio.log`, `hermes-gate.log` |
+| Tailscale/LAN relay | `-u tailnet-relay` | `~/.local/state/tailnet-relay/relay.log` |
+
+Plain lines are INFO, lines about failures are WARNING, and tracebacks (including uncaught errors in any thread or request) are ERROR. A client closing a connection isn't logged as an error. Set `LOG_LEVEL=DEBUG` in a service to log every request.
+
+## Tests
+
+End-to-end tests against the running services. Run them while nobody is listening: they play, skip and queue songs, which moves the broadcast for everyone. Anything they change is put back.
+
+```bash
+~/venv-yue2/bin/python tests/e2e_radio.py              # pages, API, library, settings, stream, skip, back, play next, log (~1 min)
+~/venv-yue2/bin/python tests/e2e_radio.py --restart    # + restarts the radio while listening: the stream must not stop
+~/venv-yue2/bin/python tests/e2e_radio.py --full       # + ✨ Improve, ✏️ rewrite ideas, and one song made start to finish (minutes)
+python tests/e2e_ui.py                                 # headless browser (Playwright): every page and flow, no JS errors
+```
+
+`--quick` skips the broadcast tests, so it's safe while people listen.
+
 ## Things we learned the hard way
 
 This fork's additions; the original project's lessons follow below.
@@ -128,6 +186,8 @@ This fork's additions; the original project's lessons follow below.
 - **Clean cuts mean reconnects.** Dropping the buffered old song on ⏭ makes the new one start in a second, but every player then reconnects. Anything that cuts must not fire for fillers, and the playout must not treat the instant between disconnect and reconnect as "everyone left".
 - **Phones freeze silent background tabs.** When a stream drops, the player keeps a silent clip looping while it retries, so Android doesn't suspend the page.
 - **Web Audio and Bluetooth don't mix on Android.** Routing the stream through Web Audio (for EQ and VU meters) crackled over car Bluetooth; phones now default to plain playback.
+- **Restarting shouldn't mean silence.** Splitting the stream into its own small service, which owns the listeners and the stream position, lets the radio restart in the middle of a song: listeners stay connected, a silence bridge covers the gap, and the next song follows. The test restarts the radio while listening and requires no pause over 3 s.
+- **Big refactors need a referee.** The radio was split from one 2,000-line file into modules mechanically, with Python's own symbol tables deciding which names are global, and checked by end-to-end tests run before and after (identical results).
 - **One GPU, many guests.** Sharing one loaded copy of a model between the lyricist and the assistant avoids reloads, and a 35B model that doesn't fit is slower than a 9B that does. With a 24 GB card, what *fits* matters more than parameter count.
 
 ### From the original yue2-xpu-radio

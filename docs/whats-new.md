@@ -107,9 +107,20 @@ A local [Hermes Agent](https://github.com/NousResearch/hermes-agent) answers in 
 - A **🌐 Internet** switch turns web search on or off.
 - Only admin accounts of the Studio can use it.
 
+## Under the hood
+
+- **The music survives a restart.** The live stream now runs as its own small service, the **stream relay** (port 7861). It holds every listener's connection, the 15 s cushion and the stream position. The radio feeds it audio. When the radio restarts for an update, listeners stay connected and a silence bridge covers the few seconds until the next song. Before, every restart cut the stream for everyone.
+- **Broken into modules by job.** The 2,000-line `radio.py` is now `radio_state`, `radio_stations`, `radio_songwriter`, `radio_spool`, `radio_broadcast` and `radio_library`. The radio page's 1,250-line script is now five files in `studio/web/` (core, player, library, panel, extras). There's no change in behaviour: the same end-to-end tests pass before and after.
+- **Logging everywhere.** Every component (radio, GPU workers, stream relay, Image & Video Studio, Hermes gate, network relay) logs with a level and its name. Logs go to the systemd journal and to rotating files (`logs/`), and uncaught errors are logged with their traceback. See [Logs](../README.md#logs).
+- **End-to-end tests.**
+  - `tests/e2e_radio.py` covers the pages, the API, the library, settings, playlist and thumbs, the stream, skip, back and play next. `--restart` restarts the radio mid-song and requires the stream not to stop. `--full` adds the AI helpers and one song made start to finish.
+  - `tests/e2e_ui.py` drives every page in a headless browser and fails on any JavaScript error.
+
 ## Fixes along the way
 
 - A song interrupted in its first 30 s is no longer put back as "unplayed" when it was a replay or a request; only new songs go back to the queue.
 - A player reconnecting after ⏮ or ⏭ no longer stops the song for a moment and skips ahead.
 - Skip, thumbs, playlist and the song page now work for any library song on air, not only radio-made ones.
 - The radio no longer crashes at startup, and cover art waits out ComfyUI restarts instead of giving up.
+- ✏️ Rewrite ideas no longer crash on songs from a station that has learned taste notes (found by the end-to-end tests).
+- A browser leaving the page mid-reply no longer logs an error.

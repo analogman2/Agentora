@@ -12,9 +12,11 @@ function hearing() {
 // A broken stream (radio restarting, network drop) is retried with backoff until it plays again; a real pause (Bluetooth
 // off, a call, ⏸) has a loaded stream and no error, and is left alone.
 let retry = {n: 0, at: 0};
+// The stream relay (its own service) serves the broadcast, so a restart of the radio doesn't disconnect anyone.
+const streamUrl = (id) => `${location.protocol}//${location.hostname}:${(R && R.stream && R.stream.relay_port) || 7861}/stream.mp3?l=${id}`;
 function connect() {
   lid = Math.random().toString(36).slice(2, 12);
-  audio.src = `/radio/stream.mp3?l=${lid}`;
+  audio.src = streamUrl(lid);
   audio.play().then(() => { retry.n = 0; }).catch(e => {
     if (e.name === "NotAllowedError") { status("Tap ▶ to resume — the phone blocked playing in the background."); toast("Tap ▶ to resume the radio."); }
     else scheduleRetry();                                  // the stream didn't load (e.g. the radio is restarting)
@@ -152,7 +154,7 @@ $("bUp").onclick = async () => {
 let myCut;
 function followCut(cut) {
   if (cut == null) return;
-  if (myCut !== undefined && cut !== myCut && wantPlay && lid) connect();
+  if (myCut !== undefined && cut > myCut && wantPlay && lid) connect();   // lower: the radio restarted (the stream didn't)
   myCut = cut;
 }
 async function skipNow(kind) {

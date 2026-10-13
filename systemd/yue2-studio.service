@@ -2,8 +2,8 @@
 #   sudo systemctl daemon-reload && sudo systemctl enable --now yue2-studio
 [Unit]
 Description=YuE2 Music Studio + radio (web UI + GPU queue) on port 7860
-After=network-online.target vllm.service
-Wants=network-online.target
+After=network-online.target vllm.service agentora-stream.service
+Wants=network-online.target agentora-stream.service
 
 [Service]
 User=YOURUSER

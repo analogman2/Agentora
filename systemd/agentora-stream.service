@@ -1,0 +1,12 @@
+[Unit]
+Description=Agentora stream relay: holds radio listeners (port 7861) so restarting the radio doesn't cut the music
+After=network.target
+
+[Service]
+ExecStart=%h/venv-yue2/bin/python %h/yue2-xpu-radio/studio/stream_relay.py --port 7861 --feed-port 7862
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

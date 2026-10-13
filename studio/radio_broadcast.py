@@ -1,5 +1,9 @@
-"""The live broadcast: encodes songs to one real-time MP3 stream, the listeners, skip / ⏮ history / 📻 play next,
+"""The live broadcast: chooses and encodes songs into one real-time MP3 stream, skip / ⏮ history / 📻 play next,
 clean cuts, and the listening signals (heard to the end / tuned out).
+
+The listeners themselves are held by the stream relay (stream_relay.py, its own service on port 7861): this module
+paces the audio and feeds it there, so restarting the radio doesn't disconnect anyone. The relay owns the stream
+position and the burst buffer; rs.bc["bytes"] mirrors its position and rs.bc["listeners"] its listeners (polled).
 """
 import collections, json, os, queue, random, re, shutil, subprocess, sys, threading, time, traceback, urllib.request, uuid
 from pathlib import Path
@@ -8,11 +12,107 @@ import art                          # cover art for stations and songs (drawn by
 
 import app
 import radio_state as rs, radio_stations as rst, radio_songwriter as rsw, radio_spool as rsp, radio_library as rlb
+import socket, struct
+
+RELAY_PORT = int(os.environ.get("RADIO_RELAY_PORT", "7861"))        # where players connect (stream_relay.py)
+RELAY_FEED = ("127.0.0.1", int(os.environ.get("RADIO_RELAY_FEED", "7862")))
+
+
+class Relay:
+    """The radio's side of the feed to stream_relay.py; reconnects by itself. Every call returns None if it's down."""
+
+    def __init__(self):
+        self.sock, self.lock, self.retry_at = None, threading.Lock(), 0.0
+
+    def _call(self, kind, payload=b"", reply="pos"):
+        with self.lock:
+            for attempt in (1, 2):
+                if self.sock is None:
+                    if time.time() < self.retry_at:
+                        return None
+                    try:
+                        self.sock = socket.create_connection(RELAY_FEED, timeout=5)
+                        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                        self._send(b"F", json.dumps({"bitrate": rs.ACTIVE_BITRATE, "burst": rs.BURST}).encode())
+                        self._recv(8)
+                        app.log(f"radio: feeding the stream relay on {RELAY_FEED[0]}:{RELAY_FEED[1]}")
+                    except OSError as e:
+                        self.sock = None; self.retry_at = time.time() + 2
+                        app.log(f"radio: stream relay not reachable ({e})")
+                        return None
+                try:
+                    self._send(kind, payload)
+                    if reply == "pos":
+                        return struct.unpack(">Q", self._recv(8))[0]
+                    n = struct.unpack(">I", self._recv(4))[0]
+                    return json.loads(self._recv(n))
+                except (OSError, ValueError, struct.error):
+                    try:
+                        self.sock.close()
+                    except OSError:
+                        pass
+                    self.sock = None
+            return None
+
+    def _send(self, kind, payload):
+        self.sock.sendall(struct.pack(">cI", kind, len(payload)) + payload)
+
+    def _recv(self, n):
+        b = bytearray()
+        while len(b) < n:
+            part = self.sock.recv(n - len(b))
+            if not part:
+                raise OSError("relay closed the feed")
+            b += part
+        return bytes(b)
+
+    def audio(self, chunk):
+        return self._call(b"A", chunk)
+
+    def cut(self):
+        return self._call(b"X")
+
+    def trim(self, keep):
+        return self._call(b"T", struct.pack(">Q", keep))
+
+    def fmt(self):
+        return self._call(b"F", json.dumps({"bitrate": rs.ACTIVE_BITRATE, "burst": rs.BURST}).encode())
+
+    def status(self):
+        return self._call(b"S", reply="json")
+
+
+relay = Relay()
+relay_view = {"listeners": {}}                    # the relay's last status: per-listener metrics for listeners_view()
+
+
+def relay_poll():
+    """Mirror the relay's listeners into rs.bc["listeners"] (who's listening, their stream offsets) and collect the
+    departures for the listening signals."""
+    seen = set()
+    while True:
+        st = relay.status()
+        if st is not None:
+            with rs.bc_lock:
+                was = bool(rs.bc["listeners"])
+                rs.bc["listeners"] = st["listeners"]
+                if not st["bridging"]:
+                    rs.bc["bytes"] = max(rs.bc["bytes"], st["pos"]) if st["pos"] >= rs.bc["bytes"] - 10 * rs.BPS else st["pos"]
+            relay_view["listeners"] = st["listeners"]
+            for d in st["departures"]:
+                key = (d[0], d[1])
+                if key not in seen:
+                    seen.add(key); _departures.append(tuple(d))
+            if rs.bc["listeners"] and not was:
+                rs.bc["wake"].set()
+        time.sleep(1)
 
 
 def set_buffer(seconds):
     rs.BURST = int(seconds) * rs.BPS // rs.FRAME * rs.FRAME
     rs.LEAD = rs.BURST / rs.BPS
+    if relay.sock is not None:
+        relay.fmt()                                  # the relay keeps that much for each new listener
 
 
 def _switch_format():
@@ -23,8 +123,8 @@ def _switch_format():
         rs.BPS, rs.FRAME, rs.ACTIVE_BITRATE = rs.BITRATE * 1000 // 8, 144 * rs.BITRATE * 1000 // 48000, rs.BITRATE
         rs.ENCODE[rs.ENCODE.index("-b:a") + 1] = f"{rs.BITRATE}k"
         set_buffer(seconds)
-        rs.bc["listeners"].clear()
-        rs.bc.update(bytes=0, epoch=time.time(), buf=bytearray(), aired=[], now=None)
+        rs.bc["listeners"] = {}
+        rs.bc.update(bytes=relay.fmt() or 0, paced=0, epoch=time.time(), aired=[], now=None)   # the relay drops its listeners
     _make_silence()
     app.log(f"radio: stream now {rs.BITRATE} kbit/s")
 
@@ -67,27 +167,20 @@ def audio_filters(seconds):
 
 
 def _broadcast(chunk):
-    """Pace the stream at real time (bytes sent == elapsed seconds * BPS), then fan the chunk out to listeners.
+    """Pace the stream at real time (bytes paced == elapsed seconds * BPS), then feed the chunk to the stream relay.
     The stream runs LEAD seconds ahead of the clock, so every player - also the first one after the stream was
     idle, or one that just reconnected - holds that much audio in its buffer."""
-    ahead = (rs.bc["bytes"] + len(chunk)) / rs.BPS - (time.time() - rs.bc["epoch"]) - rs.LEAD
+    ahead = (rs.bc["paced"] + len(chunk)) / rs.BPS - (time.time() - rs.bc["epoch"]) - rs.LEAD
     if ahead > 0:
         time.sleep(ahead)
     with rs.bc_lock:
-        if ahead < -1.0 - rs.LEAD:         # we were idle (no listeners): restart the clock instead of bursting to catch up
-            if time.time() - rs.bc["last"] > rs.STALE:
-                rs.bc["buf"].clear()       # silent for long: the buffered audio is stale
-            # a newcomer gets the kept buffer at once; send only the rest of LEAD ahead, so the slack stays ~LEAD
-            rs.bc["epoch"] = time.time() - (rs.bc["bytes"] + len(chunk) - len(rs.bc["buf"])) / rs.BPS
-        rs.bc["bytes"] += len(chunk)
+        if ahead < -1.0 - rs.LEAD:         # we were idle (no listeners) or just started: restart the clock, send LEAD at once
+            rs.bc["epoch"] = time.time() - (rs.bc["paced"] + len(chunk)) / rs.BPS
+        rs.bc["paced"] += len(chunk)
         rs.bc["last"] = time.time()
-        rs.bc["buf"] += chunk
-        del rs.bc["buf"][:-rs.BURST]                  # BURST is a whole number of frames, so the burst starts on a frame
-        for lid, li in list(rs.bc["listeners"].items()):
-            try:
-                li["q"].put_nowait(chunk)
-            except queue.Full:          # a listener that cannot keep up gets dropped (it reconnects)
-                rs.bc["listeners"].pop(lid, None)
+    pos = relay.audio(chunk)                    # the relay's stream position after this chunk (None: relay is down)
+    with rs.bc_lock:
+        rs.bc["bytes"] = pos if pos is not None else rs.bc["bytes"] + len(chunk)
 
 
 def _air(entry):
@@ -114,8 +207,11 @@ def _play_track(t):
     if t.get("tuned", t.get("station")) == rs.state["station"]:
         rs.bc["retuned"] = False                  # the new station's own song is on: nothing left to cut over
     if rs.bc["cut_next"]:                     # skipped or retuned: drop the old song's buffered audio and refill LEAD at once,
-        with rs.bc_lock:                      # so players that reconnect start right on this song with a full cushion
-            rs.bc["buf"].clear(); rs.bc["epoch"] = time.time() - rs.bc["bytes"] / rs.BPS
+        pos = relay.cut()                     # so players that reconnect start right on this song with a full cushion
+        with rs.bc_lock:
+            rs.bc["epoch"] = time.time() - rs.bc["paced"] / rs.BPS
+            if pos is not None:
+                rs.bc["bytes"] = pos
             rs.bc["cut"] += 1; rs.bc["cut_next"] = False
     _air(t | {"duration": t.get("seconds")})
     app.log("radio on air:", t["title"], f"({len(rs.bc['listeners'])} listening)")
@@ -218,7 +314,12 @@ def _play_silence():
 
 
 def playout_loop():
+    rs.bc.setdefault("paced", 0)
     _make_silence()
+    st = relay.status()                       # carry on from the relay's stream position (it outlives a restart of the radio)
+    if st is not None:
+        rs.bc["bytes"] = st["pos"]
+    threading.Thread(target=relay_poll, daemon=True, name="radio-relay-poll").start()
     while True:
         try:
             if not rs.bc["listeners"]:                 # nobody listening: don't burn songs into the void
@@ -244,66 +345,22 @@ def playout_loop():
 
 
 def stream(h):
-    """GET /radio/stream.mp3 - the live broadcast. ?l=<id> lets the deck match up what it hears with the playlist."""
-    lid = re.sub(r"\W", "", (h.path.split("l=", 1)[1] if "l=" in h.path else "").split("&")[0])[:40] or uuid.uuid4().hex[:12]
-    q = queue.Queue(maxsize=400)                    # ~2 minutes of slack before a stuck client is dropped
-    with rs.bc_lock:
-        if time.time() - rs.bc["last"] > rs.STALE:        # stream was idle for long: the buffer holds stale audio
-            rs.bc["buf"].clear()
-        burst = bytes(rs.bc["buf"])
-        rs.bc["listeners"][lid] = {"q": q, "p0": (rs.bc["bytes"] - len(burst)) / rs.BPS, "since": time.time(),
-                                "agent": (h.headers.get("User-Agent") or "")[:80], "device": _agent(h), "sent": 0,
-                                "samples": collections.deque(maxlen=64)}
-    _joined[(lid, id(q))] = time.time()
-    peer = h.headers.get("X-Forwarded-For") or h.client_address[0]
-    app.log(f"radio: listener {lid[:6]} joined from {peer} ({_agent(h)}), {len(burst) / rs.BPS:.0f} s cushion")
-    why = "left"
-    rs.bc["wake"].set()
-    try:
-        h.send_response(200)
-        for k, v in (("Content-Type", "audio/mpeg"), ("Cache-Control", "no-cache, no-store"), ("Connection", "close"),
-                     ("Access-Control-Allow-Origin", "*"), ("icy-name", "Agentora"), ("X-Content-Type-Options", "nosniff")):
-            h.send_header(k, v)
-        h.end_headers()
-        li = rs.bc["listeners"][lid]
-        if burst:
-            h.wfile.write(burst)
-            _count(li, len(burst))
-        while lid in rs.bc["listeners"] and rs.bc["listeners"][lid]["q"] is q:
-            try:
-                chunk = q.get(timeout=5)
-            except queue.Empty:
-                continue
-            h.wfile.write(chunk)
-            _count(li, len(chunk))
-        else:
-            why = "dropped by the server (too slow to keep up, or a format change)"
-    except (BrokenPipeError, ConnectionResetError, OSError) as e:
-        why = f"connection closed ({type(e).__name__})"
-    finally:
-        with rs.bc_lock:
-            if rs.bc["listeners"].get(lid, {}).get("q") is q:
-                rs.bc["listeners"].pop(lid, None)
-        _departures.append((lid, time.time(), _joined.get((lid, id(q)), time.time())))
-        app.log(f"radio: listener {lid[:6]} {why} after {time.time() - bc_since(lid, q):.0f} s")
-    h.close_connection = True
-
-
-def _count(li, n):
-    li["sent"] += n
-    li["samples"].append((time.time(), li["sent"]))
+    """GET /radio/stream.mp3: the broadcast is served by the stream relay (stream_relay.py) on its own port, so a
+    restart of the radio doesn't disconnect listeners. Old links and players (VLC, the classic deck) follow this."""
+    query = h.path.split("?", 1)[1] if "?" in h.path else ""
+    host = (h.headers.get("Host") or "127.0.0.1").rsplit(":", 1)[0]
+    h.send_response(307)
+    h.send_header("Location", f"//{host}:{RELAY_PORT}/stream.mp3" + (f"?{query}" if query else ""))   # same http/https
+    h.send_header("Content-Length", "0"); h.send_header("Cache-Control", "no-store")
+    h.end_headers()
 
 
 def listeners_view(me=None):
-    """Per-listener metrics: what the server delivered over the last ~10 s and how much is still queued for it."""
+    """Per-listener metrics from the relay: what it delivered over the last ~10 s and how much is still queued."""
     now, out = time.time(), []
-    with rs.bc_lock:
-        for lid, li in rs.bc["listeners"].items():
-            recent = [x for x in li["samples"] if now - x[0] <= 10]
-            rate = (recent[-1][1] - recent[0][1]) / (recent[-1][0] - recent[0][0]) if len(recent) > 1 and recent[-1][0] > recent[0][0] else 0
-            out.append({"id": lid[:6], "me": lid == me, "device": li.get("device", "?"), "seconds": round(now - li["since"]),
-                        "kbps": round(rate * 8 / 1000), "sent_mb": round(li["sent"] / 2**20, 1), "sent": li["sent"],
-                        "backlog_s": round(li["q"].qsize() * 8192 / rs.BPS, 1)})
+    for lid, li in list(relay_view["listeners"].items()):
+        out.append({"id": lid[:6], "me": lid == me, "device": li.get("device", "?"), "seconds": round(now - li["since"]),
+                    "kbps": li["kbps"], "sent_mb": round(li["sent"] / 2**20, 1), "sent": li["sent"], "backlog_s": li["backlog_s"]})
     return sorted(out, key=lambda x: (not x["me"], x["seconds"]))
 
 
@@ -317,20 +374,6 @@ def _noise(n):
         _noise_cache = os.urandom(n)
     return _noise_cache[:n]
 
-_joined = {}
-
-
-def bc_since(lid, q):
-    return _joined.pop((lid, id(q)), time.time())
-
-
-def _agent(h):
-    ua = h.headers.get("User-Agent") or ""
-    for key, name in (("VLC", "VLC"), ("Android", "Android"), ("iPhone", "iPhone"), ("Windows", "Windows"), ("Macintosh", "Mac"),
-                      ("Linux", "Linux"), ("curl", "curl"), ("Python", "script")):
-        if key in ua:
-            return name + (" Chrome" if "Chrome" in ua and key != "VLC" else "")
-    return ua[:30] or "unknown"
 
 def skip(track_id, kind="skip"):
     """Skip (or NOPE) the song on air - for everyone, it's one broadcast. After ⏮, ⏭ steps forward through the history."""
@@ -340,10 +383,9 @@ def skip(track_id, kind="skip"):
     if now and track_id and now["id"] != track_id and now.get("start_pos") is not None:
         # the listener still hears the song before (the stream runs LEAD ahead) and the next one is already on air:
         # drop the old song's tail from the buffer, so a reconnecting player starts on the current song
-        with rs.bc_lock:
-            keep = round((rs.bc["bytes"] / rs.BPS - now["start_pos"]) * rs.BPS / rs.FRAME) * rs.FRAME
-            if 0 < keep < len(rs.bc["buf"]):
-                del rs.bc["buf"][:len(rs.bc["buf"]) - keep]
+        keep = round((rs.bc["bytes"] / rs.BPS - now["start_pos"]) * rs.BPS / rs.FRAME) * rs.FRAME
+        if 0 < keep < rs.BURST and relay.trim(keep) is not None:
+            with rs.bc_lock:
                 rs.bc["cut"] += 1
         return {"ok": True, "cut": rs.bc["cut"]}
     if now and (not track_id or now["id"] == track_id):
@@ -466,4 +508,4 @@ def stream_view(listener=None):
         return {"pos": round(rs.bc["bytes"] / rs.BPS, 3), "listeners": len(rs.bc["listeners"]), "aired": rs.bc["aired"],
                 "now": rs.bc["now"], "p0": li["p0"] if li else None, "url": "/radio/stream.mp3",
                 "clock": round(time.time() - rs.bc["epoch"], 3) if rs.bc["listeners"] else None,   # real-time position
-                "bitrate": rs.ACTIVE_BITRATE, "lead": round(rs.LEAD, 1), "cut": rs.bc["cut"]}
+                "bitrate": rs.ACTIVE_BITRATE, "lead": round(rs.LEAD, 1), "cut": rs.bc["cut"], "relay_port": RELAY_PORT}

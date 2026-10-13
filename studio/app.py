@@ -13,6 +13,8 @@ Library layout: DATA/<job id>/job.json, plus DATA/<job id>/song/ (YuE2 artifacts
 and song.mp3. Stdlib HTTP server; run with the YuE2 venv's python.
 """
 import dataclasses, json, multiprocessing as mp, os, queue, urllib.request, random, re, shutil, subprocess, sys, threading, time, traceback, uuid
+import logging
+import logsetup                     # logging for every component: journal + logs/<component>.log
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
@@ -47,7 +49,10 @@ gpu = {"owner": "llm", "detail": "", "idle_since": None, "release_requested": Fa
 
 
 def log(*a):
-    print(time.strftime("%H:%M:%S"), *a, flush=True)
+    """Log a line as the calling module (radio_spool, art, ...) at a level read from the text (see logsetup.level_of)."""
+    msg = " ".join(str(x) for x in a)
+    name = sys._getframe(1).f_globals.get("__name__", "studio")
+    logging.getLogger("studio" if name in ("__main__", "__mp_main__", "app") else name).log(logsetup.level_of(msg), msg)
 
 
 def sh(*cmd, timeout=180):
@@ -547,6 +552,7 @@ def run_job(pipe, base, job, update, cancelled):
 
 def gpu_main(device, task_q, event_q, cancel_ev):
     """GPU child process for one card: loads YuE2 once, renders jobs until told to stop, then exits (freeing all VRAM)."""
+    logsetup.setup("yue2-worker")
     try:
         from yue2 import YuE2Pipeline
         pipe = YuE2Pipeline.from_pretrained("m-a-p/YuE2-3B", device=device, progress=False)
@@ -1307,15 +1313,20 @@ class Handler(BaseHTTPRequestHandler):
         log("deleted", job["id"])
         self.send(200, {"ok": True})
 
-    def log_message(self, *a):
-        pass
+    def log_message(self, fmt, *a):
+        logging.getLogger("http").debug("%s %s", self.address_string(), fmt % a)   # every request, at LOG_LEVEL=DEBUG
+
+
+class Server(logsetup.QuietBrokenPipes, ThreadingHTTPServer):
+    daemon_threads = True
 
 
 if __name__ == "__main__":
+    logsetup.setup("radio")
     load_library()
     sys.modules.setdefault("app", sys.modules["__main__"])   # radio.py imports the studio as `app`
     import radio
     radio.init(sys.modules["__main__"])
     Worker().start()
     log(f"Music Studio on :{PORT}, data {DATA}, devices {DEVICES}, returns GPUs after {RETURN_MINUTES} min idle")
-    ThreadingHTTPServer((os.environ.get("STUDIO_HOST", "127.0.0.1"), PORT), Handler).serve_forever()
+    Server((os.environ.get("STUDIO_HOST", "127.0.0.1"), PORT), Handler).serve_forever()

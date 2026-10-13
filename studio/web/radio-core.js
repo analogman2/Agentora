@@ -13,6 +13,7 @@ const lp = {t: null, queue: [], i: -1};          // a song playing from the Libr
 let R = null, current = null, wantPlay = false, actx = null, devNodes = null, shelfSig = "";
 let selected = store.get("station", null);
 const audio = $("audio"), pv = $("pv");
+audio.crossOrigin = "anonymous";                   // the stream comes from the relay's port; Web Audio (EQ, meters) needs CORS
 audio.volume = store.get("vol", 0.85); $("vol").value = audio.volume;
 $("vol").oninput = () => { audio.volume = +$("vol").value; store.set("vol", audio.volume); };
 
