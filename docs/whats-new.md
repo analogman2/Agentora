@@ -40,6 +40,8 @@ Agentora started as [yue2-xpu-radio](https://github.com/zebgop-ops/yue2-xpu-radi
 - **A path bar on every page** (`Library › Indie Road Trip › Final Load at the Dock`), with every step clickable, plus an ↑ button for going up one level.
 - **Previous / Next** at the bottom of a song page moves through the folder you came from: the station, your playlist or your history.
 - **Whole rows are clickable**: clicking anywhere on a song row opens it.
+- **Playing a station opens it**: pressing ▶ on a station goes straight to its page, with the song in the player bar, instead of a separate Now Playing step.
+- **🎲 Random** (Library, Now Playing and the start page) plays a station picked at random.
 - **☑ Select** on any song list, with **Select all**, then 📻 Play next, + Playlist, − Playlist or Delete for all of them at once.
 - **Search** across stations, titles, styles and lyrics.
 

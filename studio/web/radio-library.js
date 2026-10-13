@@ -177,6 +177,7 @@ function nowView() {
     return `<section class="section"><p class="label">Start listening</p><h1 style="font-size:30px;margin:0 0 6px">Pick a station</h1>
       <p class="muted" style="margin:0 0 24px">Every station writes and sings brand-new songs. Everyone listening hears the same broadcast.
         Press a station to play it, or open the <a href="#lib">Library</a> to look through stations and songs.</p>
+      <p style="margin:0 0 20px"><button class="pill primary" data-act="random" title="Play a station picked at random">🎲 Random station</button></p>
       <div class="grid">${stations.map(s => stationTile(s).replace('class="tile"', `class="tile" data-play="${esc(s.id)}"`)).join("")}${newTile}</div></section>`;
   }
   const chips = t ? [t.airing === "rerun" ? "Rerun" : t.airing === "runner-up" ? "Runner-up take" : t.airing === "history" ? "Replay" : t.airing === "request" ? "Requested" : null, t.seconds ? mmss(t.seconds) : null,
@@ -193,7 +194,7 @@ function nowView() {
         <a class="pill" href="${songHref(t)}">Song details</a>
         <a class="pill" href="${esc(t.audio)}?download=1">⤓ Download</a>
         <button class="pill" data-act="np-art" title="Draw a new cover for this song">🎨 New cover</button>` : ""}
-        <a class="pill" href="#lib/${esc(stId || "")}">Open station</a></div>
+        <button class="pill" data-act="random" title="Play a station picked at random">🎲 Random</button></div>
       ${t && t.lyrics ? `<details><summary>Lyrics</summary><pre class="ly">${esc(t.lyrics)}</pre></details>` : ""}
       <div class="status" id="npStatus"></div>
     </div></section>
@@ -219,7 +220,8 @@ async function libView() {
       <li><a class="frow" href="#lib/all"><span class="fic">🎵</span><span class="tx"><b>All songs</b><span>${all ? `${count(all.length, "song", "songs")} · every station and the Music Studio` : "every song from every station and the Music Studio"}</span></span><span class="chev" aria-hidden="true">›</span></a></li>
       <li><a class="frow" href="#lib/playlist"><span class="fic">♥</span><span class="tx"><b>My playlist</b><span>${count(pl.length, "song", "songs")} you saved</span></span><span class="chev" aria-hidden="true">›</span></a></li>
       <li><a class="frow" href="#lib/history"><span class="fic">🕘</span><span class="tx"><b>Listen history</b><span>${h.length ? `${count(h.length, "song", "songs")} played recently` : "nothing played yet"}</span></span><span class="chev" aria-hidden="true">›</span></a></li></ul>
-    <section class="section"><div class="lhead"><p class="label">📻 Stations · ${sts.length}</p>
+    <section class="section"><div class="lhead"><span style="display:flex;align-items:center;gap:12px"><p class="label">📻 Stations · ${sts.length}</p>
+      <button class="pill" data-act="random" title="Play a station picked at random">🎲 Random</button></span>
       <span class="seg" role="group" aria-label="Show stations as"><button data-act="lib-layout" data-v="0" aria-pressed="${!tiles}" title="List">☰ List</button><button data-act="lib-layout" data-v="1" aria-pressed="${tiles}" title="Covers">▦ Covers</button></span></div>
       ${tiles ? `<div class="grid">${sts.map(stationTile).join("")}${newTile}</div>`
         : `<ul class="flist">${sts.map(stRow).join("")}<li><button class="frow" data-act="new"><span class="fic">＋</span><span class="tx"><b>Create station</b><span>describe it, or learn from your music</span></span></button></li></ul>`}</section>`;
@@ -355,6 +357,7 @@ $("page").addEventListener("click", async (e) => {
   }
   const act = a.dataset.act, row = a.closest(".row");
   if (act === "new") return openNewStation();
+  if (act === "random") return playRandom();
   if (act === "sel-on") { sel.on = true; return renderView(); }
   if (act === "sel-off") { sel.on = false; sel.ids.clear(); return renderView(); }
   if (act === "sel-all") {                       // the songs you can see (a search narrows it)

@@ -77,7 +77,16 @@ async function playStation(id) {
     if (R && R.on && R.station && R.station !== id) toast("Retuned for everyone listening.");
   }
   if (!lid) connect();
-  location.hash = "#now"; refresh();
+  location.hash = "#lib/" + id; refresh();        // straight to the station: its songs, with the player bar below
+}
+// 🎲 Random: tune to a station picked at random (not the one on now, and not Reruns, which is already a shuffle)
+function playRandom() {
+  const pool = R.stations.filter(s => s.id !== R.station && s.analysis.status !== "running");
+  const list = pool.length ? pool : R.stations;
+  if (!list.length) return toast("Create a station first.");
+  const s = list[Math.floor(Math.random() * list.length)];
+  toast(`🎲 ${s.name}`);
+  return playStation(s.id);
 }
 async function togglePlay() {
   if (lp.t) { pv.paused ? pv.play().catch(e => toast(e.message)) : pv.pause(); return; }   // a library song is in the player
