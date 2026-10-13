@@ -106,3 +106,81 @@
   poll(); setInterval(poll, 10000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
 })();
+
+// ---- ☰ control panel for apps without their own (Home, Music Studio): radio, GPU and priority, disk, apps.
+// A page opts in with <button data-b70-panel></button> where the ☰ goes. Works on both servers: the radio's (:7860)
+// and the Studio's (:7870) expose the same facts under slightly different paths.
+(() => {
+  const btn = document.querySelector("[data-b70-panel]");
+  if (!btn) return;
+  const onRadio = location.port === "7860";
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+  const get = (p) => fetch(p, {cache: "no-store"}).then(r => r.ok ? r.json() : Promise.reject(new Error(r.status)));
+  const app = (port, path) => `${location.protocol}//${location.hostname}:${port}${path}`;
+  const gb = (b) => (b / 2 ** 30).toFixed(1);
+
+  async function facts() {
+    if (onRadio) {
+      const [st, g, p, d] = await Promise.all([get("/api/radio/state"), get("/api/radio/gpu").catch(() => ({})), get("/api/gpu/priority"), get("/api/disk")]);
+      const s = (st.stations || []).find(x => x.id === st.station), sv = st.stream || {};
+      return {radio: {on: st.on, station: s && s.name, now: sv.now && sv.now.title, listeners: sv.listeners || 0,
+                      making: (st.making || []).length, gpu: (st.gpu || {}).detail || (st.gpu || {}).owner},
+              vram: g.total_mb ? [g.used_mb, g.total_mb, g.name] : null, priority: p.priority, choices: p.choices, waiting: p.waiting, disk: d};
+    }
+    const [h, p, d] = await Promise.all([get("/api/home"), get("/api/gpu-priority").catch(() => ({})), get("/api/disk").catch(() => null)]);   // signed out: no priority or disk details
+    const r = h.radio, sy = h.system || {};
+    return {radio: r && {on: r.on, station: r.station && r.station.name, now: r.now && r.now.title, listeners: r.listeners || 0,
+                         making: r.making || 0, gpu: r.detail || r.gpu},
+            vram: sy.vram_total ? [sy.vram_used, sy.vram_total, "Graphics card"] : null, priority: p.priority, choices: p.choices,
+            disk: d || (sy.disk_total ? {total: sy.disk_total, free: sy.disk_free, used: sy.disk_total - sy.disk_free} : null)};
+  }
+  const setPriority = (v) => fetch(onRadio ? "/api/gpu/priority" : "/api/gpu-priority", {method: "POST",
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify({priority: v})});
+
+  btn.className = "b70-panelbtn"; btn.type = "button"; btn.innerHTML = "☰"; btn.title = "Control panel: radio, GPU, disk and apps";
+  btn.setAttribute("aria-label", "Open the control panel"); btn.setAttribute("aria-expanded", "false");
+  const fade = document.createElement("div"); fade.className = "b70-fade"; fade.hidden = true;
+  const side = document.createElement("aside"); side.className = "b70-side"; side.hidden = true; side.setAttribute("aria-label", "Control panel");
+  document.body.append(fade, side);
+  let timer = 0;
+  const open = (on) => {
+    side.hidden = fade.hidden = !on; btn.setAttribute("aria-expanded", on);
+    clearInterval(timer); if (on) { render(); timer = setInterval(render, 5000); side.querySelector("button")?.focus(); }
+  };
+  btn.onclick = () => open(side.hidden);
+  fade.onclick = () => open(false);
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && !side.hidden) open(false); });
+
+  async function render() {
+    let f, msg = "";
+    try { f = await facts(); } catch (e) { msg = "Couldn't reach the server."; }
+    const card = (title, body) => `<section class="b70-card"><h3>${title}</h3>${body}</section>`;
+    const bar = (used, total, warn) => `<div class="b70-meter"><i style="width:${Math.min(100, 100 * used / total).toFixed(1)}%"${warn ? ' class="warn"' : ""}></i></div>`;
+    const r = f && f.radio;
+    side.innerHTML = `<div class="b70-sidehead"><b>Control panel</b><button type="button" class="b70-x" aria-label="Close the control panel" title="Close">✕</button></div>
+      ${msg ? `<p class="b70-muted">${msg}</p>` : ""}
+      ${f ? card("📻 Radio", r ? `<p>${r.on ? `<b>${esc(r.now || "Next song on the way…")}</b><br><span class="b70-muted">${esc(r.station || "")} · ${r.listeners} listening</span>`
+              : `<span class="b70-muted">The radio is off.</span>`}</p>
+            <p class="b70-muted">${r.making ? `${r.making} song${r.making === 1 ? "" : "s"} being made` : "Nothing being made"}${r.gpu && r.gpu !== f.waiting ? ` · ${esc(r.gpu)}` : ""}</p>
+            <a class="b70-btn" href="${app(7860, "/radio")}" data-app="radio">Open the radio</a>` : `<p class="b70-muted">The radio isn't answering.</p>`) : ""}
+      ${f ? card("GPU", `${f.vram ? `${bar(f.vram[0], f.vram[1], f.vram[0] / f.vram[1] > 0.92)}<p class="b70-muted">${(f.vram[0] / 1024).toFixed(1)} of ${Math.round(f.vram[1] / 1024)} GB in use · ${esc(f.vram[2])}</p>` : ""}
+            ${f.choices ? `<p class="b70-label">Who goes first</p>
+            <div class="b70-prio" role="group" aria-label="GPU priority">${Object.entries(f.choices || {}).map(([k, l]) =>
+              `<button type="button" data-prio="${k}" aria-pressed="${k === f.priority}">${esc(l)}</button>`).join("")}</div>` : ""}
+            ${f.waiting ? `<p class="b70-muted">${esc(f.waiting)}</p>` : ""}<p class="b70-muted" data-prio-msg></p>`) : ""}
+      ${f && f.disk ? card("Disk", `${bar(f.disk.used, f.disk.total, f.disk.free / f.disk.total < 0.1)}<p class="b70-muted">${gb(f.disk.free)} GB free of ${Math.round(f.disk.total / 2 ** 30)} GB</p>`) : ""}
+      ${card("Apps", `<div class="b70-links">
+          <a class="b70-btn" href="${app(7870, "/home")}" data-app="home">🏠 Home</a><a class="b70-btn" href="${app(7860, "/radio")}" data-app="radio">📻 Radio</a>
+          <a class="b70-btn" href="${app(7870, "/")}" data-app="studio">🖼 Image &amp; Video</a><a class="b70-btn" href="${app(7860, "/")}" data-app="music">🎵 Music</a>
+          <a class="b70-btn" href="${app(7880, "/")}" target="_blank" rel="noopener">☤ Hermes dashboard</a></div>`)}`;
+    side.querySelector(".b70-x").onclick = () => open(false);
+  }
+  side.addEventListener("click", async (e) => {
+    const a = e.target.closest("a[data-app]");
+    if (a && window.b70Open) { e.preventDefault(); open(false); return window.b70Open(a.dataset.app); }
+    const p = e.target.closest("[data-prio]"); if (!p) return;
+    const r = await setPriority(p.dataset.prio).catch(() => null);
+    if (!r || !r.ok) { const m = side.querySelector("[data-prio-msg]"); if (m) m.textContent = r && r.status === 403 ? "Only an admin can change this." : "Couldn't change it."; return; }
+    render();
+  });
+})();
