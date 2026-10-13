@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
-<title>b70 Radio</title>
+<title>Agentora</title>
 <link rel="icon" id="favicon" href="/icons/radio.svg">
 <link rel="apple-touch-icon" href="/icons/radio-180.png">
 <style>
@@ -389,7 +389,7 @@ textarea { resize: vertical; max-height: 85vh; }
 <div class="np-wash" id="wash"></div>
 
 <nav class="nav"><div class="nav-in">
-  <a class="brand" href="#now">∞ b70 <span>radio</span></a>
+  <a class="brand" href="#now">∞ <span>Agentora</span></a>
   <div data-b70-apps></div>
   <div class="tabs" role="tablist">
     <a href="#now" data-tab="now">Now Playing</a>
@@ -404,7 +404,7 @@ textarea { resize: vertical; max-height: 85vh; }
 
 <!-- player bar -->
 <footer class="bar" id="bar">
-  <a class="np-mini" id="bLink" href="#now" title="Open this song"><img id="bCover" alt="" width="54" height="54"><div class="tx"><div class="a" id="bTitle">Pick a station</div><div class="b" id="bStation">b70 radio</div></div></a>
+  <a class="np-mini" id="bLink" href="#now" title="Open this song"><img id="bCover" alt="" width="54" height="54"><div class="tx"><div class="a" id="bTitle">Pick a station</div><div class="b" id="bStation">Agentora</div></div></a>
   <div class="mid">
     <div class="ctl">
       <button class="cbtn" id="bDown" title="Thumbs down — fewer like this (skips it)" aria-label="Thumbs down"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M17 14V3h3v11h-3ZM17 14l-4.5 7a2 2 0 0 1-2.5-2.4L11 15H5.3a2 2 0 0 1-2-2.3l1.2-7.6A2.5 2.5 0 0 1 7 3h10"/></svg></button>
@@ -705,7 +705,7 @@ function renderBar() {
   $("bCover").src = t ? trackArt(t) : stationArt(st);
   $("bLink").href = t ? (t.station ? `#lib/${encodeURIComponent(t.station)}/${encodeURIComponent(t.id)}` : `#song/${encodeURIComponent(t.id)}`) : "#now";
   $("bTitle").textContent = t ? t.title : lid ? "Next song on the way…" : st ? st.name : "Pick a station";
-  $("bStation").textContent = t ? (t.station_name || (st && st.name) || "") + (t.airing === "rerun" ? " · rerun" : t.airing === "runner-up" ? " · runner-up" : "") : st ? (lid ? "tuning in…" : "press play") : "b70 radio";
+  $("bStation").textContent = t ? (t.station_name || (st && st.name) || "") + (t.airing === "rerun" ? " · rerun" : t.airing === "runner-up" ? " · runner-up" : "") : st ? (lid ? "tuning in…" : "press play") : "Agentora";
   $("bUp").classList.toggle("on-up", !!t && t.feedback === "keep");
   setAddKey(!!t && !!t.in_playlist);
   ["bUp", "bDown", "bAdd", "bSkip", "bBack"].forEach(k => $(k).disabled = !t);
@@ -788,8 +788,8 @@ function updateMediaSession() {
   const t = current, st = R && stOf(selected), key = [lid && "on", t && t.id, t && t.cover, st && st.name, st && st.art].join("|");
   if (key === msKey) return; msKey = key;
   if (!lid) { ms.metadata = null; return; }
-  ms.metadata = new MediaMetadata({title: t ? t.title : "Next song on the way…", artist: (t && t.station_name) || (st && st.name) || "b70 radio",
-    album: "b70 radio", artwork: t && t.cover ? [{src: location.origin + t.cover, sizes: "768x768", type: "image/jpeg"}]
+  ms.metadata = new MediaMetadata({title: t ? t.title : "Next song on the way…", artist: (t && t.station_name) || (st && st.name) || "Agentora",
+    album: "Agentora", artwork: t && t.cover ? [{src: location.origin + t.cover, sizes: "768x768", type: "image/jpeg"}]
       : st && st.art ? [{src: location.origin + stationArt(st), sizes: "768x768", type: "image/jpeg"}] : [{src: "/icons/radio-180.png", sizes: "180x180", type: "image/png"}]});
 }
 if (ms) {

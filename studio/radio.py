@@ -1,4 +1,4 @@
-"""b70 Radio: infinite AI radio stations for the Music Studio (inspired by CharlesMod/infinite-tapedeck).
+"""Agentora: infinite AI radio stations for the Music Studio (inspired by CharlesMod/infinite-tapedeck).
 
 Stations are text-defined ("late-night lo-fi") or learned from a folder of songs.
 While the radio is on, a spool manager keeps a few approved songs ready per
@@ -1318,7 +1318,7 @@ def stream(h):
     try:
         h.send_response(200)
         for k, v in (("Content-Type", "audio/mpeg"), ("Cache-Control", "no-cache, no-store"), ("Connection", "close"),
-                     ("Access-Control-Allow-Origin", "*"), ("icy-name", "b70 radio"), ("X-Content-Type-Options", "nosniff")):
+                     ("Access-Control-Allow-Origin", "*"), ("icy-name", "Agentora"), ("X-Content-Type-Options", "nosniff")):
             h.send_header(k, v)
         h.end_headers()
         li = bc["listeners"][lid]
