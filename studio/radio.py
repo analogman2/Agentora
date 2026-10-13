@@ -725,7 +725,7 @@ def forget_taste(sid):
 def track_details(tid):
     with app.lock:
         j = app.jobs.get(tid)
-    if not j or j.get("source") != "radio":
+    if not j:
         raise app.BadRequest("No such song")
     return track_view(j) | {"critic": j.get("critic"), "writer": j.get("spec_writer"), "story": j.get("story"), "created": j.get("created"),
                             "approved_at": j.get("approved_at"), "airings": j.get("airings", 0), "status": j.get("radio_status"),
@@ -1655,9 +1655,11 @@ def feedback(track_id, kind):
         raise app.BadRequest("feedback must be keep, skip, dislike or clear")
     with app.lock:
         j = app.jobs.get(track_id)
-    if not j or j.get("source") != "radio":
-        raise app.BadRequest("No such radio track")
-    s = stations.get(j.get("station"))
+    if not j:
+        raise app.BadRequest("No such song")
+    # any library song can be on air (📻 Play next); a Music Studio rewrite teaches its original's station
+    orig = app.jobs.get(j.get("rewrite_of") or "") or {}
+    s = stations.get(j.get("station") or orig.get("station"))
     with lock:
         if s:
             s["feedback"] = [f for f in s["feedback"] if f["track"] != track_id]
@@ -1738,15 +1740,15 @@ def loved(j):
 def playlist():
     """Songs saved with +, any station, most recently added first."""
     with app.lock:
-        saved = [j for j in app.jobs.values() if j.get("source") == "radio" and j.get("playlist_at")]
+        saved = [j for j in app.jobs.values() if j.get("playlist_at")]
     return [track_view(j) | {"added_at": j["playlist_at"]} for j in sorted(saved, key=lambda j: -j["playlist_at"])]
 
 
 def set_playlist(track_id, on):
     with app.lock:
         j = app.jobs.get(track_id)
-        if not j or j.get("source") != "radio":
-            raise app.BadRequest("No such radio track")
+        if not j:
+            raise app.BadRequest("No such song")
         j["playlist_at"] = time.time() if on else None
         app.save_job(j)
     if j.get("station") in stations:                       # a saved song counts as a like
