@@ -1173,7 +1173,7 @@ def _play_track(t):
             bc["cut"] += 1; bc["cut_next"] = False
     _air(t | {"duration": t.get("seconds")})
     app.log("radio on air:", t["title"], f"({len(bc['listeners'])} listening)")
-    checked, start, pending = 0.0, bc["bytes"], b""
+    checked, start, pending, empty_since = 0.0, bc["bytes"], b"", None
     aired_at, present, finished = time.time(), set(bc["listeners"]), False
     try:
         while True:
@@ -1189,8 +1189,12 @@ def _play_track(t):
             if bc["skip"].is_set() or not state["on"]:
                 bc["cut_next"] = state["on"]
                 break
-            if not bc["listeners"]:                # everyone left: stop airing to nobody
-                if (bc["bytes"] - start) / BPS < 30:     # barely started -> put it back on the spool for later
+            if bc["listeners"]:
+                empty_since = None
+            elif empty_since is None:
+                empty_since = time.time()
+            elif time.time() - empty_since > 5:    # everyone left (a player reconnecting after ⏮/⏭ is back within a second)
+                if (bc["bytes"] - start) / BPS < 30 and t.get("airing") == "new":   # barely started -> back on the spool
                     with app.lock:
                         j = app.jobs.get(t["id"])
                         if j:
