@@ -711,10 +711,16 @@ async function skipNow(kind) {
 }
 $("bDown").onclick = () => { toast("👎 Noted — fewer like this. Skipping…"); skipNow("dislike"); };
 $("bSkip").onclick = () => { toast("Skipping for everyone listening…"); skipNow("skip"); };
-// ⏮ like any player: once restarts the song, again (within 4 s) goes to the previous one, and so on back through the history
+// ⏮ like any player: more than a few seconds into a song it restarts it; near the start (or pressed again quickly) it goes
+// to the previous song, and so on back through the history
 let backAt = 0;
+function secondsIntoSong() {
+  const h = hearing(), pos = streamPos();
+  return h && pos != null && h.start_pos != null ? pos - h.start_pos : null;
+}
 async function backNow() {
-  const again = Date.now() - backAt < 4000; backAt = Date.now();
+  const into = secondsIntoSong();
+  const again = Date.now() - backAt < 4000 || (into != null && into < 6); backAt = Date.now();
   toast(again ? "⏮ Previous song…" : "⏮ Back to the start of this song…");
   try {
     const r = await post("/api/radio/back", again ? {steps: 1} : {track: current ? current.id : null, steps: 0});

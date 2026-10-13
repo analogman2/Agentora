@@ -1153,7 +1153,8 @@ def _air(entry):
         bc["aired"] = (bc["aired"] + [entry])[-8:]
     if entry.get("id") and entry.get("airing") != "history":
         with nav_lock:
-            nav["hist"].append(entry["id"])
+            if not nav["hist"] or nav["hist"][-1] != entry["id"]:     # the same song twice in a row is one step back
+                nav["hist"].append(entry["id"])
     if entry.get("id"):
         log_listen(entry)               # playout only runs while someone listens, so every airing was heard
 
@@ -1506,6 +1507,7 @@ def back(track_id=None, steps=0):
         if not t:
             return {"ok": False, "cut": bc["cut"], "error": "That song isn't available any more"}
         nav["cursor"], nav["queued"] = c, t
+    app.log(f"radio: ⏮ steps={steps} heard={track_id} -> {t['title']!r} ({c + 1} of {len(hist)} in the history)")
     cut = bc["cut"]
     bc["cut_next"] = True
     bc["skip"].set()
