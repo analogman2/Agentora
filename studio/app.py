@@ -1025,8 +1025,10 @@ def rewrite_suggestions(jid, ask=""):
     st = radio.stations.get(j.get("station"))
     if st:
         ctx.append(f"Made for the radio station \"{st['name']}\": {(st.get('description') or '')[:400]}")
-        if st.get("taste"):
-            ctx.append("What this listener likes (learned from their thumbs):\n" + st["taste"][:800])
+        taste = st.get("taste")
+        taste = taste.get("notes") if isinstance(taste, dict) else taste     # stations keep {"notes": ..., "updated": ...}
+        if taste:
+            ctx.append("What this listener likes (learned from their thumbs):\n" + str(taste)[:800])
     ask = clean_text(ask, "Request", 500)
     ctx.append(f"The listener asks for this change: {ask}\nReturn exactly ONE suggestion that does ALL of it. Whatever the request "
                "says about the sound (tempo, mood, voice, instruments, genre) goes in a new style line, e.g. slower = a lower BPM and "
@@ -1100,7 +1102,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", extra.pop("Cache-Control", "no-store"))
         for k, v in extra.items():
             self.send_header(k, v)
-        self.end_headers(); self.wfile.write(b)
+        self.end_headers()
+        try:
+            self.wfile.write(b)
+        except (BrokenPipeError, ConnectionResetError):
+            pass                                         # the browser went away before the reply (e.g. left the page)
 
     @staticmethod
     def etag(f):
@@ -1142,6 +1148,13 @@ class Handler(BaseHTTPRequestHandler):
             if not f.is_file():
                 return self.send(404, {"error": "shared file missing"})
             return self.send(200, f.read_bytes(), "text/css; charset=utf-8" if f.suffix == ".css" else "text/javascript; charset=utf-8",
+                             {"Cache-Control": "no-cache"})
+        if path.startswith("/web/"):                      # the radio page's scripts (studio/web/)
+            name = path.rsplit("/", 1)[1]
+            f = HERE / "web" / name
+            if not re.fullmatch(r"[\w-]+\.(js|css)", name) or not f.is_file():
+                return self.send(404, {"error": "No such file"})
+            return self.send(200, f.read_bytes(), "text/javascript; charset=utf-8" if name.endswith(".js") else "text/css; charset=utf-8",
                              {"Cache-Control": "no-cache"})
         if path == "/favicon.ico" or path.startswith("/icons/"):
             name = "studio-32.png" if path == "/favicon.ico" else path.rsplit("/", 1)[1]

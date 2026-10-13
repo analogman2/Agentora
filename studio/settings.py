@@ -81,20 +81,20 @@ KEYS = {row[0]: row for row in SCHEMA}
 def current():
     """The values the running code uses right now (env vars and built-ins included)."""
     return {
-        "songs_ahead": radio.state["target_ahead"], "buffer_seconds": round(radio.LEAD),
-        "takes": radio.TAKES, "max_song_seconds": radio.MAX_SECONDS, "opener_seconds": radio.OPENER_SECONDS,
-        "instrumental_share": radio.INSTRUMENTAL_SHARE, "keep_text": radio.KEEP_TEXT, "keep_learned": radio.KEEP_LEARNED,
-        "warmup_scores": radio.WARMUP_SCORES, "warmup_floor": radio.WARMUP_FLOOR, "min_song_seconds": radio.MIN_SONG_SECONDS,
+        "songs_ahead": radio.state["target_ahead"], "buffer_seconds": round(radio.rs.LEAD),
+        "takes": radio.rs.TAKES, "max_song_seconds": radio.rs.MAX_SECONDS, "opener_seconds": radio.rs.OPENER_SECONDS,
+        "instrumental_share": radio.rs.INSTRUMENTAL_SHARE, "keep_text": radio.rs.KEEP_TEXT, "keep_learned": radio.rs.KEEP_LEARNED,
+        "warmup_scores": radio.rs.WARMUP_SCORES, "warmup_floor": radio.rs.WARMUP_FLOOR, "min_song_seconds": radio.rs.MIN_SONG_SECONDS,
         "writers": [{"url": u, "model": m, "label": l} for u, m, l in app.LYRICS_LLMS],
-        "spec_temperature": radio.SPEC_TEMPERATURE, "llm_timeout": app.LLM_TIMEOUT, "llm_extra": app.LLM_EXTRA,
-        "return_gpu_minutes": app.RETURN_MINUTES, "history_keep": radio.LISTENED_KEEP,
-        "stream_bitrate": str(radio.BITRATE), "loudness": "off" if radio.LOUDNESS is None else f"{radio.LOUDNESS:g}",
-        "bass_db": radio.BASS_DB, "treble_db": radio.TREBLE_DB, "stereo_width": radio.STEREO_WIDTH,
-        "compression": radio.COMPRESSION, "limiter": radio.LIMITER, "fade_in": radio.FADE_IN, "fade_out": radio.FADE_OUT,
-        "gap": radio.GAP, "ode_steps": radio.ODE_STEPS, "style_adherence": radio.CFG_SCALE or 1.0,
-        "song_temperature": radio.SONG_SAMPLING.get("temperature", 1.0), "song_top_p": radio.SONG_SAMPLING.get("top_p", 0.95),
-        "song_top_k": radio.SONG_SAMPLING.get("top_k", 100), "song_repetition_penalty": radio.SONG_SAMPLING.get("repetition_penalty", 1.2),
-        "score_temperature": radio.SCORE_SAMPLING.get("temperature", 1.0),
+        "spec_temperature": radio.rs.SPEC_TEMPERATURE, "llm_timeout": app.LLM_TIMEOUT, "llm_extra": app.LLM_EXTRA,
+        "return_gpu_minutes": app.RETURN_MINUTES, "history_keep": radio.rs.LISTENED_KEEP,
+        "stream_bitrate": str(radio.rs.BITRATE), "loudness": "off" if radio.rs.LOUDNESS is None else f"{radio.rs.LOUDNESS:g}",
+        "bass_db": radio.rs.BASS_DB, "treble_db": radio.rs.TREBLE_DB, "stereo_width": radio.rs.STEREO_WIDTH,
+        "compression": radio.rs.COMPRESSION, "limiter": radio.rs.LIMITER, "fade_in": radio.rs.FADE_IN, "fade_out": radio.rs.FADE_OUT,
+        "gap": radio.rs.GAP, "ode_steps": radio.rs.ODE_STEPS, "style_adherence": radio.rs.CFG_SCALE or 1.0,
+        "song_temperature": radio.rs.SONG_SAMPLING.get("temperature", 1.0), "song_top_p": radio.rs.SONG_SAMPLING.get("top_p", 0.95),
+        "song_top_k": radio.rs.SONG_SAMPLING.get("top_k", 100), "song_repetition_penalty": radio.rs.SONG_SAMPLING.get("repetition_penalty", 1.2),
+        "score_temperature": radio.rs.SCORE_SAMPLING.get("temperature", 1.0),
         "cover_art": __import__("art").MODE,
     }
 
@@ -102,26 +102,26 @@ def current():
 def apply(v):
     radio.state["target_ahead"] = v["songs_ahead"]
     radio.set_buffer(v["buffer_seconds"])
-    radio.BITRATE = int(v["stream_bitrate"])                # the playout switches format at the next song
-    radio.LOUDNESS = None if v["loudness"] == "off" else float(v["loudness"])
-    radio.BASS_DB, radio.TREBLE_DB, radio.STEREO_WIDTH = v["bass_db"], v["treble_db"], v["stereo_width"]
-    radio.COMPRESSION, radio.LIMITER = v["compression"], v["limiter"]
-    radio.FADE_IN, radio.FADE_OUT, radio.GAP = v["fade_in"], v["fade_out"], v["gap"]
-    radio.ODE_STEPS = v["ode_steps"]
-    radio.CFG_SCALE = None if v["style_adherence"] == 1.0 else v["style_adherence"]
-    radio.SONG_SAMPLING = {"temperature": v["song_temperature"], "top_p": v["song_top_p"], "top_k": v["song_top_k"],
+    radio.rs.BITRATE = int(v["stream_bitrate"])                # the playout switches format at the next song
+    radio.rs.LOUDNESS = None if v["loudness"] == "off" else float(v["loudness"])
+    radio.rs.BASS_DB, radio.rs.TREBLE_DB, radio.rs.STEREO_WIDTH = v["bass_db"], v["treble_db"], v["stereo_width"]
+    radio.rs.COMPRESSION, radio.rs.LIMITER = v["compression"], v["limiter"]
+    radio.rs.FADE_IN, radio.rs.FADE_OUT, radio.rs.GAP = v["fade_in"], v["fade_out"], v["gap"]
+    radio.rs.ODE_STEPS = v["ode_steps"]
+    radio.rs.CFG_SCALE = None if v["style_adherence"] == 1.0 else v["style_adherence"]
+    radio.rs.SONG_SAMPLING = {"temperature": v["song_temperature"], "top_p": v["song_top_p"], "top_k": v["song_top_k"],
                            "repetition_penalty": v["song_repetition_penalty"]}
-    radio.SCORE_SAMPLING = {"temperature": v["score_temperature"]}
-    radio.TAKES = v["takes"]
-    radio.MAX_SECONDS, radio.OPENER_SECONDS = v["max_song_seconds"], v["opener_seconds"]
-    radio.INSTRUMENTAL_SHARE = v["instrumental_share"]
-    radio.KEEP_TEXT, radio.KEEP_LEARNED = v["keep_text"], v["keep_learned"]
-    radio.WARMUP_SCORES, radio.WARMUP_FLOOR, radio.MIN_SONG_SECONDS = v["warmup_scores"], v["warmup_floor"], v["min_song_seconds"]
+    radio.rs.SCORE_SAMPLING = {"temperature": v["score_temperature"]}
+    radio.rs.TAKES = v["takes"]
+    radio.rs.MAX_SECONDS, radio.rs.OPENER_SECONDS = v["max_song_seconds"], v["opener_seconds"]
+    radio.rs.INSTRUMENTAL_SHARE = v["instrumental_share"]
+    radio.rs.KEEP_TEXT, radio.rs.KEEP_LEARNED = v["keep_text"], v["keep_learned"]
+    radio.rs.WARMUP_SCORES, radio.rs.WARMUP_FLOOR, radio.rs.MIN_SONG_SECONDS = v["warmup_scores"], v["warmup_floor"], v["min_song_seconds"]
     app.LYRICS_LLMS = [(w["url"], w["model"], w["label"]) for w in v["writers"]]
-    radio.SPEC_TEMPERATURE = v["spec_temperature"]
+    radio.rs.SPEC_TEMPERATURE = v["spec_temperature"]
     app.LLM_TIMEOUT, app.LLM_EXTRA = v["llm_timeout"], v["llm_extra"]
     app.RETURN_MINUTES = v["return_gpu_minutes"]
-    radio.LISTENED_KEEP = v["history_keep"]
+    radio.rs.LISTENED_KEEP = v["history_keep"]
     __import__("art").MODE = v["cover_art"]
 
 
@@ -170,7 +170,7 @@ def init(app_module, radio_module):
     """Called once at startup, after env vars are read: remember those as defaults, then apply saved settings."""
     global app, radio, PATH
     app, radio = app_module, radio_module
-    PATH = radio.RADIO / "settings.json"
+    PATH = radio.rs.RADIO / "settings.json"
     defaults.update(current())
     saved = {}
     if PATH.exists():
