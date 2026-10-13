@@ -138,7 +138,7 @@ def produce(sid, on_request=False, like=None):
         if not spec["instrumental"] and not spec["lyrics"].strip():
             body["mode"] = "instrumental"
         app.new_jobs(body, extra={"source": "radio", "station": sid, "priority": 0 if on_request else 1, "radio_status": "rendering",
-                                  "spec_writer": spec["writer"], "story": spec.get("story"), **({"liked_from": like.get("id")} if like else {}),
+                                  "spec_writer": spec["writer"], "story": spec.get("story"), **({"wildcard": spec["wildcard"]} if spec.get("wildcard") else {}), **({"liked_from": like.get("id")} if like else {}),
                                   **({"requested": True} if on_request else {})})
         with rs.lock:
             s["stats"]["generated"] += 1; rs.save_station(s)
@@ -173,12 +173,18 @@ def judge(job):
     settle_takes(job, s)
 
 
-def station_bar(s):
+def station_bar(s, wildcard=False):
     """The score a song must reach to air. Text stations keep the top KEEP_TEXT share, learned ones KEEP_LEARNED,
     once WARMUP_SCORES scores exist; before that, only clear misses (under WARMUP_FLOOR x the station's median) are
-    dropped. Scores live on each station's own scale (CLAP similarity to its description), so the bar is relative."""
+    dropped. Scores live on each station's own scale (CLAP similarity to its description), so the bar is relative.
+    🎲 Variety lets more through (up to half the songs the bar would drop at 100), and a WILDCARD song, which borrows
+    from another style on purpose, only has to avoid being a clear miss."""
     hist = s["scores"][-20:]
     keep_frac = rs.KEEP_LEARNED if s["kind"] == "folder" else rs.KEEP_TEXT
+    v = max(0, min(100, int(s.get("variety", 25))))
+    keep_frac += (1 - keep_frac) * 0.5 * max(0, v - 25) / 75
+    if wildcard and len(hist) >= 2:
+        return rs.WARMUP_FLOOR * float(np.median(hist))
     if len(hist) >= rs.WARMUP_SCORES:
         return float(np.quantile(hist, 1 - keep_frac))
     if len(hist) >= 2:
@@ -201,11 +207,11 @@ def settle_takes(job, s):
             return
         rank = lambda j: (j["critic"]["sane"], j["critic"]["score"] if j["critic"]["score"] is not None else float("inf"))
         best = max(scored, key=rank)
-        bar = station_bar(s)
+        bar = station_bar(s, wildcard=bool(best.get("wildcard")))
         score = best["critic"]["score"]
         asked = any(j.get("requested") for j in takes)    # someone asked for this song: keep it unless it's broken
         verdict = "approved" if best["critic"]["sane"] and (asked or score is None or score >= bar) else "rejected"
-        if job.get("spec_writer") != "fallback":
+        if job.get("spec_writer") != "fallback" and not job.get("wildcard"):   # wildcards don't shift the station's scale
             s["scores"] = (s["scores"] + [j["critic"]["score"] for j in scored if j["critic"]["score"] is not None])[-50:]
         s["stats"]["approved" if verdict == "approved" else "rejected"] += 1
         rs.save_station(s)

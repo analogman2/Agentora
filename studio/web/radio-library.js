@@ -84,6 +84,7 @@ async function songView(id) {
   const k = sibs.findIndex(x => x.id === id), prev = k > 0 ? sibs[k - 1] : null, next = k >= 0 && k < sibs.length - 1 ? sibs[k + 1] : null;
   const facts = [
     t.story ? ["Story idea", t.story] : null,
+    t.wildcard ? ["🎲 Variety twist", t.wildcard] : null,
     t.writer ? ["Written by", t.writer] : null,
     c.score != null ? ["Quality score", `${c.score.toFixed(3)}${c.bar > 0 ? ` (station bar ${c.bar.toFixed(3)})` : ""}${c.takes ? ` · best of ${c.takes} take${c.takes === 1 ? "" : "s"}` : ""}`] : null,
     t.seconds ? ["Length", mmss(t.seconds)] : null,
@@ -253,6 +254,7 @@ async function stationView(id) {
       <div class="about">
         ${s.description ? `<p>${esc(s.description)}</p>` : ""}
         ${s.theme ? `<p><b>Lyrics theme:</b> ${esc(s.theme)}</p>` : ""}
+        ${id !== RERUNS ? `<p><b>🎲 Variety:</b> ${esc(varietyName(s.variety ?? 25))} (${s.variety ?? 25}/100)</p>` : ""}
         ${id !== RERUNS ? `<p><b>Vocals:</b> ${esc(s.vocals)}${s.language ? " · " + esc(s.language) : ""} · <b>${s.kind === "folder" ? "Learns from your music" : "Defined by its description"}</b></p>` : ""}
         ${p ? `<p><b>Learned:</b> ${esc(p.top.genre.join(", "))} · ${esc(p.top.mood.join(", "))} · ${p.bpm_range ? p.bpm_range.join("–") + " BPM" : ""}</p>` : ""}
         ${s.problem ? `<p class="err">${esc(s.problem)}</p>` : ""}

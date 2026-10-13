@@ -61,6 +61,26 @@ VARIATIONS = [
     "use a different song structure (e.g. start with the chorus, or add a bridge)", "shift the decade or regional flavour slightly",
     "give it a storytelling lyric about a specific character or place"]
 
+# 🎲 Variety (a station's 0-100 slider). Every song stays in the station's sound; higher variety adds more "for variety"
+# nudges, a warmer songwriter, and more often a WILDCARD: one ingredient borrowed from a neighbouring style.
+WILDCARDS = [
+    "borrow the rhythm or groove of a neighbouring genre", "blend in one instrument the station rarely uses",
+    "cross it with a related genre from another decade", "give it a regional or world-music flavour that suits the sound",
+    "reimagine it as a stripped-back acoustic version of the station's sound", "push it toward a harder, more energetic edge",
+    "push it toward a softer, dreamier, more atmospheric side", "try an unusual tempo or time feel for this station (half-time, a waltz, double-time)",
+    "fuse the station's sound with a jazz, soul, or funk touch", "add an electronic or synth texture to the station's sound",
+    "make it a duet or call-and-response between two singers", "use a vocal style the station hasn't used (spoken verses, falsetto, choir, rap verse)"]
+VARIETY_DEFAULT = 25                                     # the station sound plus one nudge per song (the old behaviour)
+
+
+def variety_plan(s):
+    """(nudges, wildcard or None, temperature) for one song of station s."""
+    v = max(0, min(100, int(s.get("variety", VARIETY_DEFAULT))))
+    nudges = random.sample(VARIATIONS, 0 if v < 10 else 1 if v < 45 else 2 if v < 75 else 3)
+    wildcard = random.choice(WILDCARDS) if v >= 35 and random.random() < (v - 25) / 100 else None   # 10% at 35, 75% at 100
+    temp = rs.SPEC_TEMPERATURE + (v - VARIETY_DEFAULT) / 75 * 0.2 if v > VARIETY_DEFAULT else rs.SPEC_TEMPERATURE - (VARIETY_DEFAULT - v) / VARIETY_DEFAULT * 0.2
+    return nudges, wildcard, round(temp, 3)
+
 
 def parse_json_reply(text):
     """Pull a JSON object out of a chat reply (no JSON mode: xgrammar + MTP speculative decoding makes some vLLM builds return 500s)."""
@@ -207,7 +227,15 @@ def write_spec(s, short=False, fast=False, writers=None, like=None):
         u.append("The listener liked these. Keep the general vibe that made them work, but this song must be clearly "
                  "DIFFERENT from them: new title (reuse none of their title words), new topic, different groove/tempo or "
                  "instrumentation: " + "; ".join(f"{f['title']} [{f['style'][:80]}]" for f in likes))
-    u.append("For variety, this time: " + random.choice(VARIATIONS) + ".")
+    nudges, wildcard, temperature = variety_plan(s)
+    if nudges:
+        u.append("For variety, this time: " + "; ".join(nudges) + ".")
+    if wildcard and not like:
+        u.append(f"WILDCARD for this song (the listener turned up this station's variety): {wildcard}. It must still be "
+                 "clearly recognisable as this station - keep its core genre, mood and vocal style, and change only that one ingredient. "
+                 "Name the borrowed element in the style tags.")
+    elif (s.get("variety", VARIETY_DEFAULT)) < 10:
+        u.append("Stay close to the station's core sound: no detours into other genres.")
     banned = overused_words(attempt_titles + [f["title"] for f in likes])
     if attempt_titles:
         u.append("Titles of the latest songs (don't repeat their main words or ideas): " + "; ".join(attempt_titles[:10]))
@@ -222,7 +250,7 @@ def write_spec(s, short=False, fast=False, writers=None, like=None):
         if not rs.state["on"]:
             break
         try:
-            body = {"model": model, "temperature": rs.SPEC_TEMPERATURE, "top_p": 0.95, "max_tokens": 2200,
+            body = {"model": model, "temperature": temperature, "top_p": 0.95, "max_tokens": 2200,
                     "chat_template_kwargs": {"enable_thinking": False},
                     "messages": [{"role": "system", "content": SPEC_SYSTEM}, {"role": "user", "content": "\n".join(u)}],
                     **app.LLM_EXTRA}
@@ -253,7 +281,8 @@ def write_spec(s, short=False, fast=False, writers=None, like=None):
                 raise ValueError(f"title '{title}' repeats recent titles; asking again")
             if not inst and lyrics.strip() and "fallback" not in label.lower():   # editor pass (the small fallback model edits badly: skip)
                 lyrics, title = edit_lyrics(s, title, style, lyrics, base, model, label)
-            return {"title": title[:80], "style": style, "instrumental": inst, "lyrics": lyrics if not inst else "", "writer": label, "story": story}
+            return {"title": title[:80], "style": style, "instrumental": inst, "lyrics": lyrics if not inst else "", "writer": label, "story": story,
+                    **({"wildcard": wildcard} if wildcard and not like else {})}
         except Exception as e:
             app.log(f"radio: spec writer {label} failed ({e}); trying the next one")
     words = s["description"] or rst.profile_text(s)

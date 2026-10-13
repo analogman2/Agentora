@@ -38,6 +38,19 @@ function wireAssist(ids, creating) {
     document.querySelectorAll("[data-assist]").forEach(x => x.disabled = false);
   });
 }
+// 🎲 Variety slider (station setting, 0-100): how far songs may wander from the station's core sound
+const varietyName = (v) => v < 10 ? "Core sound only" : v < 35 ? "A little variety" : v < 65 ? "Some surprises" : v < 90 ? "Lots of variety" : "Adventurous";
+const varietyHelp = (v) => v < 10 ? "Every song sticks to the station's core sound."
+  : v < 35 ? "Songs vary tempo, topic or instruments, all within the station's sound."
+  : v < 65 ? `Songs vary more, and about ${Math.round((v - 25))}% borrow one element from a neighbouring style.`
+  : `Songs vary a lot, and about ${Math.round(v - 25)}% borrow one element from a neighbouring style. They still sound like this station.`;
+const varietyField = (id, v = 25) => `<label class="f" for="${id}">🎲 Variety <span id="${id}N">— ${varietyName(v)}</span></label>
+  <input type="range" id="${id}" min="0" max="100" step="5" value="${v}" style="width:100%" aria-describedby="${id}H">
+  <div class="small muted" style="display:flex;justify-content:space-between"><span>Stay in the genre</span><span>More variety</span></div>
+  <p class="small muted" id="${id}H" style="margin-top:2px">${varietyHelp(v)}</p>`;
+function wireVariety(id) {
+  $(id).oninput = () => { const v = +$(id).value; $(id + "N").textContent = "— " + varietyName(v); $(id + "H").textContent = varietyHelp(v); };
+}
 const openNewStation = () => {
   openDialog("New station", `<div class="seg" role="group"><button type="button" data-k="text" aria-pressed="true">Describe it</button><button type="button" data-k="folder" aria-pressed="false">Learn from my music</button></div>
     <label class="f" for="nName">Name</label><input type="text" id="nName" maxlength="60" placeholder="e.g. Sunday Morning Jazz">
@@ -48,14 +61,16 @@ const openNewStation = () => {
     <div><label class="f" for="nLang">Language <span>(vocals)</span></label><select id="nLang"><option value="">Any / from description</option><option>English</option><option>Mandarin</option><option>Japanese</option><option>Korean</option><option>Spanish</option><option>French</option><option>German</option></select></div></div>
     <label class="f" for="nTheme">Lyrics theme <span>— optional, e.g. "Halloween horror stories" or "songs about the sea"</span></label>
     <input type="text" id="nTheme" maxlength="1000" placeholder="what every song's lyrics should be about">
+    ${varietyField("nVar")}
     <p class="small muted" id="nFolderNote" hidden>After creating it, open the station tape to drop in your songs, then press “Learn from these songs”. The radio analyzes tempo, key, energy and sound (CLAP), and its critic keeps the takes that sound most like them.</p>
     <div style="margin-top:12px;display:flex;gap:8px;align-items:center"><button class="btn primary" id="nCreate">Create station</button><span class="err" id="nErr"></span></div>`);
   wireAssist({name: "nName", desc: "nDesc", vocals: "nVocals", lang: "nLang", theme: "nTheme"}, true);
+  wireVariety("nVar");
   let kind = "text";
   document.querySelectorAll("[data-k]").forEach(b => b.onclick = () => { kind = b.dataset.k; document.querySelectorAll("[data-k]").forEach(x => x.setAttribute("aria-pressed", x === b)); $("nFolderNote").hidden = kind !== "folder"; $("nDescHint").textContent = kind === "folder" ? "— optional; your songs define it" : "— genres, moods, instruments, era, vocals"; });
   $("nCreate").onclick = async () => {
     try {
-      const r = await post("/api/radio/stations", {kind, name: $("nName").value, description: $("nDesc").value, vocals: $("nVocals").value, language: $("nLang").value, theme: $("nTheme").value});
+      const r = await post("/api/radio/stations", {kind, name: $("nName").value, description: $("nDesc").value, vocals: $("nVocals").value, language: $("nLang").value, theme: $("nTheme").value, variety: +$("nVar").value});
       selected = r.station.id; store.set("station", selected); shelfSig = ""; await refresh(); $("dlg").close();
       if (kind === "folder") openStation(selected); else hint(`“${r.station.name}” is ready — press PLAY.`);
     } catch (e) { $("nErr").textContent = e.message; }

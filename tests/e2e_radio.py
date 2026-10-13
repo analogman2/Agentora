@@ -63,6 +63,19 @@ def all_songs():
     return f"{len(songs)} songs ({sum(1 for t in songs if t['source'] != 'radio')} from the Music Studio)"
 check("all songs", all_songs)
 check("station songs", lambda: f"{len(req(R, f'/api/radio/stations/{SID}/history?limit=500&upcoming=1')['tracks'])} on {SID}")
+def variety_setting():   # 🎲 Variety: saved on create and edit, shown in the station list, bad values refused
+    sid = req(R, "/api/radio/stations", {"name": "e2e variety test", "description": "test station, warm lo-fi piano", "variety": 70})["station"]["id"]
+    try:
+        must(next(s for s in req(R, "/api/radio/state")["stations"] if s["id"] == sid)["variety"] == 70, "variety not saved on create")
+        must(req(R, f"/api/radio/stations/{sid}", {"variety": 0}, method="PUT")["station"]["variety"] == 0, "variety not saved on edit")
+        try:
+            req(R, f"/api/radio/stations/{sid}", {"variety": "lots"}, method="PUT"); raise AssertionError("bad variety accepted")
+        except urllib.error.HTTPError as e:
+            must(e.code == 400, f"bad variety gave {e.code}")
+        return "create 70, edit 0, 'lots' refused"
+    finally:
+        req(R, f"/api/radio/stations/{sid}", method="DELETE")
+check("🎲 station variety", variety_setting)
 check("playlist", lambda: f"{len(req(R, '/api/radio/playlist')['tracks'])} saved")
 check("listen history", lambda: f"{len(req(R, '/api/radio/listened?limit=50')['tracks'])} recent")
 check("favorites", lambda: f"{len(req(R, '/api/radio/favorites')['tracks'])} kept")

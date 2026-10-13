@@ -177,16 +177,18 @@ function editStation(s) {
     <label class="f" for="eV">Vocals</label><select id="eV">${opt("mix", "Mix of songs and instrumentals")}${opt("vocals", "Always vocals")}${opt("instrumental", "Instrumental only")}</select>
     <label class="f" for="eL">Language <span>(blank = any)</span></label><input type="text" id="eL" value="${esc(s.language || "")}" maxlength="40">
     <label class="f" for="eT">Lyrics theme <span>(optional)</span></label><textarea id="eT" rows="2" maxlength="1000">${esc(s.theme || "")}</textarea>
+    ${varietyField("eVar", s.variety ?? 25)}
     <p class="small muted">${s.kind === "text" ? "Changing the description restarts the station's quality scores, since the critic measures songs against it. " : ""}Songs already made keep their old style; new ones follow the changes.</p>
     <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap"><button class="btn primary" id="eSave">Save</button><button class="btn" id="eBack">Cancel</button>
       <button class="btn" id="eArt" type="button" title="Draw new station art from its description">🎨 New art</button><span class="small" id="eMsg"></span></div>`);
   $("eArt").onclick = async () => { try { await post("/api/radio/art", {station: s.id}); $("eMsg").textContent = "Drawing new art — it appears in a minute or two (between songs)."; } catch (e) { $("eMsg").innerHTML = `<span class="err">${esc(e.message)}</span>`; } };
   wireAssist({name: "eN", desc: "eD", vocals: "eV", lang: "eL", theme: "eT"}, false);
+  wireVariety("eVar");
   $("eBack").onclick = () => openStation(s.id);
   $("eSave").onclick = async () => {
     try {
       await api(`/api/radio/stations/${s.id}`, {method: "PUT", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({name: $("eN").value, description: $("eD").value, vocals: $("eV").value, language: $("eL").value, theme: $("eT").value})});
+        body: JSON.stringify({name: $("eN").value, description: $("eD").value, vocals: $("eV").value, language: $("eL").value, theme: $("eT").value, variety: +$("eVar").value})});
       shelfSig = ""; await refresh(); openStation(s.id);
     } catch (e) { $("eMsg").innerHTML = `<span class="err">${esc(e.message)}</span>`; }
   };

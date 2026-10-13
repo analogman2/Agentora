@@ -15,7 +15,7 @@ def track_details(tid):
         j = app.jobs.get(tid)
     if not j:
         raise app.BadRequest("No such song")
-    return track_view(j) | {"critic": j.get("critic"), "writer": j.get("spec_writer"), "story": j.get("story"), "created": j.get("created"),
+    return track_view(j) | {"critic": j.get("critic"), "writer": j.get("spec_writer"), "story": j.get("story"), "wildcard": j.get("wildcard"), "created": j.get("created"),
                             "approved_at": j.get("approved_at"), "airings": j.get("airings", 0), "status": j.get("radio_status"),
                             "requested": bool(j.get("requested")), "liked_from": j.get("liked_from")}
 
@@ -42,7 +42,7 @@ def api_state(listener=None):
     with rs.lock:
         st = []
         for s in sorted(rs.stations.values(), key=lambda s: s["created"]):
-            st.append({k: s.get(k) for k in ("id", "name", "kind", "description", "vocals", "language", "theme", "stats", "analysis")} |
+            st.append({k: s.get(k) for k in ("id", "name", "kind", "description", "vocals", "language", "theme", "stats", "analysis")} | {"variety": s.get("variety", 25)} |
                       {"art": art.stamp(art.station_path(s["id"])), "asked": rs.requested.get(s["id"], 0),
                        "taste": (s.get("taste") or {}).get("notes"), "banked": len(s.get("bank") or []), "ready": len(rsp.station_tracks(s["id"])), "inflight": rsp.inflight(s["id"]),
                        "problem": (rs.backoff[s["id"]]["reason"] + f" — retrying in {int(rs.backoff[s['id']]['until'] - time.time())}s")

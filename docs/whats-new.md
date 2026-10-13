@@ -62,6 +62,12 @@ Agentora started as [yue2-xpu-radio](https://github.com/zebgop-ops/yue2-xpu-radi
 - **Taste notes from your thumbs.** 👍, 👎, skips and playlist saves are turned into short notes (for example "likes story songs about small towns; skip slow ballads") that the songwriter follows. You can read them on the station page, and **Forget** clears them.
 - **How you listen counts too.** Hearing a song to the end is a soft like, and tuning out early is a soft skip. Both count less than a thumb.
 - **More like this** on any song writes and records a new song in its spirit.
+- **🎲 Variety slider** in each station's settings, from "Core sound only" to "Adventurous".
+  - Songs always stay in the station's genre.
+  - Turning it up gives the songwriter more "for variety" nudges (tempo, topic, lead instrument, vocal approach) and a little more creative freedom.
+  - It also adds a growing share of **wildcards**: songs that borrow one ingredient from a neighbouring style, such as a jazz touch, a synth texture, a waltz feel or a duet. That's about 25% of songs at the middle and 75% at the top.
+  - The quality critic lets more of these through: a wildcard only has to avoid being a clear miss, and it doesn't shift the station's scoring scale.
+  - The song page names the twist a song took.
 - **🎵 Create a song now** puts a new song for a station at the front of the queue.
 - **✨ Improve and 💡 Suggest** when creating or editing a station. Improve edits what you wrote rather than replacing it, and Suggest gives fresh ideas.
 

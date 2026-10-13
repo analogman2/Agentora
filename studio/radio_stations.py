@@ -42,7 +42,7 @@ def create_station(body):
         raise app.BadRequest("vocals must be vocals, instrumental or mix")
     s = {"id": uuid.uuid4().hex[:10], "name": name, "kind": kind, "description": desc, "vocals": vocals,
          "language": app.clean_text(body.get("language"), "Language", 40),
-         "theme": app.clean_text(body.get("theme"), "Lyrics theme", 1000), "created": time.time(),
+         "theme": app.clean_text(body.get("theme"), "Lyrics theme", 1000), "variety": _variety(body.get("variety", 25)), "created": time.time(),
          "stats": {"generated": 0, "approved": 0, "rejected": 0, "played": 0, "kept": 0, "skipped": 0, "disliked": 0},
          "feedback": [], "scores": [], "analysis": {"status": "none" if kind == "folder" else "n/a"}, "profile": None}
     with rs.lock:
@@ -231,6 +231,14 @@ def start_analysis(sid):
     return {"ok": True}
 
 
+def _variety(v):
+    """🎲 Variety 0-100: 0 = always the station's core sound, 25 = default, 100 = adventurous (still in the station's sound)."""
+    try:
+        return max(0, min(100, int(v)))
+    except (TypeError, ValueError):
+        raise app.BadRequest("variety must be a number from 0 to 100")
+
+
 def update_station(sid, body):
     s = rs.stations.get(sid)
     if not s:
@@ -248,6 +256,10 @@ def update_station(sid, body):
         upd["language"] = app.clean_text(body.get("language"), "Language", 40)
     if "theme" in body:
         upd["theme"] = app.clean_text(body.get("theme"), "Lyrics theme", 1000)
+    if "variety" in body:
+        upd["variety"] = _variety(body["variety"])
+        if upd["variety"] != s.get("variety", 25):
+            s["bank"] = []               # pre-written songs used the old setting: write new ones
     with rs.lock:
         if upd.get("description", s["description"]) != s["description"]:
             art.station_path(sid).unlink(missing_ok=True)   # a new sound gets new art

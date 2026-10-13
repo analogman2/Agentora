@@ -28,7 +28,7 @@ The **radio and Music Studio** are in this repository (`studio/`). The **Image &
 ## What it does
 
 - **Stations that write their own songs.** Describe a station ("bell-bottom country, sassy female vocals") or teach it with a folder of songs. For each song an LLM writes a title, a style line and lyrics built around one clear story. An editor pass makes sure every line makes sense, and YuE2 sings it at 48 kHz. A CLAP critic keeps the best of 2–3 takes.
-- **It learns from you.** 👍, 👎, skips, playlist saves and even how long you listen become short taste notes the songwriter follows. **More like this** on any song writes a new one in its spirit.
+- **It learns from you.** 👍, 👎, skips, playlist saves and even how long you listen become short taste notes the songwriter follows. **More like this** on any song writes a new one in its spirit, and a **🎲 Variety** slider per station decides how far songs may wander from its core sound.
 - **Cover art for every station and song**, drawn between songs by Z-Image Turbo from a name-free description of the music, so there's no text or band likenesses.
 - **One live broadcast.** Everyone hears the same 192 kbps MP3 stream (`/radio/stream.mp3`). A 15 s cushion rides out Wi-Fi and mobile hiccups, ⏭ and ⏮ cut over in about a second, ⏮ walks back through the station's history like any player, and **📻 Play next** queues any song in the library.
 - **A library laid out like folders:** Library › station › song, with a path bar, an ↑ button, and previous/next inside each folder.
