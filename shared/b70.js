@@ -20,22 +20,27 @@
   }
   window.b70Open = open;
 
-  // Assistant brain: <button data-b70-brain> becomes a two-way toggle. 🐹 Lemming = quick answers, 🧠 AGI = the smartest
-  // local model (slower). Remembered per site; chats send b70Brain() as the model ("lemming" | "agi").
-  const BRAINS = {lemming: ["🐹", "Lemming", "Quick answers (Qwen 3.6 35B-A3B). Click for AGI."],
-                  agi: ["🧠", "AGI", "Smartest local model, slower (Qwen 3.6 27B). Click for Lemming."]};
-  const brain = () => { try { const v = localStorage.getItem("b70.brain"); return BRAINS[v] ? v : "agi"; } catch (e) { return "agi"; } };
+  // Assistant brain: <button data-b70-brain> becomes a three-way slider. 🐹 Lemming = quick answers (always fits on the
+  // GPU), ✨ Auto = the GPU broker picks AGI when it can have the card within a few seconds, else Lemming, 🧠 AGI = the
+  // smartest local model (may wait for the card). Remembered per site; chats send b70Brain() ("lemming" | "auto" | "agi").
+  const BRAINS = {lemming: ["🐹", "Lemming", "Quick answers (Qwen 3.5 9B), always on the GPU"],
+                  auto: ["✨", "Auto", "The smartest model that can have the GPU right now"],
+                  agi: ["🧠", "AGI", "The smartest local model (Qwen 3.6 27B); may wait a moment for the GPU"]};
+  const ORDER = ["lemming", "auto", "agi"];
+  const brain = () => { try { const v = localStorage.getItem("b70.brain"); return BRAINS[v] ? v : "auto"; } catch (e) { return "auto"; } };
   window.b70Brain = brain;
   const drawBrain = () => document.querySelectorAll("[data-b70-brain]").forEach(b => {
-    const on = brain() === "agi";
-    b.classList.add("b70-brain"); b.dataset.brain = brain(); b.type = "button"; b.title = BRAINS[brain()][2];
-    b.setAttribute("role", "switch"); b.setAttribute("aria-checked", on);
-    b.setAttribute("aria-label", "Assistant model: " + BRAINS[brain()][1] + " (switch on for AGI)");
-    b.innerHTML = `<span class="l">🐹 Lemming</span><span class="track" aria-hidden="true"><span class="knob"></span></span><span class="r">🧠 AGI</span>`;
+    const v = brain();
+    b.classList.add("b70-brain"); b.dataset.brain = v; b.type = "button"; b.title = `${BRAINS[v][1]}: ${BRAINS[v][2]}. Tap a name to switch.`;
+    b.setAttribute("aria-label", `Assistant model: ${BRAINS[v][1]}. ${BRAINS[v][2]}. Press to switch.`);
+    b.innerHTML = ORDER.map((k, i) => (i ? (i === 1 ? '<span class="track" aria-hidden="true"><span class="knob"></span></span>' : "") : "")
+      + `<span class="opt${k === v ? " on" : ""}" data-v="${k}">${BRAINS[k][0]} ${BRAINS[k][1]}</span>`).join("");
   });
   document.addEventListener("click", e => {
     const b = e.target.closest("[data-b70-brain]"); if (!b) return;
-    try { localStorage.setItem("b70.brain", brain() === "agi" ? "lemming" : "agi"); } catch (e) {}
+    const opt = e.target.closest("[data-v]");
+    const next = opt ? opt.dataset.v : ORDER[(ORDER.indexOf(brain()) + 1) % ORDER.length];   // a name picks it; the track cycles
+    try { localStorage.setItem("b70.brain", next); } catch (e) {}
     drawBrain();
   });
   drawBrain();

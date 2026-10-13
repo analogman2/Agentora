@@ -448,7 +448,7 @@ async def generate(request):
         raise web.HTTPBadRequest(text="Write a prompt first")
     count = max(1, min(int(body.get("count") or 1), 8 if kind == "image" else 4))
     loras = check_loras(body.get("loras"), is_admin(request))
-    await prepare_gpu()
+    await prepare_gpu(kind)
     fixed_seed = body.get("seed")
     created = []
     for n in range(count):
@@ -611,8 +611,25 @@ def gpu_priority():
     return v if v in PRIORITIES else "shared"
 
 
-async def prepare_gpu():
-    """Before a job: make room according to the GPU priority (and the older "free automatically" setting)."""
+BROKER = os.environ.get("GPU_BROKER", "http://127.0.0.1:7890")    # the GPU broker (Agentora studio/gpu_broker.py)
+LEASE_MB = {"image": 12000, "video": 20000, "workflow": 16000}
+LEASE_WAIT = {"image": 8, "video": 30, "workflow": 30}
+
+
+async def prepare_gpu(kind="image"):
+    """Before a job: ask the GPU broker for the card (it makes room: the radio steps aside, idle models unload) and
+    hold it while ComfyUI is busy. Without the broker: make room according to the GPU priority as before."""
+    try:
+        async with http.post(BROKER + "/lease", json={"client": "studio", "kind": "interactive", "mem_mb": LEASE_MB.get(kind, 12000),
+                                                       "wait_s": LEASE_WAIT.get(kind, 10), "ttl_s": 60},
+                             timeout=aiohttp.ClientTimeout(total=LEASE_WAIT.get(kind, 10) + 10)) as r:
+            if r.status == 200:
+                d = await r.json()
+                logging.getLogger("studio").info("GPU lease for a %s: %s after %s s", kind,
+                                                 "room made" if d.get("roomy") else "tight on memory", d.get("waited_s"))
+                return
+    except Exception as e:
+        logging.getLogger("studio").warning("GPU broker not reachable (%s): making room the old way", e)
     p, auto = gpu_priority(), S["auto_free_gpu"]
     await _free(release_radio=p == "studio" or (auto and p not in ("radio",)),
                 unload_llm=p in ("studio", "radio") or (auto and p != "assistant"))
@@ -931,7 +948,7 @@ async def assistant_chat(request):
         raise web.HTTPBadRequest(text="Write a message first")
     prev = body.get("previous") if re.fullmatch(r"resp_[\w-]{6,80}", str(body.get("previous") or "")) else None
 
-    model = body.get("model") if body.get("model") in ("lemming", "agi") else "agi"    # Hermes model routes (config.yaml)
+    model = body.get("model") if body.get("model") in ("lemming", "auto", "agi") else "auto"    # Hermes model routes (config.yaml)
     chat_body = {"model": model, "input": text, "instructions": INSTRUCTIONS, "store": True, "stream": True}
     if prev:
         chat_body["previous_response_id"] = prev
@@ -1397,7 +1414,7 @@ async def wf_run(request):
             W.inject_loras(W.build_prompt(a, values, images), loras)
         except W.WorkflowError as e:
             raise web.HTTPBadRequest(text=str(e))
-    await prepare_gpu()
+    await prepare_gpu("workflow")
     count = max(1, min(int(body.get("count") or 1), 8))
     kinds = {f["id"]: f["type"] for f in a["fields"]}     # what they typed is remembered for next time
     keep = {k: {"value": v.get("value"), **({"random": bool(v["random"])} if "random" in v else {})}
