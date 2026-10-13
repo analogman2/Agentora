@@ -1,0 +1,115 @@
+# What's new in Agentora
+
+Agentora started as [yue2-xpu-radio](https://github.com/zebgop-ops/yue2-xpu-radio): an endless AI radio on two Intel Arc Pro B70 cards with a cassette-deck player. This page lists what changed in the fork and why. The short version:
+
+- **Runs on one NVIDIA card** (RTX 4090) with local Ollama models instead of two Intel cards and vLLM.
+- **A new radio design**: a clean player with cover art, a library laid out like folders, and a player that behaves like Spotify's (⏮ ⏭, play next, works over Bluetooth).
+- **Better songs**: lyrics that tell one clear story, a lyric editor, taste learned from your thumbs, and ✏️ rewriting any song with AI help.
+- **More than a radio**: a Music Studio with Easy and Advanced modes, a companion Image & Video Studio, a Home page, and a local AI assistant, all one click apart.
+
+---
+
+## Hardware and models
+
+| | Original | Agentora |
+|---|---|---|
+| GPU | 2 × Intel Arc Pro B70 (XPU) | 1 × NVIDIA RTX 4090 (CUDA) |
+| Songwriter | Qwen3.8-27B on vLLM, paused while the radio runs | Qwen 3.6 35B-A3B in Ollama **on the CPU**, so it never competes for the GPU |
+| Lyricist | (none) | Qwen 3.6 27B on the GPU, pre-writing songs into a bank whenever the card is free |
+| Fast helper | (none) | Qwen 3.5 9B on the GPU: quick fallback songs, ✏️ rewrite ideas, ✨ Improve |
+| YuE2 | patched for XPU graphs | stock YuE2 on CUDA (`nvidia-local.patch` adapts `app.py`) |
+
+- **Sharing one card.** YuE2, the lyricist, ComfyUI (pictures, videos, cover art) and the chat assistant take turns. A **GPU priority** switch (Shared / Radio / Image & Video Studio / Assistant) decides who waits. The radio unloads only its own models and steps aside for whoever has priority.
+- **Models are shared, not duplicated.** The radio's lyricist and the assistant's "AGI" mode use the same loaded copy of Qwen 3.6 27B, and the 9B model serves both the assistant's "Lemming" mode and the radio's fallback writer.
+- **GPU memory safety.** A recording waits until the card has room, takes that run out of memory go back in the queue, and fewer takes are used when the spool runs low, so the broadcast never runs dry.
+
+## The radio
+
+### A cleaner player
+
+- **Now Playing** shows the song's cover art, title, style and lyrics, with **Add to my playlist**, **Song details**, **Download** and **New cover**. A "Recently played" list sits underneath.
+- **A player bar on every page**: 👎 ⏮ ▶ ⏭ 👍 ⊕, a progress bar and volume. Tapping the song opens its page.
+- **A side panel (☰)** for the controls that used to crowd the deck: who's listening and how well it's connected, GPU and disk usage, GPU priority, links to the other apps, and Settings.
+- **The cassette deck** from the original is still at `/radio/classic`.
+
+### A library laid out like folders
+
+- **Library**: ♥ My playlist, 🕘 Listen history, then every station, as a list (or as covers), each with a ▶ button.
+- **A station** lists all of its songs, including the ones recorded and waiting to air. You can sort them newest first, favourites first or most played. The description, what it has learned from you, Edit and Delete sit in an "About this station" section underneath.
+- **A song** shows its cover, style, lyrics, the story idea it was written from, its quality score, and when it last played.
+- **A path bar on every page** (`Library › Indie Road Trip › Final Load at the Dock`), with every step clickable, plus an ↑ button for going up one level.
+- **Previous / Next** at the bottom of a song page moves through the folder you came from: the station, your playlist or your history.
+- **Whole rows are clickable**: clicking anywhere on a song row opens it.
+- **☑ Select** on any song list, with **Select all**, then 📻 Play next, + Playlist, − Playlist or Delete for all of them at once.
+- **Search** across stations, titles, styles and lyrics.
+
+### Plays like any music app
+
+- **⏭ Skip** switches to the next song in about a second. The original had to play out the buffered audio first, about 15 seconds.
+- **⏮ Back** restarts the song. In the first few seconds of a song it goes to the previous one, and pressing it again keeps going back through the station's history. ⏭ then walks forward again, and new songs resume after the newest one. Stepping through the history doesn't count as a skip vote.
+- **📻 Play next** puts any song in the library, including Music Studio songs and rewrites, at the front of the broadcast. Songs still recording wait their turn.
+- **Lock screen and car controls**: ▶ ⏸ ⏮ ⏭ work from the phone's lock screen and from Bluetooth car controls. After a pause, ▶ rejoins the live stream instead of playing stale audio.
+- **Phones and Bluetooth**: phones use plain playback by default. In the original, routing audio through Web Audio for EQ and meters crackled over car Bluetooth. EQ and meters are still available as an option.
+- **No more random stops.**
+  - The stream runs 15 s ahead, so each phone holds a cushion against Wi-Fi and mobile hiccups.
+  - A dropped stream (network blip, server restart) retries on its own, and a silent clip keeps a phone's background tab awake while it does.
+  - A filler rerun now plays to its end when a new song becomes ready, instead of stopping mid-song.
+
+### Stations that learn
+
+- **Taste notes from your thumbs.** 👍, 👎, skips and playlist saves are turned into short notes (for example "likes story songs about small towns; skip slow ballads") that the songwriter follows. You can read them on the station page, and **Forget** clears them.
+- **How you listen counts too.** Hearing a song to the end is a soft like, and tuning out early is a soft skip. Both count less than a thumb.
+- **More like this** on any song writes and records a new song in its spirit.
+- **🎵 Create a song now** puts a new song for a station at the front of the queue.
+- **✨ Improve and 💡 Suggest** when creating or editing a station. Improve edits what you wrote rather than replacing it, and Suggest gives fresh ideas.
+
+### Better songs
+
+- **Lyrics that make sense.**
+  - Each song is written around one story: who's singing, to whom, and what happened.
+  - The writing instructions ask for plain, conversational lines that follow from each other, and a few details that belong to that story.
+  - A **lyric editor** pass then checks that the story is clear and every line makes literal sense, and fixes clichés, forced rhymes and weak hooks.
+  - Story ideas are only used when they fit the station.
+- **No empty songs.** A song with no sung lines (only section headings) is rejected and rewritten, not recorded.
+- **A GPU lyricist** pre-writes songs into each station's bank while the card is idle, so the next song often has its lyrics ready.
+- **Quality over speed**: 2–3 takes per song, more diffusion steps, and the critic keeps the best take. Requested songs get the same care.
+- **Audio checks** flag takes with long silent stretches or missing lyrics.
+- **Cover art for every station and song**, drawn by Z-Image Turbo between songs. The prompt is a name-free description of the music, so the art has no text, logos or band likenesses. 🎨 **New cover** draws another.
+
+## The Music Studio
+
+- **Easy and Advanced modes.**
+  - **Easy** shows presets, style, lyrics, ✨ Write lyrics for me, and Create.
+  - **Advanced** brings back the tempo slider, style chips, writer options, takes, seeds, sampling and the score editor.
+  - Your choice is remembered.
+- **✏️ Rewrite a song**, started from the song itself (a radio song page or a library row):
+  1. The Music Studio opens with the song's style, lyrics, title and quality settings filled in, a fresh take, and the original ready to play for comparison.
+  2. The AI suggests 3–4 specific improvements (for example "replace 'sea of traffic lights' in the bridge with a concrete memory", or a new sound at 85 BPM). Each one applies in a few seconds, with **Undo**.
+  3. Or type what should change ("slower and sadder, and make it about a brother"). The AI turns it into a lyric edit plus a new style line.
+  4. Press **Create song**. The new version remembers which song it rewrote. A 👍 on it also teaches the original's station.
+  5. **Stop rewriting** puts back whatever was in the form before.
+- **📻 Play next** on every song sends it to the radio.
+
+## The companion apps
+
+These live in a separate repository (the Image & Video Studio, port 7870) and share the same look and app switcher.
+
+- **Home**: what's on the radio, what the studios are making, GPU and disk use, the GPU priority, and a chat with the local assistant.
+- **Image Studio**: pictures with Z-Image Turbo, ✨ **Improve** to turn a short idea into a detailed prompt, LoRAs, aspect ratios, up to 4 at a time, plus downloaded ComfyUI workflows and models (installed with one click, PG-13 only for non-admin users).
+- **Video Studio**: Wan 2.2 videos from text, or starting from one of your pictures.
+- **App switcher** in every app's top bar (🏠 📻 🖼 🎵, Alt+0–3). Each app keeps its own browser tab, so switching never stops the radio. A small now-playing bar with 👍 and ⏭ follows you into the other apps.
+
+## The assistant (Hermes)
+
+A local [Hermes Agent](https://github.com/NousResearch/hermes-agent) answers in the chat panel on Home, in the Image & Video Studio and on the radio. It can switch stations, make pictures and videos, install workflow models, and answer questions about the machine.
+
+- A **🐹 Lemming / 🧠 AGI** switch picks the fast model (Qwen 3.5 9B) or the strongest local model (Qwen 3.6 27B).
+- A **🌐 Internet** switch turns web search on or off.
+- Only admin accounts of the Studio can use it.
+
+## Fixes along the way
+
+- A song interrupted in its first 30 s is no longer put back as "unplayed" when it was a replay or a request; only new songs go back to the queue.
+- A player reconnecting after ⏮ or ⏭ no longer stops the song for a moment and skips ahead.
+- Skip, thumbs, playlist and the song page now work for any library song on air, not only radio-made ones.
+- The radio no longer crashes at startup, and cover art waits out ComfyUI restarts instead of giving up.

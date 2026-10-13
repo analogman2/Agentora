@@ -1,128 +1,149 @@
-# yue2-xpu-radio
+# Agentora
 
-**Endless AI radio stations, written and performed live by [YuE2](https://github.com/multimodal-art-projection/YuE) on two Intel Arc Pro B70 GPUs.**
+**Endless AI radio and a home media studio on one NVIDIA card.** Every station writes, sings and draws its own songs with [YuE2](https://github.com/multimodal-art-projection/YuE), local LLMs and Z-Image, and learns what you like from your thumbs. A Music Studio, an Image & Video Studio and a Home page with a local AI assistant sit beside it, all one click apart.
 
-Describe a station ("early 90s hip hop, Salt-N-Pepa, TLC, Foxy Brown") or teach it by dropping in a folder of songs. An LLM writes each new song (title, style, lyrics), YuE2 sings it with full vocals at 48 kHz, a CLAP critic throws away the weak takes, and everyone listening hears the same live broadcast — in a cassette-deck web player or any MP3 player. Inspired by [infinite-tapedeck](https://github.com/CharlesMod/infinite-tapedeck).
+Agentora is a fork of [zebgop-ops/yue2-xpu-radio](https://github.com/zebgop-ops/yue2-xpu-radio), which ran on two Intel Arc Pro B70 cards. This fork runs on a single **RTX 4090** with [Ollama](https://ollama.com), and redesigns the radio around a cleaner, folder-style library. **[What's new in Agentora →](docs/whats-new.md)**
 
-![The radio deck](docs/radio-deck.png)
+![Now playing: cover art drawn for the song, lyrics, playlist and the player bar](docs/screens/radio-now-playing.png)
 
-The radio lives inside a small **Music Studio** (make individual songs or instrumentals, write lyrics with an LLM, edit the score), which owns the GPU queue. Both are plain Python stdlib HTTP servers — no web framework, no build step.
+## The apps
 
-| Radio (phone) | Music Studio |
-|---|---|
-| <img src="docs/radio-mobile.png" width="260"> | <img src="docs/studio.png" width="520"> |
+| Radio: library | Radio: a station | Radio: a song |
+|---|---|---|
+| <img src="docs/screens/radio-library.png" width="300"> | <img src="docs/screens/radio-station.png" width="300"> | <img src="docs/screens/radio-song.png" width="300"> |
+| Your playlist, listen history and every station, laid out like folders | All of a station's songs, sortable, with **Select all** to play next, save or delete | Lyrics, the story idea, quality score, cover art, ✏️ **Rewrite** and **More like this** |
+
+| Music Studio (Easy mode) | ✏️ Rewrite a song | Radio on a phone |
+|---|---|---|
+| <img src="docs/screens/music-studio.png" width="300"> | <img src="docs/screens/music-rewrite.png" width="300"> | <img src="docs/screens/radio-phone.png" width="150"> |
+| Style, lyrics, Create. **Advanced** shows every control | Opened from a song: everything prefilled, AI ideas apply in one click | Plays over Bluetooth in the car, ⏮ ⏭ from the lock screen |
+
+| Image Studio | Video Studio | Home |
+|---|---|---|
+| <img src="docs/screens/image-studio.png" width="300"> | <img src="docs/screens/video-studio.png" width="300"> | <img src="docs/screens/home.png" width="300"> |
+| Pictures with Z-Image Turbo, ✨ Improve for prompts, LoRAs, ComfyUI workflows | Videos with Wan 2.2, from text or starting from one of your pictures | What's on, GPU and disk, and a chat with the local Hermes assistant |
+
+The **radio and Music Studio** are in this repository (`studio/`). The **Image & Video Studio and Home page** are a companion app (a small aiohttp front end over ComfyUI on port 7870) in a separate repository, not published yet. They share one look and an app switcher (`/b70/b70.css`, `/b70/b70.js`), so moving between apps keeps the radio playing in its own tab.
 
 ## What it does
 
-- **Two kinds of stations.** *Text* stations are defined by a description. *Learned* stations analyze uploaded songs with CLAP + librosa (genre/mood/instrument tags, vocal share, tempo, key) and also pass the song names to the songwriter — the LLM usually knows the artists far better than the automatic tags do.
-- **Lyrics themes.** A station can carry a theme ("mature Halloween horror stories", "songs about the sea"): the station keeps its musical sound and every song's words, title and mood follow the theme.
-- **A songwriter LLM** (any OpenAI-compatible server) writes a JSON spec per song: title, style line, structured lyrics sized for ~2.5–3 minutes. It sees what aired recently, what you kept / skipped / disliked, and gets a random "variety axis" each time; overused title words are banned so stations don't collapse onto one idea.
-- **YuE2 on every GPU.** One worker process per card (`xpu:0`, `xpu:1`) with XPU graphs, ~0.7× real time per card (a 3.5 min song renders in ~2.5 min), so two cards stay well ahead of playback.
-- **A critic.** Each take is embedded with CLAP and scored against the station (its description, or the corpus of learned songs), nudged by your likes/dislikes, with a near-duplicate penalty. The bottom 15 % (text stations) or 30 % (learned) are dropped.
-- **One shared broadcast.** A playout thread encodes approved tracks to a 192 kbps CBR MP3 stream at real time; every listener — the deck, VLC, a phone — gets the same audio (`/radio/stream.mp3`). New listeners get a 4 s burst so playback starts instantly; the deck works out which song is *audible* from the stream offset, so titles change exactly when the music does. Nobody listening → no songs are used up. If the spool ever runs dry, it airs the best recent runner-up, then a rerun of the station's favorites / best songs, instead of dead air.
-- **Feedback.** KEEP / SKIP / NOPE shape the station (SKIP and NOPE skip for everyone — it's one broadcast).
-- **♻ Reruns.** A special tape that shuffles every station's aired songs (favorites 3× as often, nothing from the last 3 h, never skipped/disliked songs, rarely the same station twice in a row). It generates nothing, so the LLM keeps the GPUs while the radio plays.
-- **♥ Favorites.** Every kept song across all stations in one panel — filter by station, preview (pauses the broadcast for you only), lyrics, MP3 download, un-favorite.
-- **Shares the GPUs with an LLM.** The studio pauses the LLM service (e.g. vLLM) when it needs the cards and restarts it when the radio is switched off or someone presses *Give GPUs back*.
-- **The deck.** A realistic cassette (SVG): tape packs whose radii follow the stream position as a 45-minute side and auto-reverse to side B, hubs that turn at real 4.76 cm/s tape speed (the small reel spins faster), backlit analog VU meters on Web Audio, a VFD, a hand-written label tinted per station.
+- **Stations that write their own songs.** Describe a station ("bell-bottom country, sassy female vocals") or teach it with a folder of songs. For each song an LLM writes a title, a style line and lyrics built around one clear story. An editor pass makes sure every line makes sense, and YuE2 sings it at 48 kHz. A CLAP critic keeps the best of 2–3 takes.
+- **It learns from you.** 👍, 👎, skips, playlist saves and even how long you listen become short taste notes the songwriter follows. **More like this** on any song writes a new one in its spirit.
+- **Cover art for every station and song**, drawn between songs by Z-Image Turbo from a name-free description of the music, so there's no text or band likenesses.
+- **One live broadcast.** Everyone hears the same 192 kbps MP3 stream (`/radio/stream.mp3`). A 15 s cushion rides out Wi-Fi and mobile hiccups, ⏭ and ⏮ cut over in about a second, ⏮ walks back through the station's history like any player, and **📻 Play next** queues any song in the library.
+- **A library laid out like folders:** Library › station › song, with a path bar, an ↑ button, and previous/next inside each folder.
+- **✏️ Rewrite.** Open any song in the Music Studio with its settings and lyrics filled in. Get 3–4 specific AI suggestions, or type what should change ("slower and sadder, about a brother"), apply with one click, then record.
+- **Shares one GPU politely.** YuE2, the GPU lyricist, ComfyUI and the chat assistant take turns on the card, and a **GPU priority** switch (Radio / Studio / Assistant / Shared) decides who waits.
+- **Classic deck.** The original cassette-deck player is still at `/radio/classic`.
 
 ## How it works
 
 ```
- station (text or learned) ─┐
- likes / skips / recent ────┼─> songwriter LLM ──JSON spec──> job queue ──> YuE2 worker xpu:0 ─┐
-                            │                                             └> YuE2 worker xpu:1 ─┤
-                            │                                                                    v
-                            └──────────────────────── CLAP critic <── song.mp3 (320 kbps) <──────┘
-                                                          │ approved
-                                                          v
-                         spool (keeps ~4 songs ahead) ──> playout (real-time pacing, 576-byte frames)
-                                                          │
-                              /radio/stream.mp3  <────────┴──> deck · VLC · phones (same audio)
+ station + taste notes ──> songwriter (Qwen 3.6 35B, CPU) ──┐     GPU lyricist (Qwen 3.6 27B) pre-writes
+                                                            ├──> songs into a bank while the card is free
+                            lyric editor pass ──────────────┘
+                                   │ spec: title · style · lyrics · story
+                                   v
+                       job queue ──> YuE2 on cuda:0 (2–3 takes) ──> CLAP critic + audio checks
+                                                                           │ approved
+                                                                           v
+   ComfyUI Z-Image ──> cover art        spool (6 ahead) ──> playout (real-time, 15 s lead, clean cuts)
+                                                                           │
+                                     /radio/stream.mp3 ──> radio page · phones · VLC (same audio)
 ```
 
-- `studio/app.py` — studio server, job queue, GPU pool (spawned child process per GPU — the only reliable way to give all VRAM back), LLM pause/resume, lyrics writer, MP3 library.
-- `studio/radio.py` — stations, CLAP listener, songwriter, spool, critic, broadcast/playout, `/api/radio/*`.
-- `studio/index.html`, `studio/radio.html` — the two UIs (no dependencies besides Google Fonts, with system-font fallbacks).
-- `patches/yue2-xpu.patch` — the YuE2 port to Intel XPU (below).
+- `studio/app.py`: the HTTP server (Python stdlib), job queue, GPU worker and hand-off, lyrics writer, ✏️ rewrite suggestions, MP3 library.
+- `studio/radio.py`: stations, songwriter and lyric editor, lyric bank, taste learning, critic, broadcast/playout, history navigation, play next, `/api/radio/*`.
+- `studio/art.py`: cover art through ComfyUI. `studio/assistant.py`: the radio's chat panel, relayed to Hermes.
+- `studio/radio.html`, `studio/index.html`: the radio and the Music Studio (no build step, no dependencies).
 
-## Hardware and software it runs on
+## Hardware and software
 
-- 2 × Intel Arc Pro B70 (32 GB each, `xe` driver), Ryzen 9 3950X, 30 GB RAM, Ubuntu 26.04 / kernel 7.0
-- Intel compute-runtime 26.35, PyTorch **2.14.0+xpu** (XPU graphs need torch ≥ 2.13), transformers 4.57, librosa 1.0, soundfile 0.13, numpy 2.2, ffmpeg
-- Models: `m-a-p/YuE2-3B` + `m-a-p/YuE2-Vae`, CLAP `laion/clap-htsat-unfused` (CPU)
-- Songwriter: Qwen3.8-27B on vLLM (any OpenAI-compatible chat model works; thinking is disabled via `chat_template_kwargs`)
+- NVIDIA GeForce RTX 4090 (24 GB), AMD Ryzen 9 3900X, 60 GB RAM, Ubuntu 26.04 (kernel 7.0)
+- PyTorch 2.14 (CUDA 13), YuE2 (`m-a-p/YuE2-3B` + VAE), CLAP `laion/clap-htsat-unfused` (CPU), ffmpeg
+- Ollama 0.40 with three models (created from Modelfiles, below)
+  - `qwen3.6-songwriter`: Qwen 3.6 35B-A3B on the **CPU** (`num_gpu 0`), so writing never fights the GPU
+  - `qwen3.6-agent`: Qwen 3.6 27B on the GPU, used as the lyricist; it's the same loaded copy as the assistant's "AGI" model
+  - `qwen3.5-agent-fast`: Qwen 3.5 9B on the GPU, for the fast fallback writer, ✏️ rewrite ideas and Improve
+- Optional: ComfyUI with Z-Image Turbo (cover art), [Hermes Agent](https://github.com/NousResearch/hermes-agent) (chat panel)
 
-It should also run on a single XPU or CUDA GPU (`STUDIO_DEVICES=cuda:0`); the patch is only needed for XPU.
-
-## Setup
+## Setup (one NVIDIA GPU)
 
 ```bash
-# 1. YuE2 with the XPU patch
+# 1. YuE2 (unpatched on NVIDIA; patches/yue2-xpu.patch is only for Intel XPU)
 git clone https://github.com/multimodal-art-projection/YuE.git ~/YuE
-cd ~/YuE && git checkout 1dc1c50 && git apply ~/yue2-xpu-radio/patches/yue2-xpu.patch
-
-# 2. a venv with PyTorch for XPU (or CUDA)
+cd ~/YuE && git checkout 1dc1c50
 python3.12 -m venv ~/venv-yue2
-~/venv-yue2/bin/pip install torch --index-url https://download.pytorch.org/whl/xpu
+~/venv-yue2/bin/pip install torch --index-url https://download.pytorch.org/whl/cu130
 ~/venv-yue2/bin/pip install -e ~/YuE librosa soundfile transformers
 sudo apt install ffmpeg
 
-# 3. run it
-STUDIO_DEVICES=xpu:0,xpu:1 \
-STUDIO_LYRICS_LLMS="http://localhost:8000/v1|qwen38|local LLM" \
-STUDIO_INSTRUMENTAL=~/YuE/skills/yue2-music/instrumental/scripts \
-~/venv-yue2/bin/python ~/yue2-xpu-radio/studio/app.py
+# 2. the songwriter models
+ollama pull qwen3.6:35b-a3b && ollama pull qwen3.6:27b && ollama pull qwen3.5:9b
+printf 'FROM qwen3.6:35b-a3b\nPARAMETER num_ctx 8192\nPARAMETER num_gpu 0\n' > Modelfile && ollama create qwen3.6-songwriter -f Modelfile
+printf 'FROM qwen3.6:27b\nPARAMETER num_ctx 65536\n' > Modelfile && ollama create qwen3.6-agent -f Modelfile
+printf 'FROM qwen3.5:9b\nPARAMETER num_ctx 65536\n' > Modelfile && ollama create qwen3.5-agent-fast -f Modelfile
+
+# 3. run it (or install systemd/yue2-studio.service as a user service)
+~/yue2-xpu-radio/start-local.sh
 ```
 
-Open `http://<host>:7860/` (studio) or `http://<host>:7860/radio`. For a service, see [`systemd/yue2-studio.service`](systemd/yue2-studio.service) and the narrow [`systemd/sudoers.example`](systemd/sudoers.example) that lets it stop/start only the LLM unit.
+Open `http://<host>:7860/radio` (radio) or `http://<host>:7860/` (Music Studio). `nvidia-local.patch` holds the changes to `app.py` that make it run on CUDA; it's already applied on this branch.
+
+Optional, and it makes the 27B model fit fully on a 24 GB card: `OLLAMA_KV_CACHE_TYPE=q8_0` and `OLLAMA_FLASH_ATTENTION=1` in Ollama's service environment.
 
 ### Configuration
 
-| Variable | Default | Meaning |
+| Variable | Here | Meaning |
 |---|---|---|
-| `STUDIO_PORT` | `7860` | HTTP port |
-| `STUDIO_DEVICES` | `xpu:0,xpu:1` | one YuE2 worker per device |
-| `STUDIO_DATA` | `~/yue2/studio/library` | song library (`<id>/job.json`, `<id>/song.mp3`); radio state lives next to it |
-| `STUDIO_LLM_UNIT` | `vllm-qwen38.service` | systemd unit paused while the studio holds the GPUs |
-| `STUDIO_LYRICS_LLMS` | `http://localhost:8000/v1\|qwen38\|local LLM` | songwriter LLMs, `base_url\|model\|label`, comma-separated, tried in order. While the radio runs the local LLM is paused, so add a server on another machine. |
-| `STUDIO_RETURN_MINUTES` | `0` | auto-return the GPUs after N idle minutes (0 = only on request / radio off) |
-| `STUDIO_INSTRUMENTAL` | `~/yue2/YuE/skills/yue2-music/instrumental/scripts` | YuE2's instrumental helper scripts |
+| `STUDIO_DEVICES` | `cuda:0` | one YuE2 worker per device |
+| `STUDIO_LYRICS_LLMS` | songwriter (CPU), then `qwen3.5-agent-fast` (GPU) | `base_url\|model\|label`, comma-separated, tried in order; a label containing "GPU" is preferred for quick jobs |
+| `STUDIO_LLM_EXTRA` | `{"reasoning_effort": "none"}` | added to every LLM request (skips Ollama's thinking step) |
+| `STUDIO_LLM_UNIT` | *(empty)* | a systemd LLM unit to pause for the GPU; not needed with Ollama |
+| `RADIO_TAKES` / `RADIO_AHEAD` | `2` / `6` | takes per song (the critic keeps the best); songs kept ready |
+| `RADIO_BURST_SECONDS` | `15` | how far the stream runs ahead, i.e. each player's cushion |
+| `STUDIO_DATA` | `~/yue2-xpu-radio/library` | the song library; radio state lives next to it |
+
+Most radio and audio settings (bitrate, loudness, EQ, quality steps, takes, writers, cover art) can also be changed live on the radio page under ☰ → Settings.
 
 ### Radio API (selection)
 
 | | |
 |---|---|
-| `GET /radio/stream.mp3` | the live broadcast (open in VLC / any player) |
-| `GET /api/radio/state` | stations, spool, GPU owner, stream position, what's on air |
-| `POST /api/radio/power` `{on, station}` | switch on/off / retune (on = generate; pauses the LLM). `station: "__reruns__"` = rerun mode, no GPUs |
-| `POST /api/radio/skip` `{track, kind}` | skip (or `kind: "dislike"`) the song on air |
+| `GET /radio/stream.mp3` | the live broadcast |
+| `GET /api/radio/state` | stations, what's on air, what's being made, GPU owner, play-next list |
+| `POST /api/radio/power` `{on, station}` | switch on/off or retune |
+| `POST /api/radio/skip` `{track, kind}` / `POST /api/radio/back` `{track, steps}` | ⏭ / ⏮ (steps 0 = restart the song, 1 = previous) |
+| `POST /api/radio/upnext` `{ids}` | 📻 play these library songs next |
 | `POST /api/radio/feedback` `{track, kind}` | `keep` / `skip` / `dislike` / `clear` |
-| `GET /api/radio/favorites` | every kept song, all stations, newest first |
-| `POST /api/radio/stations` | create `{kind: "text"\|"folder", name, description, vocals, language, theme}` |
-| `PUT /api/radio/stations/<id>/files/<name>` | upload a song to a learned station, then `POST .../analyze` |
-
-## The YuE2 XPU patch
-
-Three small changes against upstream `1dc1c50` (`patches/yue2-xpu.patch`):
-
-- **XPU graphs**: `GraphAR` captures with `torch.xpu.XPUGraph` / `torch.xpu.graph` / XPU streams, and token generation enables graphs on `xpu` (decode runs ~75 tok/s per B70).
-- **Sync, RNG, cache**: `torch.xpu.synchronize`, an on-device `torch.Generator`, `torch.xpu.empty_cache`.
-- **No AR offload before the VAE on XPU**: a 32 GB card holds the AR model and the VAE together; moving the 7 GB AR model to host RAM for every song cost time and, with two workers, exhausted a 30 GB host.
+| `GET /api/radio/stations/<id>/history?limit=500&upcoming=1` | every song of a station, the ones waiting to air first |
+| `POST /api/radio/stations/<id>/song` `{like}` | write and record a song now (optionally "more like" a song) |
+| `POST /api/rewrite/suggest` `{id, ask}` | ✏️ ideas for rewriting a song, or turn a request into edits |
 
 ## Things we learned the hard way
 
-- **A device fault poisons a process forever.** An `xe` engine reset (`Engine memory CAT error`) left one worker returning `UR_RESULT_ERROR_DEVICE_LOST` for every job — 185 instant failures while the station replayed the five songs that existed. Workers now restart on `DEVICE_LOST` or 3 consecutive failures, retire after repeated faults, and the spool backs off instead of hammering the songwriter.
-- **The length cap was cutting songs off.** YuE2 caps semantic tokens at `max_seconds`; with 180 s, a quarter of songs stopped mid-phrase at full volume. The radio now uses 300 s as a safety cap (generation time follows the real length), sizes lyrics for ~2.5–3 min with an `[Outro]`, and fades out any take that still ends loud.
-- **CLAP saturates within a genre.** Distinct songs on one station score 0.95–0.97 cosine against each other, clones 0.94–0.98 — so it's a soft novelty penalty, not a dedup (a hard cut at 0.975 threw away ~half of all takes and starved the spool). Variety has to come from the songwriter prompt.
-- **Liked songs over-anchor.** "The listener loved X, lean toward it" turned a station into five variations of one song. Likes now set the vibe only; titles may not reuse recent words.
-- **CLAP tags can be badly wrong** (a Zach Bryan station came out as "indie rock, punk, bossa nova, female vocals"). Passing the learned songs' names to the LLM fixed the station's sound immediately.
-- **vLLM structured output + MTP speculative decoding** (xgrammar, `num_speculative_tokens: 3`, pipeline parallel) returned HTTP 500 for ~75 % of `response_format: json_object` requests ("grammar rejected tokens … Terminating request"). The songwriter doesn't use JSON mode; it parses and repairs the JSON itself (unterminated strings, stray backslashes).
-- **Real-time MP3 pacing**: 192 kbps at 48 kHz gives exactly 576-byte frames (24 000 B/s), so byte offsets are time offsets and cuts can land on frame boundaries — skips never leave a torn frame.
+This fork's additions; the original project's lessons follow below.
+
+- **Coherent lyrics need to be asked for.** Prompts that pushed "concrete details" and banned clichés produced vivid nonsense ("a bowl of cold light", "cast iron butter"). Putting one clear story and plain language first, letting the editor check sense before style, and relaxing over-strict title rules fixed it. A spec with only section tags and no sung lines also has to be rejected, or the model sings nothing.
+- **Clean cuts mean reconnects.** Dropping the buffered old song on ⏭ makes the new one start in a second, but every player then reconnects. Anything that cuts must not fire for fillers, and the playout must not treat the instant between disconnect and reconnect as "everyone left".
+- **Phones freeze silent background tabs.** When a stream drops, the player keeps a silent clip looping while it retries, so Android doesn't suspend the page.
+- **Web Audio and Bluetooth don't mix on Android.** Routing the stream through Web Audio (for EQ and VU meters) crackled over car Bluetooth; phones now default to plain playback.
+- **One GPU, many guests.** Sharing one loaded copy of a model between the lyricist and the assistant avoids reloads, and a 35B model that doesn't fit is slower than a 9B that does. With a 24 GB card, what *fits* matters more than parameter count.
+
+### From the original yue2-xpu-radio
+
+- **A device fault poisons a process forever.** Workers restart on `DEVICE_LOST` or 3 consecutive failures and retire after repeated faults.
+- **The length cap was cutting songs off.** The radio uses 300 s as a safety cap, sizes lyrics for about 2.5–3 min with an `[Outro]`, and fades out any take that still ends loud.
+- **CLAP saturates within a genre**, so it's a soft novelty penalty, not a dedup; variety has to come from the songwriter prompt.
+- **Liked songs over-anchor**: likes set the vibe only.
+- **CLAP tags can be badly wrong**; passing the learned songs' names to the LLM fixes a station's sound.
+- **Real-time MP3 pacing**: 192 kbps at 48 kHz gives 576-byte frames, so byte offsets are time offsets and cuts land on frame boundaries.
+
+The Intel XPU port (`patches/yue2-xpu.patch`: XPU graphs, sync/RNG/cache, no AR offload before the VAE) is unchanged from the original; see its history for details.
 
 ## Credits and licenses
 
-- Code in this repository: Apache-2.0 (see `LICENSE`).
-- [YuE2](https://github.com/multimodal-art-projection/YuE) by M-A-P: code Apache-2.0; the model weights have their own license (`MODEL_LICENSE` upstream) — check it before using generated music.
-- [CLAP](https://huggingface.co/laion/clap-htsat-unfused) by LAION. Idea: [infinite-tapedeck](https://github.com/CharlesMod/infinite-tapedeck) by CharlesMod.
-- Songs you upload to learned stations stay on your machine and are only analyzed; they are not part of this repository.
+- Original project: [yue2-xpu-radio](https://github.com/zebgop-ops/yue2-xpu-radio) by zebgop-ops. Code in this repository: Apache-2.0 (see `LICENSE`).
+- [YuE2](https://github.com/multimodal-art-projection/YuE) by M-A-P: code Apache-2.0; the model weights have their own license (`MODEL_LICENSE` upstream). Check it before using generated music.
+- [Qwen](https://huggingface.co/Qwen) models by Alibaba, Z-Image Turbo and Wan 2.2 through [ComfyUI](https://github.com/comfyanonymous/ComfyUI), [CLAP](https://huggingface.co/laion/clap-htsat-unfused) by LAION, [Hermes Agent](https://github.com/NousResearch/hermes-agent) by Nous Research. Idea: [infinite-tapedeck](https://github.com/CharlesMod/infinite-tapedeck) by CharlesMod.
+- Songs you upload to learned stations, and everything the stations make, stay on your machine; none of it is part of this repository.
