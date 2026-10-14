@@ -209,16 +209,27 @@ $("bAdd").onclick = async () => { if (current) try { await setPlaylist(current.i
 // lock screen / notification controls
 const ms = "mediaSession" in navigator ? navigator.mediaSession : null;
 let msKey = null;
-function updateMediaSession() {
+const PAGE_TITLE = document.title;
+function updateMediaSession(force) {
+  const t = current, st = R && stOf(selected), on = !!(lid || lp.t);
+  // the tab title too: Android shows it on the lock screen and over Bluetooth when it has no song details
+  document.title = on ? `${t ? t.title : "Next song on the way…"} · ${(t && t.station_name) || (st && st.name) || "Agentora"}` : PAGE_TITLE;
   if (!ms) return;
   ms.playbackState = lp.t ? (pv.paused ? "paused" : "playing") : !lid ? "none" : audio.paused ? "paused" : "playing";
-  const t = current, st = R && stOf(selected), key = [(lid || lp.t) && "on", t && t.id, t && t.cover, st && st.name, st && st.art].join("|");
-  if (key === msKey) return; msKey = key;
-  if (!lid && !lp.t) { ms.metadata = null; return; }
+  const key = [on && "on", t && t.id, t && t.cover, st && st.name, st && st.art].join("|");
+  if (key === msKey && !force) return; msKey = key;
+  if (!on) { ms.metadata = null; return; }
   ms.metadata = new MediaMetadata({title: t ? t.title : "Next song on the way…", artist: (t && t.station_name) || (st && st.name) || "Agentora",
     album: "Agentora", artwork: t && t.cover ? [{src: location.origin + t.cover, sizes: "768x768", type: "image/jpeg"}]
       : st && st.art ? [{src: location.origin + stationArt(st), sizes: "768x768", type: "image/jpeg"}] : [{src: "/icons/radio-180.png", sizes: "180x180", type: "image/png"}]});
 }
+// Chrome on Android ties the lock-screen / Bluetooth song details to the playing media: a new stream source (every
+// ⏭ ⏮, cut or reconnect) or the silent bridge clip can leave them blank. Send them again whenever playback (re)starts
+// and when the page comes back into view.
+const resendMeta = () => { updateMediaSession(true); setTimeout(() => updateMediaSession(true), 1500); };
+audio.addEventListener("playing", resendMeta);
+pv.addEventListener("playing", resendMeta);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) updateMediaSession(true); });
 if (ms) {
   const act = (a, f) => { try { ms.setActionHandler(a, f); } catch {} };
   act("play", () => { if (!lid) return togglePlay(); wantPlay = true; audio.paused ? connect() : audio.play(); });   // live: rejoin, don't resume stale audio

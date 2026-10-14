@@ -50,7 +50,7 @@ Agentora started as [yue2-xpu-radio](https://github.com/zebgop-ops/yue2-xpu-radi
 - **⏭ Skip** switches to the next song in about a second. The original had to play out the buffered audio first, about 15 seconds.
 - **⏮ Back** restarts the song. In the first few seconds of a song it goes to the previous one, and pressing it again keeps going back through the station's history. ⏭ then walks forward again, and new songs resume after the newest one. Stepping through the history doesn't count as a skip vote.
 - **📻 Play next** puts any song in the library, including Music Studio songs and rewrites, at the front of the broadcast. Songs still recording wait their turn.
-- **Lock screen and car controls**: ▶ ⏸ ⏮ ⏭ work from the phone's lock screen and from Bluetooth car controls. After a pause, ▶ rejoins the live stream instead of playing stale audio.
+- **Lock screen and car controls**: ▶ ⏸ ⏮ ⏭ work from the phone's lock screen and from Bluetooth car controls. After a pause, ▶ rejoins the live stream instead of playing stale audio. The song's title, station and cover are sent again whenever playback restarts (every ⏭, ⏮ or reconnect), because Android can otherwise blank them on Bluetooth. The tab title shows the song too.
 - **Phones and Bluetooth**: phones use plain playback by default. In the original, routing audio through Web Audio for EQ and meters crackled over car Bluetooth. EQ and meters are still available as an option.
 - **No more random stops.**
   - The stream runs 15 s ahead, so each phone holds a cushion against Wi-Fi and mobile hiccups.
