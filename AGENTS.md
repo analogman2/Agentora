@@ -1,51 +1,98 @@
-# YuE2 music studio + AI radio
+# Agentora: guide for agents (Claude Code, Hermes, anyone editing this repo)
 
-Written by jt's friend (github.com/zebgop-ops/yue2-xpu-radio) and adapted for this NVIDIA machine. jt's changes live on
-the local git branch `local`; never push anywhere. Served by the user systemd unit `yue2-studio` on
-http://127.0.0.1:7860 (radio at /radio, classic deck at /radio/classic, music studio at /).
+Agentora is jt's local AI media suite on one RTX 4090:
+- an endless AI radio and a Music Studio (YuE2);
+- an Image & Video Studio and Home page (ComfyUI);
+- a local assistant (Hermes).
 
-## How it works
-- `studio/app.py`: plain `http.server` (ThreadingHTTPServer) + a worker that runs YuE2 (`m-a-p/YuE2-3B`, from ~/YuE,
-  venv ~/venv-yue2) in subprocesses on the GPU. `Worker.acquire/release` hand the GPU between YuE2 and other users;
-  `unload_ollama_gpu_models()` frees Ollama models first.
-- The radio is split by job (see each module's docstring): `studio/radio.py` (startup, `/api/radio/*` routes, forwards
-  `radio.NAME`), `radio_state.py` (shared state + every setting: read and write them as `rs.NAME`, never copy them),
-  `radio_stations.py`, `radio_songwriter.py`, `radio_spool.py`, `radio_broadcast.py`, `radio_library.py`.
-- `studio/stream_relay.py`: the **stream relay**, its own user service `agentora-stream` (port 7861 for players,
-  127.0.0.1:7862 for the radio's feed). It holds the listeners, the burst buffer and the stream position, and bridges
-  with silence when the feed stops, so restarting `yue2-studio` no longer disconnects anyone. Restarting
-  `agentora-stream` itself does.
-- `studio/gpu_broker.py`: the **GPU broker**, user service `agentora-gpu` (leases on 127.0.0.1:7890, Ollama proxy for
-  Hermes on 127.0.0.1:11435; `GET :7890/status`). The radio asks `app.broker_yield()` before starting GPU work and
-  reports `app.broker_holding()`; the Studio's `prepare_gpu()` takes a lease. Anything new that uses the GPU should
-  take a lease (`POST :7890/lease`) instead of grabbing the card.
-- `studio/speech_server.py`: the **speech service**, user service `agentora-speech` on 127.0.0.1:7895, run with
-  `~/venv-speech` (not venv-yue2). OpenAI audio API: `/v1/audio/speech` (Qwen3-TTS voice design, GPU under a
-  broker lease "speech", unloads after 2 min) and `/v1/audio/transcriptions` (whisper small.en on the GPU under lease "speech-ears", ~1 GB,
-  CPU fallback; CTranslate2 needs CUDA 12 cuBLAS, kept in `~/venv-speech/cu12` and loaded by path).
-- `studio/logsetup.py`: logging for every component (journal + `logs/<component>.log`); use `app.log(...)` or
-  `logging.getLogger(__name__)`, never `print`.
-- `studio/art.py`: cover art via ComfyUI (Z-Image), drawn between songs only; scenes are name-free.
-- Lyrics: `SPEC_SYSTEM` brief + `STORY_SEEDS` + `edit_lyrics` editor pass; the GPU lyricist (`qwen3.6-agent`, shared with Hermes's AGI;
-  27B) fills each station's lyric bank when the card is free (`bank_loop`); taste notes from thumbs (`update_taste`).
-- ✏️ Rewrite: a song page (radio) or library row (Music Studio) opens `/#rewrite=<id>`; the form is filled from the song and `/api/rewrite/suggest` (GPU-first) gives ideas / turns a request into a lyrics instruction + style line. Easy/Advanced mode hides `.adv-only` controls.
-- `studio/settings.py`: every radio/audio setting with ranges (served at /api/radio/settings).
-- `studio/assistant.py`: the radio's Assistant panel, relaying chat to Hermes (http://127.0.0.1:8642) for signed-in
-  Studio admins only.
-- `studio/radio.html` + `studio/web/radio-{core,player,library,panel,extras}.js`: the radio page. Plain scripts loaded in
-  order that share one global scope (a file can't call a later file's function while the page loads). Here `$` takes a
-  bare element id: `$("powerBtn")`, not `$("#powerBtn")`. `esc()` escapes HTML; `api()` is the fetch helper.
-- Songwriter LLM: `qwen3.6-songwriter` in Ollama (Qwen 3.6 35B-A3B, CPU only). Fallback `qwen3.5-agent-fast` (Qwen 3.5 9B, Hermes's Lemming) on the GPU. `app.SHARED_WITH_ASSISTANT` models count as the radio's only while it used them in the last 7 min.
-- Data (not in git): `library/` (every song), `radio/` (stations, state, history), `gpu.json`.
+It's a fork of github.com/zebgop-ops/yue2-xpu-radio (jt's friend). Branch `local`, pushed to the remote `agentora` (github.com/analogman2/Agentora).
 
-## How to change it safely
-1. `git status`; work on branch `local`.
-2. Syntax-check Python with `~/venv-yue2/bin/python -c "import ast;ast.parse(open('studio/app.py').read())"` and the
-   page script with `node --check`.
-3. Restarting `yue2-studio` keeps listeners connected (the stream relay bridges the gap) but kills any song being
-   recorded: wait until nothing is running (`/api/radio/state` making with status "running", `/api/state` queue).
-   Restarting `agentora-stream` disconnects every listener: only when `/api/radio/listeners` is empty.
-4. After restarting, confirm `systemctl --user is-active yue2-studio agentora-stream` and run the end-to-end tests:
-   `~/venv-yue2/bin/python tests/e2e_radio.py` (add `--quick` if someone is listening) and `tests/e2e_ui.py`.
-   Check `logs/radio.log` for WARNING / ERROR lines.
-5. Commit on `local` with a clear message (`git push` goes to the Agentora fork).
+Read this whole file before changing anything. `README.md` has the user-facing docs, and `image-studio/AGENTS.md` has the Studio's own notes.
+
+## Rules (these protect jt's listening and data)
+
+1. **Git**
+   - Never push to `origin` (the friend's repo; its push URL is disabled on purpose). Never push `backup-before-email*` branches.
+   - **Never `git add -A` / `git add .`**: Hermes and other sessions edit this repo too. Stage only the files you changed, by name. A change you didn't make belongs to someone else: leave it, don't revert it, and mention it.
+   - Commit with a clear message; `git push` goes to `agentora/local`.
+2. **Secrets**
+   - Never print, commit or paste the contents of `image-studio/agent.token`, `settings.json`, `users.json`, `sessions.json`, any `.env`, or `~/.hermes/auth.json`.
+   - The agent token may be read by code and sent only to 127.0.0.1.
+   - Never put passwords anywhere.
+3. **No sudo, no system settings.** jt types sudo commands themselves; give them the exact command.
+4. **Restarts interrupt jt.** jt listens for hours on phone and car Bluetooth. Before restarting anything, check:
+   - **`yue2-studio`**: a restart keeps listeners connected (the stream relay bridges the gap) but kills a song being recorded. Wait until nothing is recording (`/api/radio/state` → `making[].status == "running"`) and the Music Studio queue (`/api/state`) is idle.
+   - **`agentora-stream`** and **`tailnet-relay`** disconnect everyone. Restart them only when `/api/radio/listeners` is empty, or when jt says "restart now".
+   - **`genstudio`**: no Studio job running or queued (`image-studio/jobs.json`).
+   - Page-only changes (HTML, `studio/web/*.js`, `image-studio/shared/*`) need no restart.
+   - Batch Python changes and restart once.
+5. **The GPU is shared through the broker.** New GPU work takes a lease (`POST 127.0.0.1:7890/lease`) instead of grabbing the card. Hermes reaches Ollama only through the broker's proxy (`:11435`); never point it back at `:11434`.
+6. **Hermes config:** `model.context_length` in `~/.hermes/config.yaml` must stay ≥ 64000, or every chat fails.
+7. **Privacy in logs:** the activity log never records passwords, prompts or lyrics.
+8. **Verify before saying it works.** Run the tests below after every change, and report failures as they are.
+
+## Services and ports
+
+| Service (user unit) | Port | Code | What |
+|---|---|---|---|
+| `yue2-studio` | 7860 | `studio/app.py`, `studio/radio*.py` | radio (`/radio`), Music Studio (`/`), classic deck (`/radio/classic`) |
+| `agentora-stream` | 7861 (feed 127.0.0.1:7862) | `studio/stream_relay.py` | the live MP3 stream: listeners, cushion, silence bridge |
+| `agentora-gpu` | 7890, Ollama proxy 11435 | `studio/gpu_broker.py` | GPU leases (`GET :7890/status`), virtual model `agentora-auto` |
+| `agentora-speech` | 7895 | `studio/speech_server.py` (`~/venv-speech`) | OpenAI audio API: Qwen3-TTS voice, whisper listening, both under leases |
+| `genstudio` | 7870 | `image-studio/server.py` | Image & Video Studio (`/`), Home (`/home`), accounts, shared look `/agentora/agentora.{css,js}` |
+| `hermes-gate` | 7880 | `image-studio/hermes_gate.py` | Studio-admin sign-in in front of the Hermes dashboard |
+| `tailnet-relay` | all of the above | `tools/tailnet-relay.py` (symlinked from `~/.local/bin`) | serves the apps on the Tailscale and LAN addresses (jt's phone), notes real client IPs |
+| `comfyui` | 8188 | `~/ComfyUI` | image/video backend |
+| Hermes | 8642 (API), dashboard behind the gate | `~/.hermes` | the assistant (Lemming 9B / Auto / AGI 27B) |
+
+`~/genstudio` is a symlink to `image-studio/`, because the units use that path. Unit files live in `systemd/`.
+
+## How the code is laid out
+
+- **Radio and Music Studio** (`studio/`)
+  - `app.py`: a `ThreadingHTTPServer` plus the YuE2 worker (`m-a-p/YuE2-3B`, from ~/YuE, venv `~/venv-yue2`).
+  - The radio is split by job:
+    - `radio.py`: routes and the façade.
+    - `radio_state.py`: all state and settings. Read and write them as `rs.NAME`; never copy them.
+    - `radio_stations.py`, `radio_songwriter.py` (lyrics, the 🎲 variety slider), `radio_spool.py` (recording and the critic), `radio_broadcast.py`, `radio_library.py`.
+  - `settings.py`: every setting, with its range.
+  - `assistant.py`: chat relay to Hermes.
+  - `art.py`: cover art.
+  - `useractivity.py`: who did what on 7860.
+- **Radio page:** `radio.html` plus `studio/web/radio-{core,player,library,panel,extras}.js`. These are plain scripts sharing one global scope, loaded in order. `$("id")` takes a bare id, `esc()` escapes HTML, and `api()` fetches.
+- **Image & Video Studio** (`image-studio/`)
+  - `server.py` (aiohttp), `auth.py` (accounts and sessions; each sign-in keeps its IP and device), `workflows.py`, `models.py`, `ratings.py`.
+  - `shared/agentora.{css,js}`: the look shared by every app. It provides the app switcher, the now-playing bar, the ☰ panel (`data-agentora-panel`), the 👤 account card (`data-agentora-account`) and the brain switch.
+- **Logging:** `logsetup.py` (the same file in `studio/` and `image-studio/`; keep them identical).
+  - Logs go to the journal and to `logs/<component>.log`. Use `logging` or `app.log()`, never `print`.
+  - User activity goes to `logs/activity-YYYY-MM.jsonl` via `logsetup.activity(...)`. Read it with `tools/activity.py` (who's here now) or `tools/activity.py --since 24h`.
+- **Models (Ollama):**
+
+  | Model | What runs it | Used for |
+  |---|---|---|
+  | `qwen3.6-songwriter` (35B-A3B) | CPU only | songwriter |
+  | `qwen3.6-agent` (27B) | GPU | lyricist and Hermes AGI |
+  | `qwen3.5-agent-fast` (9B) | GPU | fallback writer and Hermes Lemming |
+  | `agentora-auto` | broker picks the 27B or the 9B | Hermes Auto |
+- **Data (not in git):**
+  - `library/`: every song.
+  - `radio/`: stations, state, history.
+  - `image-studio/*.json`: users, sessions, jobs, settings.
+  - `logs/`.
+
+## Check your work
+
+```bash
+cd ~/yue2-xpu-radio
+python3 -c "import ast,sys;[ast.parse(open(f).read()) for f in sys.argv[1:]]" studio/*.py image-studio/*.py   # syntax
+for f in studio/web/*.js image-studio/shared/agentora.js; do node --check "$f"; done                          # page scripts
+systemctl --user is-active yue2-studio agentora-stream agentora-gpu agentora-speech genstudio hermes-gate tailnet-relay
+python3 tests/e2e_radio.py --quick                                      # API, library, stream, skip/back, broker, speech (--quick if someone listens)
+uv run -q --no-project --with playwright python tests/e2e_ui.py          # every page in a headless browser, fails on JS errors
+grep -E "WARNING|ERROR" logs/radio.log | tail                             # anything new?
+```
+
+Done means:
+- the tests pass and the services are active;
+- the README (and `docs/whats-new.md` for anything a user would notice) is updated;
+- the work is committed on `local` and pushed to `agentora`.
