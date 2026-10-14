@@ -64,7 +64,8 @@ def sh(*cmd, timeout=180):
 
 # ---- GPU priority, shared with the Image & Video Studio: which AI tool gets the graphics card first
 PRIORITY_FILE = Path.home() / ".config" / "ai-gpu-priority.json"
-PRIORITIES = {"shared": "Shared — take turns", "studio": "Image & Video Studio", "radio": "Radio", "assistant": "Assistant (Hermes)"}
+PRIORITIES = {"shared": "Shared — take turns", "studio": "Image & Video Studio", "radio": "Radio", "assistant": "Assistant (Hermes)",
+              "clipsmith": "Clipsmith (Designer Studio)"}
 _prio = {"t": 0, "v": "shared"}
 
 

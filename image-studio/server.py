@@ -600,7 +600,8 @@ async def free_gpu(request):
 
 # GPU priority, shared with the radio (it reads the same file): which AI tool gets the graphics card first
 PRIORITY_FILE = Path.home() / ".config" / "ai-gpu-priority.json"
-PRIORITIES = {"shared": "Shared — take turns", "studio": "Image & Video Studio", "radio": "Radio", "assistant": "Assistant (Hermes)"}
+PRIORITIES = {"shared": "Shared — take turns", "studio": "Image & Video Studio", "radio": "Radio", "assistant": "Assistant (Hermes)",
+              "clipsmith": "Clipsmith (Designer Studio)"}
 
 
 def gpu_priority():

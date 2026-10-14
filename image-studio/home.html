@@ -136,7 +136,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 const base = (port) => `${location.protocol}//${location.hostname}:${port}`;
 const size = (n) => n >= 2 ** 40 ? (n / 2 ** 40).toFixed(2) + " TB" : (n / 2 ** 30).toFixed(n >= 100 * 2 ** 30 ? 0 : 1) + " GB";
-const PRIO = {shared: "Shared", studio: "Image & Video Studio", radio: "Radio", assistant: "Assistant (Hermes)"};
+const PRIO = {shared: "Shared", studio: "Image & Video Studio", radio: "Radio", assistant: "Assistant (Hermes)", clipsmith: "Clipsmith (Designer Studio)"};
 async function load() {
   let d;
   try { d = await (await fetch("/api/home", {cache: "no-store"})).json(); } catch (e) { $("subline").textContent = "Couldn't reach the Studio."; return; }

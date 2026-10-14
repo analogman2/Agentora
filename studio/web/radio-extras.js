@@ -196,12 +196,13 @@ $("asstForm").onsubmit = async (e) => {
 };
 
 // ---------- GPU priority (shared with the Image & Video Studio)
-const PRIO = [["shared", "Shared"], ["studio", "Image studio"], ["radio", "Radio"], ["assistant", "Assistant"]];
+const PRIO = [["shared", "Shared"], ["studio", "Image studio"], ["radio", "Radio"], ["assistant", "Assistant"], ["clipsmith", "Clipsmith"]];
 const PRIO_HELP = {
   shared: "Everyone takes turns. The radio makes room before recording a song.",
   studio: "Pictures and videos come first: the radio pauses new songs while the studio works (what's already made keeps playing).",
   radio: "The radio comes first: the studio won't switch it off, and ComfyUI is cleared when the radio records.",
-  assistant: "Hermes comes first: its model stays loaded, and the radio waits while it's in use."};
+  assistant: "Hermes comes first: its model stays loaded, and the radio waits while it's in use.",
+  clipsmith: "Clipsmith (Designer Studio) comes first: the radio pauses new songs and chat models unload while it transcribes, writes or draws."};
 let prioNow = null;
 function drawPrio(d) {
   prioNow = d.priority;

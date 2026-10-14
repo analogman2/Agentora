@@ -2070,12 +2070,13 @@ _fetch("/api/session").then(r => r.json()).then(d => d.user ? signedIn(d.user) :
 })();
 
 // ---------- GPU priority (shared with the radio): which AI tool gets the graphics card first. Admins choose.
-const PRIO = [["shared", "Shared"], ["studio", "Image studio"], ["radio", "Radio"], ["assistant", "Assistant"]];
+const PRIO = [["shared", "Shared"], ["studio", "Image studio"], ["radio", "Radio"], ["assistant", "Assistant"], ["clipsmith", "Clipsmith"]];
 const PRIO_HELP = {
   shared: "Everyone takes turns. The radio makes room before recording a song.",
   studio: "Pictures and videos come first: the radio pauses new songs while the studio works and chat models are unloaded before each job.",
   radio: "The radio comes first: creating here won't switch it off, so jobs can be slower while it records.",
-  assistant: "Hermes comes first: its model stays loaded, and the radio waits while it's in use. Jobs here can be slower."};
+  assistant: "Hermes comes first: its model stays loaded, and the radio waits while it's in use. Jobs here can be slower.",
+  clipsmith: "Clipsmith (Designer Studio) comes first: the radio pauses new songs and chat models unload while it works. Jobs here can be slower."};
 function drawPrio(v) {
   const admin = ME && ME.role === "admin";
   $("#prio").innerHTML = PRIO.map(([k, l]) => `<button type="button" data-prio="${k}" aria-pressed="${k === v}" ${admin ? "" : "disabled"} title="${escapeHtml(PRIO_HELP[k])}">${l}</button>`).join("");

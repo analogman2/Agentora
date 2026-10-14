@@ -7,7 +7,8 @@ Every GPU user takes a *lease*: who it is, roughly how much memory it needs, and
 the lyricist). To grant a lease the broker makes room with real measurements (nvidia-smi): it tells background
 clients to step aside (they ask GET /yield before starting new work), asks an idle ComfyUI to unload, and unloads
 idle Ollama models. The order follows the "Who goes first" setting (~/.config/ai-gpu-priority.json): shared = a
-person waiting beats background work; radio / studio / assistant = that one first.
+person waiting beats background work; radio / studio / assistant / clipsmith (Designer Studio's leases,
+"designer-studio*") = that one first, and its jobs may unload lower-priority chat models to make room.
 
 Tools that can't ask for a lease themselves get a proxy: the Ollama proxy (127.0.0.1:11435) takes a lease for every
 chat request, for the client named in the X-Agentora-Client header (Hermes sends none: "assistant"; Designer Studio
@@ -91,7 +92,7 @@ def priority():
 def rank(client, kind):
     """Lower goes first."""
     p = priority()
-    if client == p or (p == "studio" and client == "studio") or (p == "radio" and client.startswith("radio")):
+    if client == p or (p == "radio" and client.startswith("radio")) or (p == "clipsmith" and client.startswith("designer-studio")):
         return 0
     return 1 if kind == "interactive" else 2
 
@@ -165,7 +166,9 @@ def make_room(for_client):
             freed.append("ComfyUI")
         except Exception:
             pass
-    leased = {l.get("model") for l in leases.values() if l["granted"] and l.get("model")}   # someone's chat model: keep
+    me = rank(for_client, "interactive" if for_client in INTERACTIVE or for_client.startswith("designer-studio") else "background")
+    # someone's chat model stays, unless the one asking has priority over them (Image Studio / Clipsmith priority)
+    leased = {l.get("model") for l in leases.values() if l["granted"] and l.get("model") and rank(l["client"], l["kind"]) <= me}
     for name, m in ollama_loaded().items():
         if m.get("size_vram") and name not in leased and name != leases_model_wanted():
             try:
@@ -451,11 +454,90 @@ def is_unload(j):
 
 
 def learn_size(model):
-    m = ollama_loaded().get(model)
+    loaded = ollama_loaded()
+    m = loaded.get(model)
     if m and m.get("size") and m["size_vram"] >= m["size"] * 0.97:   # only a full load tells its real size
-        mb = m["size"] >> 20
+        # what the card really holds for it (weights + KV cache + compute buffers) when it's the only model loaded;
+        # Ollama's own size leaves the buffers out (17.6 GB reported vs 20 GB held for the 27B at 64k)
+        mb = max(ollama_gpu_mb(), m["size"] >> 20) if len(loaded) == 1 else m["size"] >> 20
         if abs(sizes.get(model, 0) - mb) > 200:
             sizes[model] = mb; save_sizes()
+
+
+# ---------------------------------------------------------------- Assistant priority: Hermes's model stays whole
+PIN_EVERY_S = 10
+PIN_KEEP_ALIVE = "10m"                            # refreshed every few minutes while Assistant has priority
+pin = {"note": None, "touched": 0.0, "lease": None}
+
+
+def keep_assistant_model():
+    """While "Who goes first" is Assistant, Hermes's model (the one it used last) stays loaded and entirely on the card:
+    a standing assistant lease (so the radio steps aside and nothing else takes its room), and the model is loaded
+    only when all of it fits - after making room (idle ComfyUI, lower-priority models) and waiting for running jobs to
+    finish, never by squeezing it partly onto the CPU."""
+    if priority() != "assistant":
+        if pin["lease"]:
+            drop(pin["lease"]); pin.update(lease=None, note=None)
+        return
+    h = holds.setdefault("assistant", {"lease": None, "model": None})
+    model = h.get("model") or AUTO["agentora-auto"][0]
+    cur = h.get("lease")
+    if cur and cur["id"] in leases and h.get("model") == model:
+        renew(cur["id"], 3600)
+    else:
+        lid = uuid.uuid4().hex[:10]                  # a standing lease: no waiting (the broker itself holds it)
+        lease = {"id": lid, "client": "assistant", "kind": "interactive", "mem_mb": model_mb(model), "device": pick_device(0)[0],
+                 "granted": True, "since": time.time(), "expires": time.time() + 3600, "model": model, "roomy": True}
+        with lock:
+            leases[lid] = lease
+        h.update(lease=lease, model=model); pin["lease"] = lid
+        log.info("assistant priority: keeping %s loaded for Hermes", model)
+    m = ollama_loaded().get(model)
+    if m and m["size_vram"] >= m["size"] * 0.97:
+        if time.time() - pin["touched"] > 240:       # keep it from timing out while nobody chats
+            try:
+                ollama_json("/api/generate", {"model": model, "keep_alive": PIN_KEEP_ALIVE}, timeout=30)
+                pin["touched"] = time.time()
+            except Exception:
+                pass
+        if pin["note"]:
+            log.info("assistant priority: %s is loaded entirely on the GPU", model); pin["note"] = None
+        return
+    if m:                                           # squeezed partly onto the CPU: reload whole once there's room
+        if not reload_if_split(model):
+            with lock:
+                busy = [l["client"] for l in leases.values() if l["granted"] and l["client"] != "assistant" and l["mem_mb"] > 1000]
+            note = f"{model} is only {100 * m['size_vram'] // m['size']}% on the GPU; reloading it whole once {', '.join(busy) or 'the card'} makes room"
+            if note != pin["note"]:
+                log.info("assistant priority: %s", note); pin["note"] = note
+            make_room("assistant")
+        return
+    need = model_mb(model)
+    _, free = pick_device(need)
+    if free - MARGIN_MB >= need:
+        try:
+            log.info("assistant priority: loading %s (%d MiB) entirely on the GPU", model, need)
+            ollama_json("/api/generate", {"model": model, "keep_alive": PIN_KEEP_ALIVE}, timeout=300)
+            pin["touched"] = time.time()
+            threading.Thread(target=learn_size, args=(model,), daemon=True).start()
+        except Exception as e:
+            log.warning("assistant priority: couldn't load %s: %s", model, e)
+        return
+    make_room("assistant")
+    with lock:
+        busy = [l["client"] for l in leases.values() if l["granted"] and l["client"] != "assistant" and l["mem_mb"] > 1000]
+    note = f"waiting for room to load {model} whole ({need} MiB, {free} MiB free; in use: {', '.join(busy) or 'nothing leased'})"
+    if note != pin["note"]:
+        log.info("assistant priority: %s", note); pin["note"] = note
+
+
+def pinner():
+    while True:
+        try:
+            keep_assistant_model()
+        except Exception:
+            log.warning("assistant priority keeper failed", exc_info=True)
+        time.sleep(PIN_EVERY_S)
 
 
 class OllamaProxy(BaseHTTPRequestHandler):
@@ -562,6 +644,7 @@ class Server(logsetup.QuietBrokenPipes, ThreadingHTTPServer):
 if __name__ == "__main__":
     logsetup.setup("gpu-broker")
     threading.Thread(target=reaper, daemon=True, name="reaper").start()
+    threading.Thread(target=pinner, daemon=True, name="assistant-priority").start()
     threading.Thread(target=Server(("127.0.0.1", A.ollama_port), OllamaProxy).serve_forever, daemon=True, name="ollama-proxy").start()
     log.info("leases on 127.0.0.1:%d, Ollama proxy on 127.0.0.1:%d -> %s; devices: %s", A.port, A.ollama_port, A.ollama,
              ", ".join(f"{d['index']}: {d['name']} {d['total_mb'] // 1024} GB" for d in devices()) or "none found")

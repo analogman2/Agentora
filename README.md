@@ -171,7 +171,12 @@ One 24 GB card serves the radio's music model (YuE2, about 10–13 GB while it r
 
 - **Every GPU user takes a lease**: who it is, roughly how much memory it needs, and whether a person is waiting (the assistant, the Image & Video Studio) or it's background work (the radio's recordings, cover art, the lyricist). The radio and the Studio ask the broker directly. Hermes reaches Ollama through the broker's **Ollama proxy** (`127.0.0.1:11435`), which takes leases on its behalf, so the chat panels, the Hermes dashboard, the terminal and cron jobs are all covered.
 - **To grant a lease, the broker makes room** using real measurements (`nvidia-smi`): background work stops starting new pieces and gives the card back (the radio finishes the take in progress, then unloads YuE2; the music keeps playing from its spool of ready songs), an idle ComfyUI unloads, and idle Ollama models unload.
-- **The order follows "Who goes first"** in the ☰ panel. With *Shared*, a person waiting beats background work; *Radio*, *Image & Video Studio* or *Assistant* puts that one first.
+- **The order follows "Who goes first"** in the ☰ panel. With *Shared*, a person waiting beats background work. *Radio*, *Image & Video Studio*, *Assistant* or *Clipsmith* (Designer Studio's jobs) puts that one first, and its jobs may unload lower-priority chat models to make room.
+- **With *Assistant* first, Hermes's model stays loaded, entirely on the card.**
+  - The broker holds a standing lease for the model Hermes used last and refreshes it so it never times out.
+  - It loads the model only when all of it fits. Before that, it clears room (idle ComfyUI, lower-priority models) and waits for running jobs to finish. It never interrupts them.
+  - The radio doesn't record new songs meanwhile, since there isn't room for both; the music plays from ready songs and reruns.
+  - Pick *Clipsmith* or *Image & Video Studio* when doing big picture or video work.
 - **A chat keeps the card for 3 minutes after its last message** (`BROKER_ASSISTANT_IDLE`), then the radio carries on. A Studio job keeps it while ComfyUI is busy.
 - **Models squeezed partly onto the CPU are reloaded fully** as soon as there's room, only when more room has appeared since the last try.
 - **✨ Auto** (the chat's middle setting) uses the 27B model when it can have the card within about 3 seconds, and otherwise answers right away with the 9B model, which always fits.
