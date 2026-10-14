@@ -23,7 +23,7 @@ Agentora is a fork of [zebgop-ops/yue2-xpu-radio](https://github.com/zebgop-ops/
 | <img src="docs/screens/image-studio.png" width="300"> | <img src="docs/screens/video-studio.png" width="300"> | <img src="docs/screens/home.png" width="300"> |
 | Pictures with Z-Image Turbo, ✨ Improve for prompts, LoRAs, ComfyUI workflows | Videos with Wan 2.2, from text or starting from one of your pictures | What's on, GPU and disk, and a chat with the local Hermes assistant |
 
-The **radio and Music Studio** are in this repository (`studio/`). The **Image & Video Studio and Home page** are a companion app (a small aiohttp front end over ComfyUI on port 7870) in a separate repository, not published yet. They share one look and an app switcher (`/b70/b70.css`, `/b70/b70.js`), so moving between apps keeps the radio playing in its own tab.
+The **radio and Music Studio** are in this repository (`studio/`). The **Image & Video Studio and Home page** are in `image-studio/` (a small aiohttp front end over ComfyUI on port 7870, plus the sign-in gate for the Hermes dashboard on 7880). They share one look and an app switcher (`/b70/b70.css`, `/b70/b70.js`), so moving between apps keeps the radio playing in its own tab.
 
 ## What it does
 
@@ -81,6 +81,9 @@ The code, by job:
 | `studio/index.html` | the Music Studio |
 | `studio/logsetup.py` | logging for every component |
 | `tests/e2e_radio.py`, `tests/e2e_ui.py` | end-to-end tests (below) |
+| `image-studio/` | the Image & Video Studio and Home page (`server.py`, port 7870), ComfyUI workflows and models (`workflows.py`, `models.py`), users and sign-in (`auth.py`), the Hermes dashboard gate (`hermes_gate.py`, port 7880), and the shared look and app switcher (`shared/b70.css`, `shared/b70.js`). Its own notes: `image-studio/AGENTS.md` |
+| `tools/tailnet-relay.py` | serves the apps (7860, 7861, 7870, 7880) on the Tailscale and home-network addresses, with HTTPS from the Tailscale certificate |
+| `systemd/` | user units for every service: `yue2-studio`, `agentora-stream`, `agentora-gpu`, `agentora-speech`, `genstudio`, `hermes-gate`, `tailnet-relay` |
 
 ## Hardware and software
 
@@ -116,6 +119,14 @@ systemctl --user daemon-reload && systemctl --user enable --now agentora-stream 
 
 # 4. run the radio (or install systemd/yue2-studio.service)
 ~/yue2-xpu-radio/start-local.sh
+
+# 5. the Image & Video Studio and Home page (needs ComfyUI in ~/ComfyUI on port 8188); the units expect it at ~/genstudio
+ln -s ~/yue2-xpu-radio/image-studio ~/genstudio
+cp ~/yue2-xpu-radio/systemd/{genstudio,hermes-gate}.service ~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user enable --now genstudio hermes-gate
+
+# 6. reach it all from your phone over Tailscale (and the home network with --lan)
+ln -s ~/yue2-xpu-radio/tools/tailnet-relay.py ~/.local/bin/tailnet-relay.py
+cp ~/yue2-xpu-radio/systemd/tailnet-relay.service ~/.config/systemd/user/ && systemctl --user enable --now tailnet-relay
 ```
 
 Players connect to the relay on port 7861, so open that port wherever you expose 7860 (here: the Tailscale/LAN relay).
@@ -197,7 +208,7 @@ Every component logs the same way: a level and the component's name on every lin
 | Stream relay | `journalctl --user -u agentora-stream` | `logs/stream.log` |
 | GPU broker (leases, the Ollama proxy) | `journalctl --user -u agentora-gpu` | `logs/gpu-broker.log` |
 | Speech service | `journalctl --user -u agentora-speech` | `logs/speech.log` |
-| Image & Video Studio, Hermes gate (companion app) | `-u genstudio`, `-u hermes-gate` | `~/genstudio/logs/studio.log`, `hermes-gate.log` |
+| Image & Video Studio, Hermes gate (companion app) | `-u genstudio`, `-u hermes-gate` | `image-studio/logs/studio.log`, `hermes-gate.log` |
 | Tailscale/LAN relay | `-u tailnet-relay` | `~/.local/state/tailnet-relay/relay.log` |
 
 Plain lines are INFO, lines about failures are WARNING, and tracebacks (including uncaught errors in any thread or request) are ERROR. A client closing a connection isn't logged as an error. Set `LOG_LEVEL=DEBUG` in a service to log every request.

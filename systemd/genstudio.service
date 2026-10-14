@@ -1,0 +1,14 @@
+[Unit]
+Description=Image & Video Studio web front end (localhost:7870) over ComfyUI
+After=comfyui.service
+Wants=comfyui.service
+
+[Service]
+WorkingDirectory=%h/genstudio
+ExecStart=%h/ComfyUI/.venv/bin/python %h/genstudio/server.py
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

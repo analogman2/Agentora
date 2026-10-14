@@ -100,7 +100,7 @@ Agentora started as [yue2-xpu-radio](https://github.com/zebgop-ops/yue2-xpu-radi
 
 ## The companion apps
 
-These live in a separate repository (the Image & Video Studio, port 7870) and share the same look and app switcher.
+These live in `image-studio/` (the Image & Video Studio, port 7870) and share the same look and app switcher.
 
 - **Home**: what's on the radio, what the studios are making, GPU and disk use, the GPU priority, and a chat with the local assistant.
 - **Image Studio**: pictures with Z-Image Turbo, ✨ **Improve** to turn a short idea into a detailed prompt, LoRAs, aspect ratios, up to 4 at a time, plus downloaded ComfyUI workflows and models (installed with one click, PG-13 only for non-admin users).
