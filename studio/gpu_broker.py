@@ -9,9 +9,12 @@ clients to step aside (they ask GET /yield before starting new work), asks an id
 idle Ollama models. The order follows the "Who goes first" setting (~/.config/ai-gpu-priority.json): shared = a
 person waiting beats background work; radio / studio / assistant = that one first.
 
-Tools that can't ask for a lease themselves get a proxy: the Ollama proxy (127.0.0.1:11435) takes an "assistant"
-lease for every chat request from Hermes, reloads a model that was squeezed half onto the CPU once there is room,
-and maps the virtual model "agentora-auto" to the strongest model that can have the card right now.
+Tools that can't ask for a lease themselves get a proxy: the Ollama proxy (127.0.0.1:11435) takes a lease for every
+chat request, for the client named in the X-Agentora-Client header (Hermes sends none: "assistant"; Designer Studio
+sends "designer-studio"), reloads a model that was squeezed half onto the CPU once there is room, and maps the virtual
+model "agentora-auto" to the strongest model that can have the card right now. Clients share one loaded copy of a
+model: a smaller num_ctx than the model's own is dropped (Ollama would reload it), and an unload request
+(keep_alive 0) for a model another client holds is answered without unloading it.
 
 API (127.0.0.1:7890, JSON):
   POST /lease {client, kind: interactive|background, mem_mb, wait_s, ttl_s, device?} -> {granted, id, device, ...}
@@ -162,9 +165,9 @@ def make_room(for_client):
             freed.append("ComfyUI")
         except Exception:
             pass
-    leased = {l.get("model") for l in leases.values() if l["granted"] and l["client"] == "assistant"}
+    leased = {l.get("model") for l in leases.values() if l["granted"] and l.get("model")}   # someone's chat model: keep
     for name, m in ollama_loaded().items():
-        if m.get("size_vram") and name not in leased and not (for_client == "assistant" and name == leases_model_wanted()):
+        if m.get("size_vram") and name not in leased and name != leases_model_wanted():
             try:
                 ollama_json("/api/generate", {"model": name, "keep_alive": 0}, timeout=30)
                 freed.append(name)
@@ -176,7 +179,7 @@ def make_room(for_client):
 
 def leases_model_wanted():
     with lock:
-        return next((l.get("model") for l in leases.values() if l["client"] == "assistant" and not l["granted"]), None)
+        return next((l.get("model") for l in leases.values() if l.get("model") and not l["granted"]), None)
 
 
 def pick_device(mem_mb, want=None):
@@ -255,7 +258,8 @@ def should_yield(client):
             continue
         if l["granted"] and l["mem_mb"] + mine + MARGIN_MB <= total:
             continue                                     # both fit: carry on
-        who = {"assistant": "the assistant", "studio": "the Image & Video Studio", "speech": "the voice"}.get(l["client"], l["client"])
+        who = {"assistant": "the assistant", "studio": "the Image & Video Studio", "speech": "the voice"}.get(l["client"],
+              "Designer Studio" if l["client"].startswith("designer-studio") else l["client"])
         return True, f"Waiting: {who} {'is using' if l['granted'] else 'is waiting for'} the GPU"
     return False, None
 
@@ -279,6 +283,7 @@ def status():
     with lock:
         ls = [dict(l, age_s=round(time.time() - l["since"]), expires_in_s=round(l["expires"] - time.time())) for l in leases.values()]
     return {"priority": priority(), "devices": devices(), "leases": ls, "holders": holders, "sizes": sizes,
+            "models": {c: h["model"] for c, h in holds.items() if h.get("model")},
             "yield": {c: should_yield(c)[1] for c in ("radio", "radio-art", "radio-llm")}}
 
 
@@ -334,11 +339,27 @@ class Api(BaseHTTPRequestHandler):
 
 # ---------------------------------------------------------------- the Ollama proxy (for Hermes)
 GPU_PATHS = ("/v1/chat/completions", "/v1/completions", "/v1/responses", "/api/chat", "/api/generate")
-assistant = {"lease": None, "model": None}        # the assistant's current lease (one model on the card at a time)
-_mine = [l for l in leases.values() if l["client"] == "assistant"]   # restored after a restart of the broker
-if _mine:
-    assistant.update(lease=_mine[-1], model=_mine[-1].get("model"))
+holds = {}                                        # client -> {"lease", "model"}: each chat client's model on the card
+for _l in sorted(leases.values(), key=lambda l: l["since"]):          # restored after a restart of the broker
+    if _l.get("model"):
+        holds[_l["client"]] = {"lease": _l, "model": _l["model"]}
 alock = threading.Lock()
+_ctx = {}                                         # model -> its own num_ctx (Modelfile), cached
+
+
+def model_ctx(model):
+    if model not in _ctx:
+        try:
+            m = re.search(r"^num_ctx\s+(\d+)", ollama_json("/api/show", {"model": model}).get("parameters", ""), re.M)
+            _ctx[model] = int(m.group(1)) if m else 0
+        except Exception:
+            return 0
+    return _ctx[model]
+
+
+def held_by_other(model, client):
+    with lock:
+        return next((l["client"] for l in leases.values() if l["granted"] and l.get("model") == model and l["client"] != client), None)
 
 
 def cpu_only(model):
@@ -381,42 +402,52 @@ def reload_if_split(model):
     return True
 
 
-def assistant_lease(model, wait_s):
-    """Hold the card for the assistant's model; reload it if it had been squeezed partly onto the CPU."""
+def model_lease(client, model, wait_s):
+    """Hold the card for a client's chat model; reload it if it had been squeezed partly onto the CPU. A model another
+    client already has on the card is shared: no extra room needed."""
     with alock:
-        cur = assistant["lease"]
-        if cur and cur["id"] in leases and assistant["model"] == model and cur.get("roomy"):
+        h = holds.setdefault(client, {"lease": None, "model": None})
+        cur = h["lease"]
+        if cur and cur["id"] in leases and h["model"] == model and cur.get("roomy"):
             renew(cur["id"], ASSISTANT_IDLE_S)
             reload_if_split(model)
             return cur
         if cur:
             drop(cur["id"])
-        need = model_mb(model)
-        extra = ollama_gpu_mb() if model in ollama_loaded() else 0     # what it already holds on the card counts as room
-        lease = acquire("assistant", "interactive", need, wait_s, ASSISTANT_IDLE_S, model=model, extra_mb=extra)
-        if lease["roomy"]:
+        loaded = ollama_loaded().get(model)
+        shared = loaded and held_by_other(model, client) and loaded["size_vram"] >= loaded["size"] * 0.97
+        need = 0 if shared else model_mb(model)
+        extra = ollama_gpu_mb() if loaded and not shared else 0      # what it already holds on the card counts as room
+        lease = acquire(client, "interactive", need, wait_s, ASSISTANT_IDLE_S, model=model, extra_mb=extra)
+        if lease["roomy"] and not shared:
             reload_if_split(model)
-        assistant.update(lease=leases.get(lease["id"], lease), model=model)
+        h.update(lease=leases.get(lease["id"], lease), model=model)
         return lease
 
 
-def choose_model(model):
+def choose_model(model, client="assistant"):
     """'agentora-auto': the strong model if the card can be had for it within a few seconds, else the one that fits."""
     if model not in AUTO:
         if cpu_only(model):
             return model, None                       # runs on the CPU: no lease needed
-        return model, assistant_lease(model, STRONG_WAIT_S)
+        return model, model_lease(client, model, STRONG_WAIT_S)
     strong, light = AUTO[model]
-    cur = assistant["lease"]
-    if cur and cur["id"] in leases and assistant["model"] in (strong, light) and cur.get("roomy"):
+    h = holds.get(client) or {}
+    cur = h.get("lease")
+    if cur and cur["id"] in leases and h.get("model") in (strong, light) and cur.get("roomy"):
         renew(cur["id"], ASSISTANT_IDLE_S)               # stay on the model the conversation is already using
-        reload_if_split(assistant["model"])
-        return assistant["model"], cur
-    lease = assistant_lease(strong, AUTO_WAIT_S)
+        reload_if_split(h["model"])
+        return h["model"], cur
+    lease = model_lease(client, strong, AUTO_WAIT_S)
     if lease["roomy"]:
         return strong, lease
-    log.info("auto: no room for %s right now, answering with %s", strong, light)
-    return light, assistant_lease(light, 10)
+    log.info("auto: no room for %s right now, answering %s with %s", strong, client, light)
+    return light, model_lease(client, light, 10)
+
+
+def is_unload(j):
+    """{"model": m, "keep_alive": 0} with nothing to answer: a request to take the model off the card."""
+    return str(j.get("keep_alive", "")).strip() in ("0", "0s", "0m") and not j.get("prompt") and not j.get("messages")
 
 
 def learn_size(model):
@@ -437,20 +468,35 @@ class OllamaProxy(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(n) if n else None
         model = None
+        client = re.sub(r"[^\w.-]", "", self.headers.get("X-Agentora-Client") or "")[:40] or "assistant"
         if method == "POST" and self.path.split("?")[0] in GPU_PATHS and body:
             try:
                 j = json.loads(body)
                 model = j.get("model", "").removesuffix(":latest")
-                if model:
-                    real, lease = choose_model(model)
-                    if real != model:
+                if model and is_unload(j):
+                    h = holds.get(client)
+                    if h and h.get("model") == model and h.get("lease"):
+                        drop(h["lease"]["id"]); h.update(lease=None, model=None)
+                    other = held_by_other(model, client)
+                    if other:                            # someone else is using it: done for this client, model stays
+                        log.info("%s asked to unload %s, which %s is using: kept loaded", client, model, other)
+                        return self.answer({"model": model, "done": True, "done_reason": "unload", "response": ""})
+                    model = None
+                elif model:
+                    real, lease = choose_model(model, client)
+                    changed = real != model
+                    opts = j.get("options") or {}
+                    own = model_ctx(real)
+                    if own and opts.get("num_ctx") and int(opts["num_ctx"]) <= own:
+                        opts.pop("num_ctx"); changed = True  # its own (larger) context: one loaded copy for everyone
+                    if changed:
                         j["model"] = real; body = json.dumps(j).encode()
                     model = real
-            except ValueError:
+            except (ValueError, TypeError):
                 pass
         u = A.ollama.split("://", 1)[1]
         conn = http.client.HTTPConnection(u, timeout=900)
-        hdrs = {k: v for k, v in self.headers.items() if k.lower() not in ("host", "content-length", "connection")}
+        hdrs = {k: v for k, v in self.headers.items() if k.lower() not in ("host", "content-length", "connection", "x-agentora-client")}
         if body is not None:
             hdrs["Content-Length"] = str(len(body))
         try:
@@ -478,10 +524,16 @@ class OllamaProxy(BaseHTTPRequestHandler):
         finally:
             conn.close()
             if model:
-                cur = assistant["lease"]
+                cur = (holds.get(client) or {}).get("lease")
                 if cur and cur["id"] in leases:
                     renew(cur["id"], ASSISTANT_IDLE_S)         # the conversation keeps the card for a while after each reply
                 threading.Thread(target=learn_size, args=(model,), daemon=True).start()
+
+    def answer(self, obj):
+        b = json.dumps(obj).encode()
+        self.send_response(200); self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(b))); self.send_header("Connection", "close"); self.end_headers()
+        self.wfile.write(b)
 
     def do_GET(self):
         if self.path.split("?")[0] in ("/v1/models", "/api/tags"):        # list the virtual "auto" model too

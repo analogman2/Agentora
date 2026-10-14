@@ -177,7 +177,12 @@ One 24 GB card serves the radio's music model (YuE2, about 10–13 GB while it r
 - **✨ Auto** (the chat's middle setting) uses the 27B model when it can have the card within about 3 seconds, and otherwise answers right away with the 9B model, which always fits.
 - **More GPUs, more tools:** devices come from `nvidia-smi` and leases are per device, so a second card is picked up automatically. A new tool takes a lease with `POST :7890/lease {client, kind, mem_mb, wait_s}`. `GET :7890/status` shows the cards, leases and who is being asked to wait.
 
-Using ComfyUI's own page (port 8188) directly bypasses the broker; everything the Studio sends goes through it.
+- **Several clients share one model through the proxy.** A tool names itself with an `X-Agentora-Client` header (Hermes sends none and counts as `assistant`; Designer Studio sends `designer-studio`), so each gets its own lease.
+  - A model another client already has on the card is shared, not loaded twice.
+  - A smaller `num_ctx` than the model's own is dropped, so Ollama doesn't reload it.
+  - An unload request (`keep_alive: 0`) for a model someone else is using is answered without unloading it.
+
+Using ComfyUI's own page (port 8188) directly bypasses the broker; everything the Studio and Designer Studio send goes through it.
 
 ## Speech
 
