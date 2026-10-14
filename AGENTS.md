@@ -43,7 +43,7 @@ Read this whole file before changing anything. `README.md` has the user-facing d
 | `hermes-gate` | 7880 | `image-studio/hermes_gate.py` | Studio-admin sign-in in front of the Hermes dashboard |
 | `tailnet-relay` | all of the above | `tools/tailnet-relay.py` (symlinked from `~/.local/bin`) | serves the apps on the Tailscale and LAN addresses (jt's phone), notes real client IPs |
 | `comfyui` | 8188 | `~/ComfyUI` | image/video backend |
-| Hermes | 8642 (API), dashboard behind the gate | `~/.hermes` | the assistant (Lemming 9B / Auto / AGI 27B) |
+| Hermes | 8642 (API), dashboard behind the gate | `~/.hermes` | the assistant (Lemming 9B / Auto / AGI = Qwen 3.6 35B-A3B `qwen3.6-agent-moe`) |
 
 `~/genstudio` is a symlink to `image-studio/`, because the units use that path. Unit files live in `systemd/`.
 

@@ -45,10 +45,13 @@ STATE_FILE = Path.home() / ".config" / "agentora-gpu-broker.json"     # learned 
 INTERACTIVE = {"assistant", "studio"}
 MARGIN_MB = 600                                   # keep this much free beyond the estimate (CUDA context, fragmentation)
 ASSISTANT_IDLE_S = int(os.environ.get("BROKER_ASSISTANT_IDLE", "180"))   # a chat keeps the card this long after its last call
-AUTO = {"agentora-auto": ("qwen3.6-agent", "qwen3.5-agent-fast")}       # strongest first, then the one that always fits
+AUTO = {"agentora-auto": ("qwen3.6-agent-moe", "qwen3.5-agent-fast")}   # strongest first, then the one that always fits
+# Mixture-of-experts models run well partly on the CPU (only ~3B of the 35B work per word): they need this much of the
+# card to be fast, take whatever more Ollama gives them, and are never reloaded just to get "whole".
+SPLIT_OK = {"qwen3.6-agent-moe": 12000}
 AUTO_WAIT_S = 3.0                                 # how long "auto" waits for room for the strong model
 STRONG_WAIT_S = 45.0                              # a model asked for by name waits this long for room, then loads anyway
-DEFAULT_MB = {"qwen3.6-agent": 18000, "qwen3.5-agent-fast": 9000}
+DEFAULT_MB = {"qwen3.6-agent": 18000, "qwen3.5-agent-fast": 9000, **SPLIT_OK}
 
 lock = threading.RLock()
 leases = {}                                       # id -> {client, kind, mem_mb, device, granted, since, expires, note}
@@ -122,7 +125,16 @@ def save_sizes():
 
 
 def model_mb(model):
+    if model in SPLIT_OK:
+        return SPLIT_OK[model]
     return sizes.get(model) or DEFAULT_MB.get(model) or 10000
+
+
+def on_gpu_enough(model, m):
+    """Loaded well enough: all of it, or for a mixture-of-experts model, at least its share of the card."""
+    if model in SPLIT_OK:
+        return (m["size_vram"] >> 20) >= SPLIT_OK[model] * 0.9
+    return m["size_vram"] >= m["size"] * 0.97
 
 
 def ollama_gpu_mb():
@@ -386,7 +398,7 @@ def reload_if_split(model):
     unload it so the next request loads it fully (a reload from the page cache takes seconds; a split model is slow
     for the whole conversation)."""
     m = ollama_loaded().get(model)
-    if not m or m["size_vram"] >= m["size"] * 0.97:
+    if not m or on_gpu_enough(model, m):
         return False
     full = model_mb(model)                           # its size when fully on the GPU (a split model reports more)
     _, free = pick_device(full)
@@ -423,7 +435,7 @@ def model_lease(client, model, wait_s):
         if cur:
             drop(cur["id"])
         loaded = ollama_loaded().get(model)
-        shared = loaded and held_by_other(model, client) and loaded["size_vram"] >= loaded["size"] * 0.97
+        shared = loaded and held_by_other(model, client) and on_gpu_enough(model, loaded)
         need = 0 if shared else model_mb(model)
         extra = ollama_gpu_mb() if loaded and not shared else 0      # what it already holds on the card counts as room
         lease = acquire(client, "interactive", need, wait_s, ASSISTANT_IDLE_S, model=model, extra_mb=extra)
@@ -459,6 +471,8 @@ def is_unload(j):
 
 
 def learn_size(model):
+    if model in SPLIT_OK:
+        return
     loaded = ollama_loaded()
     m = loaded.get(model)
     if m and m.get("size") and m["size_vram"] < m["size"] * 0.97 and len(loaded) == 1 and m["size_vram"]:
@@ -505,7 +519,7 @@ def keep_assistant_model():
         h.update(lease=lease, model=model); pin["lease"] = lid
         log.info("assistant priority: keeping %s loaded for Hermes", model)
     m = ollama_loaded().get(model)
-    if m and m["size_vram"] >= m["size"] * 0.97:
+    if m and on_gpu_enough(model, m):
         if time.time() - pin["touched"] > 240:       # keep it from timing out while nobody chats
             try:
                 ollama_json("/api/generate", {"model": model, "keep_alive": PIN_KEEP_ALIVE}, timeout=30)
@@ -513,12 +527,13 @@ def keep_assistant_model():
             except Exception:
                 pass
         if pin["note"]:
-            log.info("assistant priority: %s is loaded entirely on the GPU", model); pin["note"] = None
+            log.info("assistant priority: %s is loaded %s", model, "with its share on the GPU" if model in SPLIT_OK else "entirely on the GPU")
+            pin["note"] = None
         return
     learn_size(model)
     need, total = model_mb(model), max((d["total_mb"] for d in devices()), default=0)
     baseline = sum(gpu_mb_of(n) for n in (b"speech_server", b"ComfyUI", b"claude-desktop", b"gnome-shell", b"Xwayland"))
-    if m and total and need > total - baseline - MARGIN_MB:
+    if m and total and model not in SPLIT_OK and need > total - baseline - MARGIN_MB:
         note = (f"{model} can't load whole on this card: it needs about {need} MiB, and {total} MiB minus {baseline} MiB held "
                 f"by other programs leaves {total - baseline} MiB. It runs {100 * m['size_vram'] // m['size']}% on the GPU. "
                 "An 8-bit KV cache (OLLAMA_KV_CACHE_TYPE=q8_0 + OLLAMA_FLASH_ATTENTION=1) or a second card fixes this.")
