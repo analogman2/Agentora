@@ -105,7 +105,9 @@ def playlist_roundtrip():
     must(on and off, f"on={on} off={off}"); return t["title"]
 check("playlist add + remove", playlist_roundtrip)
 def feedback_roundtrip():   # a Music Studio song with no station: no taste notes get rewritten
-    t = next(x for x in songs if x["source"] != "radio" and not x.get("feedback") and not x.get("station"))
+    t = next((x for x in songs if x["source"] != "radio" and not x.get("feedback") and not x.get("station")), None)
+    if not t:
+        return "skipped: no unrated Music Studio song to try it on (a radio song would rewrite a station's taste notes)"
     req(R, "/api/radio/feedback", {"track": t["id"], "kind": "keep"})
     kept = req(R, f"/api/radio/tracks/{t['id']}")["feedback"] == "keep"
     req(R, "/api/radio/feedback", {"track": t["id"], "kind": "clear"})

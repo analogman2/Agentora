@@ -1132,7 +1132,22 @@ def state():
 class Handler(BaseHTTPRequestHandler):
     server_version = "b70-music-studio"
 
+    def handle_one_request(self):
+        self._noted = False; self._json = None
+        super().handle_one_request()
+        if not self._noted and getattr(self, "command", "GET") not in ("GET", "HEAD", None):   # streamed answers (chat, lyrics)
+            try:
+                import useractivity
+                useractivity.note(self, 200)
+            except Exception:
+                pass
+
     def send(self, code, body, ctype="application/json", extra=None):
+        try:
+            import useractivity
+            useractivity.note(self, code)               # who did what (logs/activity-*.jsonl)
+        except Exception:
+            logging.getLogger("activity").warning("couldn't note the activity", exc_info=True)
         b = (json.dumps(body) if ctype == "application/json" else body)
         b = b.encode() if isinstance(b, str) else b
         extra = dict(extra or {})
@@ -1165,7 +1180,8 @@ class Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length") or 0)
         if n > 200_000:
             raise BadRequest("Request too large")
-        return json.loads(self.rfile.read(n) or b"{}")
+        self._json = json.loads(self.rfile.read(n) or b"{}")
+        return self._json
 
     def job_or_404(self, jid):
         with lock:

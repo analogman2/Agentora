@@ -108,6 +108,7 @@ def user_for(token):
     s = sessions.get(_token_key(token))
     if not s or s["user"] not in users or time.time() - s["seen"] > SESSION_DAYS * 86400:
         return None
+    last_seen[s["user"]] = time.time()                 # exact, in memory (Manage users shows it)
     if time.time() - s["seen"] > 3600:                 # refresh "last seen" at most hourly (keeps disk writes rare)
         with lock:
             s["seen"] = time.time()
@@ -160,8 +161,18 @@ def delete_user(name):
     end_user_sessions(name)
 
 
+last_seen = {}                                         # name -> time of their latest request (this run)
+
+
 def listing():
-    return [{"name": n, "role": u["role"], "created": u["created"]} for n, u in sorted(users.items())]
+    """Accounts with when each was last seen: the latest of their sessions' saved "seen" (hourly) and this run's exact
+    time, and how many devices are signed in."""
+    out = []
+    for n, u in sorted(users.items()):
+        mine = [s for s in sessions.values() if s["user"] == n]
+        seen = max([s["seen"] for s in mine] + [last_seen.get(n, 0)] + [0]) or None
+        out.append({"name": n, "role": u["role"], "created": u["created"], "last_seen": seen, "sessions": len(mine)})
+    return out
 
 
 def user_for_name(name):

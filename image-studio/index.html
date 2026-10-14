@@ -1879,10 +1879,22 @@ $("#mPw").onclick = () => {
     catch (err) { $("#pwMsg").innerHTML = `<span style="color:var(--err)">${escapeHtml(err.message)}</span>`; }
   };
 };
+// "Last seen": online now, minutes or hours ago, or a date; with the device and app of their latest activity
+function lastSeen(u, now) {
+  if (!u.last_seen) return "Never signed in";
+  const ago = Math.max(0, (now || Date.now() / 1000) - u.last_seen);
+  const when = ago < 300 ? "🟢 Online now" : ago < 3600 ? `Last seen ${Math.round(ago / 60)} min ago`
+    : ago < 86400 ? `Last seen ${Math.round(ago / 3600)} h ago`
+    : "Last seen " + new Date(u.last_seen * 1000).toLocaleDateString(undefined, {month: "short", day: "numeric", year: ago > 300 * 86400 ? "numeric" : undefined});
+  const app = {studio: "Studio", radio: "radio", stream: "radio", "hermes-gate": "Hermes dashboard"}[u.last_app] || "";
+  const where = [u.last_device, app].filter(Boolean).join(", ");
+  return escapeHtml(when + (where ? ` · ${where}` : "") + (u.sessions > 1 ? ` · ${u.sessions} active sign-ins` : ""));
+}
 async function renderUsers(msg) {
   const d = await jsonCall("/api/users", "GET").catch(err => ({users: [], error: err.message}));
   openAcc("Manage users", `<p class="hlp" style="margin-top:0">Each person sees only their own pictures and videos. Admins can manage accounts and change studio settings.</p>
-    <table class="utable"><tbody>${d.users.map(u => `<tr data-u="${escapeHtml(u.name)}"><td><b>${escapeHtml(u.name)}</b>${u.name === ME.name ? " (you)" : ""}<div class="hlp" style="margin:0">${u.items} item${u.items === 1 ? "" : "s"}</div></td>
+    <table class="utable"><tbody>${d.users.map(u => `<tr data-u="${escapeHtml(u.name)}"><td><b>${escapeHtml(u.name)}</b>${u.name === ME.name ? " (you)" : ""}<div class="hlp" style="margin:0">${u.items} item${u.items === 1 ? "" : "s"}</div>
+        <div class="hlp" style="margin:0" title="${u.last_seen ? escapeHtml(new Date(u.last_seen * 1000).toLocaleString()) : ""}">${lastSeen(u, d.now)}</div></td>
       <td><select data-role aria-label="Role for ${escapeHtml(u.name)}"><option value="user" ${u.role === "user" ? "selected" : ""}>User</option><option value="admin" ${u.role === "admin" ? "selected" : ""}>Admin</option></select></td>
       <td style="text-align:right;white-space:nowrap"><button class="btn" data-reset>Reset password</button>${u.name === ME.name ? "" : `<button class="btn danger" data-del>Delete</button>`}</td></tr>`).join("")}</tbody></table>
     <h3 style="margin:18px 0 0;font-size:13px">Add a user</h3>

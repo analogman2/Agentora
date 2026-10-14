@@ -10,6 +10,9 @@ import asyncio, logging, logging.handlers, os, socket, ssl, subprocess, sys, tim
 from pathlib import Path
 
 CERT_DIR = Path.home() / ".config" / "tailnet-relay"
+# The apps see every relayed connection as coming from 127.0.0.1. For each one the relay writes the real client address
+# to PEERS/<the local port it connects from>, so the apps' activity log can name the device (logsetup.real_ip).
+PEERS = Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / "agentora-peers"
 LOG = logging.getLogger("tailnet-relay")
 
 
@@ -89,6 +92,10 @@ async def handle(conn, port):
         if not ctx:
             conn.close()
             return
+    try:
+        client_ip = conn.getpeername()[0]
+    except OSError:
+        client_ip = ""
     reader = asyncio.StreamReader(limit=2 ** 20)
     proto = asyncio.StreamReaderProtocol(reader)
     try:
@@ -102,7 +109,17 @@ async def handle(conn, port):
     except OSError:
         writer.close()
         return
-    await asyncio.gather(pipe(reader, server_w), pipe(server_r, writer))
+    note = None
+    try:
+        note = PEERS / str(server_w.get_extra_info("sockname")[1])
+        note.write_text(client_ip)
+    except (OSError, TypeError, IndexError):
+        note = None
+    try:
+        await asyncio.gather(pipe(reader, server_w), pipe(server_r, writer))
+    finally:
+        if note:
+            note.unlink(missing_ok=True)
 
 
 # asyncio keeps only weak references to tasks: an unreferenced connection task can be garbage-collected mid-stream
@@ -133,6 +150,9 @@ def lan_ip():
 async def main(ports, lan, listen):
     ips = listen or [subprocess.check_output(["tailscale", "ip", "-4"], text=True).split()[0]] + ([lan_ip()] if lan else [])
     tls_context()
+    PEERS.mkdir(mode=0o700, exist_ok=True)
+    for f in PEERS.iterdir():                            # left over from before a restart
+        f.unlink(missing_ok=True)
     await asyncio.gather(*(serve(ip, p) for ip in ips for p in ports))
 
 

@@ -60,6 +60,11 @@ async def studio_user(cookie):
     return user
 
 
+def who(request):
+    peer = request.transport.get_extra_info("peername") if request.transport else None
+    return {"ip": logsetup.real_ip(*(peer[:2] if peer else (request.remote, None))), "ua": request.headers.get("User-Agent")}
+
+
 def same_site(request):
     origin = request.headers.get("Origin")
     return not origin or origin.split("://", 1)[-1] == request.host
@@ -69,12 +74,15 @@ async def login(request):
     if not same_site(request):
         raise web.HTTPForbidden(text="Cross-site request refused")
     b = await request.json()
-    async with http.post(STUDIO + "/api/login", json={"username": b.get("username"), "password": b.get("password")}) as r:
+    w = who(request)                                 # the Studio logs the sign-in with this device, not the gate's
+    async with http.post(STUDIO + "/api/login", json={"username": b.get("username"), "password": b.get("password")},
+                         headers={"X-Agentora-Client": w["ip"] or "", "User-Agent": w["ua"] or ""}) as r:
         text = await r.text()
         if r.status != 200:
             return web.json_response({"error": text[:200] or "Wrong username or password"}, status=400)
         user = json.loads(text)["user"]
         if user["role"] != "admin":
+            logsetup.activity("hermes-gate", "refused: not an admin", user["name"], **w)
             return web.json_response({"error": "That account isn't a Studio admin"}, status=403)
         resp = web.json_response({"ok": True})
         for c in r.headers.getall("Set-Cookie", []):
@@ -103,6 +111,7 @@ async def proxy(request):
         raise web.HTTPUnauthorized(text="Sign in with a Studio admin account")
     if not same_site(request):
         raise web.HTTPForbidden(text="Cross-site request refused")
+    logsetup.activity("hermes-gate", "use the Hermes dashboard", user["name"], **who(request), every=600)
     url = DASH + request.rel_url.path_qs
     if request.headers.get("Upgrade", "").lower() == "websocket":
         return await bridge(request, url)

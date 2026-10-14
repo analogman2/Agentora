@@ -213,6 +213,24 @@ Every component logs the same way: a level and the component's name on every lin
 
 Plain lines are INFO, lines about failures are WARNING, and tracebacks (including uncaught errors in any thread or request) are ERROR. A client closing a connection isn't logged as an error. Set `LOG_LEVEL=DEBUG` in a service to log every request.
 
+### Who's using it (activity log)
+
+Every app also writes what people do to one shared log, `logs/activity-YYYY-MM.jsonl` (a JSON object per line, a new file each month). That covers the radio and Music Studio, the stream, the Image & Video Studio, Home and the Hermes dashboard gate. Each line has the time, the app, the signed-in user (the radio asks the Studio, which holds the accounts), the device, its address and the event:
+
+- **Accounts:** sign in, failed sign-in (with the name tried, never the password), sign out, password changes and user management.
+- **Visits:** opening a page, and a "still here" heartbeat at most every 10 minutes per user, device and app.
+- **What people do:** creating pictures, videos and songs, chatting with Hermes, 👍 👎 ⏭ ⏮, play next, playlist changes, tuning in, editing stations, settings, and GPU priority. Prompts and lyrics are never logged.
+- **Listening:** when a device starts listening, and how long it listened.
+
+Connections through the Tailscale relay would all look like 127.0.0.1, so the relay notes each one's real address in `$XDG_RUNTIME_DIR/agentora-peers/`, and devices are named from Tailscale ("Pixel 10 Pro", or "shared device of …" for devices shared in from another tailnet).
+
+```bash
+tools/activity.py                 # who's here now (last 10 min), and who's listening to the radio
+tools/activity.py --since 24h     # a timeline per person and device (--all adds the heartbeats)
+```
+
+**Manage users** in the Image & Video Studio shows each account's **last seen** time, with its device and app, and how many sign-ins it has active.
+
 ## Tests
 
 End-to-end tests against the running services. Run them while nobody is listening: they play, skip and queue songs, which moves the broadcast for everyone. Anything they change is put back.

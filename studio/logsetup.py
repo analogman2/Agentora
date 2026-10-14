@@ -70,3 +70,97 @@ class QuietBrokenPipes:
         if t and issubclass(t, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError)):
             return
         logging.getLogger("http").error("request from %s failed", client_address[0], exc_info=True)
+
+
+# ---------------------------------------------------------------- user activity
+# One log of who did what, shared by every app: logs/activity-YYYY-MM.jsonl (one JSON object per line, appended by
+# each process with a single write, so the apps can share it; a new file each month instead of rotation). Each line:
+#   {"t": "2026-10-13 20:31:05", "app": "radio", "user": "jt", "device": "Pixel 10 Pro", "ip": "100.85.161.32",
+#    "event": "skip", ...details}
+# tools/activity.py reads it (who's here now, a timeline). Passwords, prompts and lyrics are never logged.
+import json, subprocess, time
+
+ACTIVITY_DIR = Path(os.environ.get("ACTIVITY_DIR") or Path(__file__).resolve().parent.parent / "logs")
+PEERS = Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / "agentora-peers"     # written by tools/tailnet-relay.py
+_alog = logging.getLogger("activity")
+_seen, _names, _alock = {}, {"t": 0, "map": {}}, threading.Lock()
+
+
+def real_ip(ip, port):
+    """The device's own address. Connections through the tailnet relay arrive from 127.0.0.1; the relay notes each one's
+    real client under the local port it connects from."""
+    if ip in ("127.0.0.1", "::1") and port:
+        try:
+            return (PEERS / str(port)).read_text().strip() or ip
+        except OSError:
+            pass
+    return ip
+
+
+def device_names():
+    """Tailscale address -> device name ("Pixel 10 Pro"), and for devices shared from other tailnets, whose they are."""
+    with _alock:
+        if time.time() - _names["t"] < 300:
+            return _names["map"]
+        _names["t"] = time.time()
+    m = {}
+    try:
+        d = json.loads(subprocess.run(["tailscale", "status", "--json"], capture_output=True, text=True, timeout=5).stdout)
+        users = {str(k): (v.get("DisplayName") or v.get("LoginName") or "") for k, v in (d.get("User") or {}).items()}
+        for p in [d.get("Self") or {}] + list((d.get("Peer") or {}).values()):
+            name = p.get("HostName") or ""
+            if name == "device-of-shared-to-user":           # someone else's device, shared into this tailnet
+                name = "shared device of " + (users.get(str(p.get("UserID"))) or "another tailnet")
+            for ip in p.get("TailscaleIPs") or []:
+                m[ip] = name
+    except Exception:
+        pass
+    with _alock:
+        _names["map"] = m or _names["map"]
+        return _names["map"]
+
+
+def browser(ua):
+    ua = ua or ""
+    if not ua or ua.startswith(("curl", "python", "Python", "Wget")) or "HeadlessChrome" in ua:
+        return "script"
+    os_ = next((n for k, n in (("iPhone", "iPhone"), ("iPad", "iPad"), ("Android", "Android"), ("Windows", "Windows"),
+                                ("Macintosh", "Mac"), ("CrOS", "ChromeOS"), ("Linux", "Linux")) if k in ua), "")
+    br = next((n for k, n in (("Edg/", "Edge"), ("Firefox", "Firefox"), ("CriOS", "Chrome"), ("Chrome", "Chrome"),
+                               ("Safari", "Safari")) if k in ua), "")
+    return " ".join(x for x in (os_, br) if x) or ua[:40]
+
+
+def device(ip, ua):
+    """A readable device: its Tailscale name when it has one, else the browser and OS."""
+    return device_names().get(ip) or browser(ua)
+
+
+def activity(app, event, user=None, ip=None, ua=None, every=0, key=None, **details):
+    """Record one thing a person did. every=seconds logs it at most that often per (app, user, device, key) - for
+    "still here" heartbeats and page visits."""
+    if browser(ua) == "script" and event in ("open", "active"):
+        return
+    dev = device(ip, ua) if ip else browser(ua)
+    if every:
+        k = (app, user, dev, key or event)
+        now = time.time()
+        with _alock:
+            if now - _seen.get(k, 0) < every:
+                return
+            _seen[k] = now
+    rec = {"t": time.strftime("%Y-%m-%d %H:%M:%S"), "app": app, "user": user, "device": dev, "ip": ip, "event": event,
+           **{k: v for k, v in details.items() if v not in (None, "")}}
+    line = json.dumps(rec, ensure_ascii=False) + "\n"
+    try:
+        ACTIVITY_DIR.mkdir(parents=True, exist_ok=True)
+        fd = os.open(ACTIVITY_DIR / f"activity-{rec['t'][:7]}.jsonl", os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o640)
+        try:
+            os.write(fd, line.encode())
+        finally:
+            os.close(fd)
+    except OSError as e:
+        _alog.warning("couldn't write the activity log: %s", e)
+    if event != "active":
+        _alog.info("%s %s on %s (%s)%s", user or "someone", event, app, dev,
+                   "".join(f" {k}={v}" for k, v in details.items() if v not in (None, "")))

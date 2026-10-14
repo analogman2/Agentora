@@ -1014,6 +1014,61 @@ def agent_user(request):
     return None
 
 
+# ---- user activity (logsetup.activity): what each signed-in person does, with their device
+ACTIONS = {   # (method, route) -> event name
+    ("POST", "/api/generate"): "create", ("POST", "/api/upload"): "upload a picture", ("POST", "/api/jobs/{id}/cancel"): "cancel",
+    ("DELETE", "/api/jobs/{id}"): "delete a creation", ("POST", "/api/free-gpu"): "free the GPU", ("PUT", "/api/settings"): "change settings",
+    ("POST", "/api/password"): "change password", ("POST", "/api/users"): "add a user", ("PUT", "/api/users/{name}"): "change a user",
+    ("DELETE", "/api/users/{name}"): "delete a user", ("POST", "/api/workflows/import"): "import a workflow",
+    ("DELETE", "/api/workflows/{id}"): "delete a workflow", ("POST", "/api/workflows/{id}/install"): "install a workflow",
+    ("POST", "/api/workflows/install-many"): "install workflows", ("POST", "/api/workflows/{id}/run"): "run a workflow",
+    ("POST", "/api/prompt/improve"): "improve a prompt", ("POST", "/api/assistant/chat"): "chat with Hermes",
+    ("POST", "/api/assistant/internet"): "switch Hermes internet", ("POST", "/api/nowplaying/{action}"): "radio",
+    ("POST", "/api/gpu-priority"): "set GPU priority", ("POST", "/api/models/download"): "download a model",
+    ("DELETE", "/api/models/installed"): "remove a model", ("POST", "/api/models/rating"): "rate models"}
+PAGES = {"/": "Image & Video Studio", "/home": "Home"}
+
+
+def who(request):
+    peer = request.transport.get_extra_info("peername") if request.transport else None
+    ip = logsetup.real_ip(*(peer[:2] if peer else (request.remote, None)))
+    if ip in ("127.0.0.1", "::1") and request.headers.get("X-Agentora-Client"):   # the Hermes gate, passing on its visitor
+        ip = request.headers["X-Agentora-Client"]
+    return {"ip": ip, "ua": request.headers.get("User-Agent")}
+
+
+async def note_activity(request, resp):
+    user = (request.get("user") or {}).get("name")
+    by_hermes = (request.get("user") or {}).get("via") == "assistant"     # Hermes's tools acting for this account
+    route = request.match_info.route.resource.canonical if request.match_info.route.resource else request.path
+    ev = ACTIONS.get((request.method, route))
+    w = who(request)
+    if ev:
+        details = {}
+        try:
+            b = await request.json() if request.content_type == "application/json" else {}
+        except Exception:
+            b = {}
+        if ev == "create":
+            details = {"kind": b.get("kind"), "count": b.get("count")}
+        elif ev == "radio":
+            ev = "radio " + request.match_info.get("action", "")
+        elif ev == "chat with Hermes":
+            details = {"model": b.get("model")}
+        elif ev in ("change a user", "delete a user", "add a user"):
+            details = {"target": request.match_info.get("name") or b.get("username"), "role": b.get("role")}
+        elif ev == "set GPU priority":
+            details = {"priority": b.get("priority")}
+        if "{id}" in route:
+            details["id"] = request.match_info.get("id")
+        logsetup.activity("studio", ev, user, **w, status=resp.status if resp.status >= 400 else None,
+                          via="Hermes" if by_hermes else None, **details)
+    elif request.method == "GET" and request.path in PAGES:
+        logsetup.activity("studio", "open", user, **w, every=600, key=request.path, page=PAGES[request.path])
+    elif user and not by_hermes and request.path.startswith("/api/"):
+        logsetup.activity("studio", "active", user, **w, every=600)
+
+
 # Agentora's own apps on this machine (radio + Music Studio, this Studio, the Hermes gate) may ask who's signed in and
 # sign out: one account across every app. Any other site is refused.
 OWN_PORTS = {"7860", "7870", "7880"}
@@ -1040,6 +1095,14 @@ async def guard(request, handler):
         resp = await handler(request)
     except auth.AuthError as e:
         raise web.HTTPBadRequest(text=str(e))
+    except web.HTTPException as e:
+        if e.status in (401, 403) and request.method != "GET" and request.path not in ("/api/login", "/api/setup"):
+            logsetup.activity("studio", "refused", (request.get("user") or {}).get("name"), **who(request), path=request.path, status=e.status)
+        raise
+    try:
+        await note_activity(request, resp)
+    except Exception:
+        logging.getLogger("activity").warning("couldn't note the activity", exc_info=True)
     origin = request.headers.get("Origin")
     if origin and request.path in CORS_PATHS and own_origin(origin, request):   # the radio's and the gate's account card
         resp.headers.update({"Access-Control-Allow-Origin": origin, "Access-Control-Allow-Credentials": "true", "Vary": "Origin"})
@@ -1084,12 +1147,17 @@ async def login(request):
     try:
         name = auth.verify(body.get("username"), body.get("password"))
     except auth.AuthError:
+        logsetup.activity("studio", "sign-in failed", None, **who(request), tried=str(body.get("username") or "")[:40])
         await asyncio.sleep(0.6)                       # slows down password guessing
         raise
+    logsetup.activity("studio", "sign in", name, **who(request))
     return session_response({"user": auth.user_for_name(name)}, token=auth.new_session(name))
 
 
 async def logout(request):
+    if request["user"]:
+        logsetup.activity("studio", "sign out", request["user"]["name"], **who(request),
+                          via={"7860": "radio", "7880": "Hermes gate"}.get(str(request.headers.get("Origin", "")).rpartition(":")[2]))
     auth.end_session(request.cookies.get(auth.COOKIE))
     return session_response({"ok": True}, clear=True)
 
@@ -1108,7 +1176,33 @@ async def list_users(request):
     counts = {}
     for j in jobs.values():
         counts[j.get("owner")] = counts.get(j.get("owner"), 0) + 1
-    return web.json_response({"users": [u | {"items": counts.get(u["name"], 0)} for u in auth.listing()]})
+    last = last_activity()
+    users = []
+    for u in auth.listing():
+        a = last.get(u["name"]) or {}
+        if a.get("ts", 0) > (u["last_seen"] or 0):      # the radio and the Hermes gate see people too
+            u["last_seen"] = a["ts"]
+        users.append(u | {"items": counts.get(u["name"], 0), "last_device": a.get("device"), "last_app": a.get("app"),
+                          "last_event": a.get("event")})
+    return web.json_response({"users": users, "now": time.time()})
+
+
+def last_activity():
+    """Each user's latest line in the activity log (this month and last), from every app."""
+    out = {}
+    for f in sorted(logsetup.ACTIVITY_DIR.glob("activity-*.jsonl"))[-2:]:
+        try:
+            for line in f.read_text(encoding="utf-8").splitlines():
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                if r.get("user"):
+                    r["ts"] = time.mktime(time.strptime(r["t"], "%Y-%m-%d %H:%M:%S"))
+                    out[r["user"]] = r
+        except OSError:
+            pass
+    return out
 
 
 async def add_user(request):

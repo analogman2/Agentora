@@ -195,8 +195,9 @@ class Handler(BaseHTTPRequestHandler):
                                    "agent": ua[:80], "sent": 0, "samples": collections.deque(maxlen=64)}
             bps = S["bps"]
         joined = time.time()
-        peer = self.headers.get("X-Forwarded-For") or self.client_address[0]
-        log(f"listener {lid[:6]} joined from {peer} ({li['device']}), {len(burst) / bps:.0f} s cushion")
+        peer = self.headers.get("X-Forwarded-For") or logsetup.real_ip(*self.client_address[:2])
+        log(f"listener {lid[:6]} joined from {peer} ({logsetup.device(peer, ua)}), {len(burst) / bps:.0f} s cushion")
+        logsetup.activity("stream", "start listening", None, ip=peer, ua=ua, every=600)   # ⏭/⏮ reconnect: once per 10 min
         why = "left"
         try:
             self.send_response(200)
@@ -223,6 +224,8 @@ class Handler(BaseHTTPRequestHandler):
                     listeners.pop(lid, None)
                 departures.append((lid, time.time(), joined))
             log(f"listener {lid[:6]} {why} after {time.time() - joined:.0f} s")
+            if time.time() - joined >= 60:
+                logsetup.activity("stream", "listened", None, ip=peer, ua=ua, minutes=round((time.time() - joined) / 60, 1))
         self.close_connection = True
 
 
