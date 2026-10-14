@@ -128,6 +128,11 @@ def model_mb(model):
 def ollama_gpu_mb():
     """GPU memory Ollama's runners really hold (nvidia-smi per process: weights + KV cache + compute buffers; Ollama's
     own size_vram leaves the buffers out)."""
+    return gpu_mb_of(b"ollama")
+
+
+def gpu_mb_of(name):
+    """GPU memory held by processes whose command line contains name (bytes)."""
     try:
         out = subprocess.run(["nvidia-smi", "--query-compute-apps=pid,used_memory", "--format=csv,noheader,nounits"],
                              capture_output=True, text=True, timeout=10).stdout
@@ -138,7 +143,7 @@ def ollama_gpu_mb():
                 cmd = Path(f"/proc/{pid}/cmdline").read_bytes()
             except OSError:
                 continue
-            if b"ollama" in cmd:
+            if name in cmd:
                 total += int(mb)
         return total
     except Exception:
@@ -159,7 +164,7 @@ def make_room(for_client):
     """Free what isn't needed right now: idle ComfyUI models, Ollama models nobody holds a lease for. Background
     clients (the radio) see the waiting lease through /yield and step aside on their own."""
     freed = []
-    if not any(l["client"] == "studio" and l["granted"] for l in leases.values()) and comfy_idle():
+    if not any(l["client"] == "studio" and l["granted"] for l in leases.values()) and comfy_idle() and gpu_mb_of(b"ComfyUI") > 1500:
         try:
             urllib.request.urlopen(urllib.request.Request(A.comfy + "/free", json.dumps({"unload_models": True, "free_memory": True}).encode(),
                                                           {"Content-Type": "application/json"}), timeout=10).read()
@@ -456,6 +461,13 @@ def is_unload(j):
 def learn_size(model):
     loaded = ollama_loaded()
     m = loaded.get(model)
+    if m and m.get("size") and m["size_vram"] < m["size"] * 0.97 and len(loaded) == 1 and m["size_vram"]:
+        # split: what the card holds for the part on it, scaled up, is a fair estimate of the whole (never below the guess)
+        est = int(ollama_gpu_mb() * m["size"] / m["size_vram"])
+        if est > sizes.get(model, 0) + 200:
+            sizes[model] = est; save_sizes()
+            log.info("%s needs about %d MiB on the GPU to load whole (learned from a partial load)", model, est)
+        return
     if m and m.get("size") and m["size_vram"] >= m["size"] * 0.97:   # only a full load tells its real size
         # what the card really holds for it (weights + KV cache + compute buffers) when it's the only model loaded;
         # Ollama's own size leaves the buffers out (17.6 GB reported vs 20 GB held for the 27B at 64k)
@@ -502,6 +514,16 @@ def keep_assistant_model():
                 pass
         if pin["note"]:
             log.info("assistant priority: %s is loaded entirely on the GPU", model); pin["note"] = None
+        return
+    learn_size(model)
+    need, total = model_mb(model), max((d["total_mb"] for d in devices()), default=0)
+    baseline = sum(gpu_mb_of(n) for n in (b"speech_server", b"ComfyUI", b"claude-desktop", b"gnome-shell", b"Xwayland"))
+    if m and total and need > total - baseline - MARGIN_MB:
+        note = (f"{model} can't load whole on this card: it needs about {need} MiB, and {total} MiB minus {baseline} MiB held "
+                f"by other programs leaves {total - baseline} MiB. It runs {100 * m['size_vram'] // m['size']}% on the GPU. "
+                "An 8-bit KV cache (OLLAMA_KV_CACHE_TYPE=q8_0 + OLLAMA_FLASH_ATTENTION=1) or a second card fixes this.")
+        if note[:60] != (pin["note"] or "")[:60]:
+            log.warning("assistant priority: %s", note); pin["note"] = note
         return
     if m:                                           # squeezed partly onto the CPU: reload whole once there's room
         if not reload_if_split(model):
