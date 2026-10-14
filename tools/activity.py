@@ -57,7 +57,7 @@ else:
     rs = records(time.time() - 86400)
     here = {}
     for r in rs:
-        if r["ts"] >= cutoff and r["event"] not in ("sign out", "sign-in failed"):
+        if r["ts"] >= cutoff and r.get("device") != "script" and r["event"] not in ("sign out", "sign-in failed"):
             here[(who(r), r.get("device") or "?")] = r
         if r["event"] == "sign out":
             here.pop((who(r), r.get("device") or "?"), None)
