@@ -153,7 +153,7 @@ def reference_tracks(s, limit=15):
 
 
 def llm_candidates():
-    """Reachable LLMs in order. While the radio is on, b70's own LLM is (or is about to be) paused for the
+    """Reachable LLMs in order. While the radio is on, the radio's own LLM is (or is about to be) paused for the
     GPUs, so the other servers go first."""
     cands = list(app.LYRICS_LLMS)
     if rs.state["on"] or app.gpu["owner"] != "llm":

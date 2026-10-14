@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en" data-b70-app="music">
+<html lang="en" data-agentora-app="music">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>b70 Music Studio</title>
+<title>Agentora Music Studio</title>
 <link rel="icon" id="favicon" type="image/svg+xml" href="/icons/studio.svg">
 <link rel="alternate icon" type="image/png" sizes="32x32" href="/icons/studio-32.png">
 <link rel="apple-touch-icon" href="/icons/studio-180.png">
@@ -106,18 +106,18 @@ dialog pre { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(
 .gpubar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 
 </style>
-<link rel="stylesheet" href="/b70/b70.css">
+<link rel="stylesheet" href="/agentora/agentora.css">
 </head>
 <body>
 <div class="wrap">
   <header>
-    <h1>🎵 b70 Music Studio</h1>
-  <div data-b70-apps></div>
+    <h1>🎵 Agentora Music Studio</h1>
+  <div data-agentora-apps></div>
     <span class="muted small">YuE2 · lyrics + style → full song with vocals, 48 kHz stereo</span>
     <span class="gpubar" style="margin-left:auto">
       <span class="badge" id="gpu"><span class="dot"></span><span>…</span></span>
       <button class="btn small" id="release" hidden title="Unload YuE2 and restart the LLM (takes ~1.5 min; songs then need ~1 min to take the GPUs again)">Give GPUs back to the LLM</button>
-      <button data-b70-panel></button>
+      <button data-agentora-panel></button>
     </span>
   </header>
 
@@ -730,6 +730,6 @@ tick(); setInterval(tick, 2000);
 rewriteFromHash();
 
 </script>
-<script src="/b70/b70.js" defer></script>
+<script src="/agentora/agentora.js" defer></script>
 </body>
 </html>

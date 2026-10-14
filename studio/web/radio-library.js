@@ -380,7 +380,7 @@ $("page").addEventListener("click", async (e) => {
   if (act === "song-art") { post("/api/radio/art", {track: view.id}).then(() => toast("Drawing a new cover — it appears in a minute or two.")).catch(e => toast(e.message)); return; }
   if (act === "song-more") { post(`/api/radio/stations/${encodeURIComponent(a.dataset.station)}/song`, {like: view.id}).then(() => toast("Writing a new song in the spirit of this one — it's recorded next.")).catch(e => toast(e.message)); return; }
   if (act === "song-play") return preview(a.dataset.audio, null, view.id);
-  if (act === "song-rewrite") { if (window.b70Open) { e.preventDefault(); b70Open("music", "#rewrite=" + a.dataset.id); } return; }
+  if (act === "song-rewrite") { if (window.agentoraOpen) { e.preventDefault(); agentoraOpen("music", "#rewrite=" + a.dataset.id); } return; }
   if (act === "make-song") {
     a.disabled = true;
     post(`/api/radio/stations/${encodeURIComponent(view.id)}/song`).then(() => { hint("Writing a new song for this station — it's recorded next, ahead of everything else."); refresh().then(updateMk); })

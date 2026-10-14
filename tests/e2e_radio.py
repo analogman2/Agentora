@@ -51,7 +51,7 @@ if listeners and not A.quick and not A.allow_listeners:
     sys.exit(f"{len(listeners)} listening right now: run with --quick, or wait (the broadcast tests move the stream)")
 
 print("pages")
-for base, path in ((R, "/radio"), (R, "/"), (R, "/radio/classic"), (R, "/b70/b70.js"), (R, "/b70/b70.css"), (S, "/home"), (S, "/b70/b70.js")):
+for base, path in ((R, "/radio"), (R, "/"), (R, "/radio/classic"), (R, "/agentora/agentora.js"), (R, "/agentora/agentora.css"), (S, "/home"), (S, "/agentora/agentora.js")):
     check(f"GET {base[-5:]}{path}", lambda base=base, path=path: must(req(base, path, raw=True)[0] == 200, "not 200"))
 
 print("radio state and library")

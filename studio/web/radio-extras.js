@@ -168,7 +168,7 @@ $("asstForm").onsubmit = async (e) => {
   A.log.push({who: "me", text});
   const reply = {who: "ai", text: "", tools: []}; A.log.push(reply); asstDraw();
   try {
-    const r = await fetch("/api/assistant/chat", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({message: text, previous: A.prev, model: window.b70Brain ? b70Brain() : "agi"})});
+    const r = await fetch("/api/assistant/chat", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({message: text, previous: A.prev, model: window.agentoraBrain ? agentoraBrain() : "agi"})});
     if (!r.ok) { const j = await r.json().catch(() => ({})); if (r.status === 403) asstCheck(); throw new Error(j.error || r.statusText); }
     const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "";
     for (;;) {

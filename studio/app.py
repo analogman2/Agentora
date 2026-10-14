@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""b70 Music Studio: a web UI and job queue for YuE2 on an Intel XPU.
+"""Agentora Music Studio: a web UI and job queue for YuE2 (originally on an Intel XPU).
 
 GPU policy: when a song is queued and the LLM service holds the GPUs, the
 studio pauses the LLM and starts a GPU child process that loads YuE2 and stays
@@ -561,7 +561,7 @@ def run_job(pipe, base, job, update, cancelled):
         update(stage="Encoding MP3")
         # the library keeps one 320 kbps MP3 per song; the 24-bit FLAC render is only an intermediate
         sh("ffmpeg", "-y", "-loglevel", "error", "-i", str(out / "audio.flac"), "-codec:a", "libmp3lame", "-b:a", "320k",
-           "-metadata", f"title={job['title']}", "-metadata", "artist=YuE2 on b70", str(d / "song.mp3"))
+           "-metadata", f"title={job['title']}", "-metadata", "artist=Agentora", str(d / "song.mp3"))
         if (d / "song.mp3").stat().st_size > 10_000:
             (out / "audio.flac").unlink()
         result = json.loads((out / "result.json").read_text())
@@ -988,7 +988,7 @@ def stream_lyrics(handler, body):
     prompt = lyrics_prompt(body)            # validates before we commit to a stream
     llm = pick_llm(prefer_gpu=bool(body.get("fast")))
     if llm is None:
-        return handler.send(503, {"error": "No lyrics writer is reachable right now. b70's LLM is paused while the studio "
+        return handler.send(503, {"error": "No lyrics writer is reachable right now. the radio's LLM is paused while the studio "
                                            "holds the GPUs, and the backup server did not answer."})
     base, model, label = llm
     llm_used(model)
@@ -1130,7 +1130,7 @@ def state():
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "b70-music-studio"
+    server_version = "agentora-music-studio"
 
     def handle_one_request(self):
         self._noted = False; self._json = None
@@ -1198,8 +1198,8 @@ class Handler(BaseHTTPRequestHandler):
             if self.not_modified(tag, "no-cache"):
                 return
             return self.send(200, f.read_bytes(), "text/html; charset=utf-8", {"ETag": tag, "Cache-Control": "no-cache"})
-        if path in ("/b70/b70.css", "/b70/b70.js"):             # the look shared with the other apps (kept with the Studio)
-            f = Path(os.environ.get("B70_SHARED", str(Path.home() / "genstudio" / "shared"))) / path.rsplit("/", 1)[1]
+        if path in ("/agentora/agentora.css", "/agentora/agentora.js"):             # the look shared with the other apps (kept with the Studio)
+            f = Path(os.environ.get("AGENTORA_SHARED") or os.environ.get("B70_SHARED", str(Path.home() / "genstudio" / "shared"))) / path.rsplit("/", 1)[1]
             if not f.is_file():
                 return self.send(404, {"error": "shared file missing"})
             return self.send(200, f.read_bytes(), "text/css; charset=utf-8" if f.suffix == ".css" else "text/javascript; charset=utf-8",

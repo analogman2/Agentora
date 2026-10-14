@@ -693,7 +693,7 @@ SHARED = HERE / "shared"
 async def shared_file(request):
     """The look and script shared by every app (switcher, now-playing bar); the radio serves the same files."""
     name = request.match_info["name"]
-    if name not in ("b70.css", "b70.js"):
+    if name not in ("agentora.css", "agentora.js"):
         raise web.HTTPNotFound()
     return web.FileResponse(SHARED / name, headers={"Cache-Control": "no-cache"})
 
@@ -1089,7 +1089,7 @@ async def guard(request, handler):
         origin = request.headers.get("Origin")
         if origin and not (origin.split("://", 1)[-1] == request.host or (request.path in CORS_PATHS and own_origin(origin, request))):
             raise web.HTTPForbidden(text="Cross-site request refused")      # another website trying to act as the user
-    if request.path not in PUBLIC_PATHS and not request.path.startswith(("/b70/", "/api/nowplaying")) and not request["user"]:
+    if request.path not in PUBLIC_PATHS and not request.path.startswith(("/agentora/", "/api/nowplaying")) and not request["user"]:
         raise web.HTTPUnauthorized(text="Please sign in")
     try:
         resp = await handler(request)
@@ -1100,6 +1100,9 @@ async def guard(request, handler):
             logsetup.activity("studio", "refused", (request.get("user") or {}).get("name"), **who(request), path=request.path, status=e.status)
         raise
     try:
+        if request["user"] and request["user"].get("via") != "assistant":
+            w = who(request)
+            auth.note_client(request.cookies.get(auth.COOKIE), w["ip"], logsetup.device(w["ip"], w["ua"]))
         await note_activity(request, resp)
     except Exception:
         logging.getLogger("activity").warning("couldn't note the activity", exc_info=True)
@@ -1150,8 +1153,10 @@ async def login(request):
         logsetup.activity("studio", "sign-in failed", None, **who(request), tried=str(body.get("username") or "")[:40])
         await asyncio.sleep(0.6)                       # slows down password guessing
         raise
-    logsetup.activity("studio", "sign in", name, **who(request))
-    return session_response({"user": auth.user_for_name(name)}, token=auth.new_session(name))
+    w = who(request)
+    logsetup.activity("studio", "sign in", name, **w)
+    return session_response({"user": auth.user_for_name(name)},
+                            token=auth.new_session(name, w["ip"], logsetup.device(w["ip"], w["ua"]) if w["ip"] else logsetup.browser(w["ua"])))
 
 
 async def logout(request):
@@ -1183,7 +1188,7 @@ async def list_users(request):
         if a.get("ts", 0) > (u["last_seen"] or 0):      # the radio and the Hermes gate see people too
             u["last_seen"] = a["ts"]
         users.append(u | {"items": counts.get(u["name"], 0), "last_device": a.get("device"), "last_app": a.get("app"),
-                          "last_event": a.get("event")})
+                          "last_event": a.get("event"), "last_ip": a.get("ip") or next((s["ip"] for s in u["sign_ins"] if s["ip"]), None)})
     return web.json_response({"users": users, "now": time.time()})
 
 
@@ -1721,7 +1726,7 @@ def main():
     app.router.add_get("/api/gpu-priority", get_priority)
     app.router.add_post("/api/prompt/improve", improve_prompt)
     app.router.add_get("/home", home_page)
-    app.router.add_get("/b70/{name}", shared_file)
+    app.router.add_get("/agentora/{name}", shared_file)
     app.router.add_get("/api/assistant/internet", assistant_internet)
     app.router.add_post("/api/assistant/internet", assistant_internet)
     app.router.add_get("/api/nowplaying", nowplaying)

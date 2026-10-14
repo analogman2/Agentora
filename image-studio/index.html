@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-b70-app="studio">
+<html lang="en" data-agentora-app="studio">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -424,12 +424,12 @@ body.view-workflows .wflist span { padding: 0; }
 @media (max-width: 440px) { .nav .brand { display: none; } }             /* the switcher already says which app this is */
 @media (max-width: 1200px) { .nav-in { gap: 18px; } .navtabs { gap: 18px; } }
 </style>
-<link rel="stylesheet" href="/b70/b70.css">
+<link rel="stylesheet" href="/agentora/agentora.css">
 </head>
 <body>
 <nav class="nav"><div class="nav-in">
-  <a class="brand" href="#create">∞ b70 <span>studio</span></a>
-  <div data-b70-apps></div>
+  <a class="brand" href="#create">∞ Agentora <span>studio</span></a>
+  <div data-agentora-apps></div>
   <div class="navtabs">
     <a href="#create" data-view="create">Create</a>
     <a href="#creations" data-view="creations">My creations</a>
@@ -476,7 +476,7 @@ body.view-workflows .wflist span { padding: 0; }
 <div class="asst" id="asst" role="dialog" aria-modal="false">
   <div class="ah"><strong>✦ <span id="asstUser">Assistant</span></strong>
     <div class="small" id="asstWho"></div>
-    <button data-b70-brain></button>
+    <button data-agentora-brain></button>
     <button class="x" id="asstClose" title="Close">✕</button></div>
   <div id="asstLog" class="al"></div>
   <form class="af" id="asstForm">
@@ -1888,13 +1888,20 @@ function lastSeen(u, now) {
     : "Last seen " + new Date(u.last_seen * 1000).toLocaleDateString(undefined, {month: "short", day: "numeric", year: ago > 300 * 86400 ? "numeric" : undefined});
   const app = {studio: "Studio", radio: "radio", stream: "radio", "hermes-gate": "Hermes dashboard"}[u.last_app] || "";
   const where = [u.last_device, app].filter(Boolean).join(", ");
-  return escapeHtml(when + (where ? ` · ${where}` : "") + (u.sessions > 1 ? ` · ${u.sessions} active sign-ins` : ""));
+  return escapeHtml(when + (where ? ` · ${where}` : "") + (u.last_ip ? ` · IP ${u.last_ip}` : "") + (u.sessions > 1 ? ` · ${u.sessions} active sign-ins` : ""));
+}
+// each active sign-in: its device, IP address (and the one it signed in from, if different) and when it was last used
+function signIns(u) {
+  if (!u.sign_ins || !u.sign_ins.length) return "";
+  const d = (t) => new Date(t * 1000).toLocaleString(undefined, {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"});
+  return `<details class="hlp" style="margin:2px 0 0"><summary>Sign-ins (${u.sign_ins.length})</summary><ul style="margin:4px 0 0;padding-left:18px">${u.sign_ins.map(s =>
+    `<li>${escapeHtml(s.device || "unknown device")} · ${escapeHtml(s.ip || "IP not recorded yet")}${s.first_ip && s.first_ip !== s.ip ? ` (signed in from ${escapeHtml(s.first_ip)})` : ""} · used ${d(s.seen)} · since ${d(s.since)}</li>`).join("")}</ul></details>`;
 }
 async function renderUsers(msg) {
   const d = await jsonCall("/api/users", "GET").catch(err => ({users: [], error: err.message}));
   openAcc("Manage users", `<p class="hlp" style="margin-top:0">Each person sees only their own pictures and videos. Admins can manage accounts and change studio settings.</p>
     <table class="utable"><tbody>${d.users.map(u => `<tr data-u="${escapeHtml(u.name)}"><td><b>${escapeHtml(u.name)}</b>${u.name === ME.name ? " (you)" : ""}<div class="hlp" style="margin:0">${u.items} item${u.items === 1 ? "" : "s"}</div>
-        <div class="hlp" style="margin:0" title="${u.last_seen ? escapeHtml(new Date(u.last_seen * 1000).toLocaleString()) : ""}">${lastSeen(u, d.now)}</div></td>
+        <div class="hlp" style="margin:0" title="${u.last_seen ? escapeHtml(new Date(u.last_seen * 1000).toLocaleString()) : ""}">${lastSeen(u, d.now)}</div>${signIns(u)}</td>
       <td><select data-role aria-label="Role for ${escapeHtml(u.name)}"><option value="user" ${u.role === "user" ? "selected" : ""}>User</option><option value="admin" ${u.role === "admin" ? "selected" : ""}>Admin</option></select></td>
       <td style="text-align:right;white-space:nowrap"><button class="btn" data-reset>Reset password</button>${u.name === ME.name ? "" : `<button class="btn danger" data-del>Delete</button>`}</td></tr>`).join("")}</tbody></table>
     <h3 style="margin:18px 0 0;font-size:13px">Add a user</h3>
@@ -2002,7 +2009,7 @@ _fetch("/api/session").then(r => r.json()).then(d => d.user ? signedIn(d.user) :
     msg(text, "me");
 
     try {
-      const r = await fetch("/api/assistant/chat", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({message: text, previous: A.prev, model: window.b70Brain ? b70Brain() : "agi"})});
+      const r = await fetch("/api/assistant/chat", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({message: text, previous: A.prev, model: window.agentoraBrain ? agentoraBrain() : "agi"})});
       if (!r.ok) throw new Error(`Server ${r.status}`);
       const reader = r.body.getReader();
       let buf = "";
@@ -2115,6 +2122,6 @@ document.addEventListener("click", async (e) => {
   b.disabled = false;
 });
 </script>
-<script src="/b70/b70.js" defer></script>
+<script src="/agentora/agentora.js" defer></script>
 </body>
 </html>

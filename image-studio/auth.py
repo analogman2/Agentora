@@ -93,10 +93,11 @@ def verify(name, password):
     return name
 
 
-def new_session(name):
+def new_session(name, ip=None, device=None):
     token = secrets.token_urlsafe(32)
     with lock:
-        sessions[_token_key(token)] = {"user": name, "created": time.time(), "seen": time.time()}
+        sessions[_token_key(token)] = {"user": name, "created": time.time(), "seen": time.time(), "ip": ip, "device": device,
+                                       "first_ip": ip}
         _save(SESSIONS_FILE, sessions)
     return token
 
@@ -164,6 +165,18 @@ def delete_user(name):
 last_seen = {}                                         # name -> time of their latest request (this run)
 
 
+def note_client(token, ip, device):
+    """Keep each sign-in's latest IP address and device (saved with the next hourly "seen" write, or now if it changed)."""
+    s = sessions.get(_token_key(token)) if token else None
+    if not s or not ip:
+        return
+    if s.get("ip") != ip or s.get("device") != device:
+        with lock:
+            s.update(ip=ip, device=device)
+            s.setdefault("first_ip", ip)
+            _save(SESSIONS_FILE, sessions)
+
+
 def listing():
     """Accounts with when each was last seen: the latest of their sessions' saved "seen" (hourly) and this run's exact
     time, and how many devices are signed in."""
@@ -171,7 +184,9 @@ def listing():
     for n, u in sorted(users.items()):
         mine = [s for s in sessions.values() if s["user"] == n]
         seen = max([s["seen"] for s in mine] + [last_seen.get(n, 0)] + [0]) or None
-        out.append({"name": n, "role": u["role"], "created": u["created"], "last_seen": seen, "sessions": len(mine)})
+        out.append({"name": n, "role": u["role"], "created": u["created"], "last_seen": seen, "sessions": len(mine),
+                    "sign_ins": sorted(({"since": s["created"], "seen": max(s["seen"], 0), "ip": s.get("ip"), "device": s.get("device"),
+                                         "first_ip": s.get("first_ip")} for s in mine), key=lambda x: -x["seen"])})
     return out
 
 

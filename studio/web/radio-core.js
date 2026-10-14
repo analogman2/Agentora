@@ -22,7 +22,7 @@ function prng(seed) {
   let h = 2166136261; for (const c of String(seed)) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
   return () => { h += 0x6D2B79F5; let t = h; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; };
 }
-function hueOf(st) { let h = 0; for (const ch of (st ? (st.id || "") + (st.name || "") : "b70")) h = (h * 31 + ch.charCodeAt(0)) % 360; return h; }
+function hueOf(st) { let h = 0; for (const ch of (st ? (st.id || "") + (st.name || "") : "agentora")) h = (h * 31 + ch.charCodeAt(0)) % 360; return h; }
 const artCache = new Map();
 function songArt(seed, baseHue) {
   const key = seed + "|" + baseHue; if (artCache.has(key)) return artCache.get(key);
@@ -58,7 +58,7 @@ function songArt(seed, baseHue) {
 // drawn cover art when it exists (made by the Image & Video Studio's picture model), else the generated pattern
 const stationArt = (st) => st && st.art && st.id !== RERUNS ? `/api/radio/stations/${encodeURIComponent(st.id)}/art?v=${st.art}` : patternArt(st);
 function patternArt(st) {
-  if (!st) return songArt("b70", 220);
+  if (!st) return songArt("agentora", 220);
   if (st.id === RERUNS) return songArt("reruns-mix", 350);
   const key = "st|" + st.id + st.name; if (artCache.has(key)) return artCache.get(key);
   const h = hueOf(st), r = prng(st.id + st.name), cx = 150 + (r() - .5) * 60, cy = 150 + (r() - .5) * 60;

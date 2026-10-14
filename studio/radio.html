@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-b70-app="radio">
+<html lang="en" data-agentora-app="radio">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -383,14 +383,14 @@ textarea { resize: vertical; max-height: 85vh; }
 .tawrap.big .tabig { color: var(--accent); opacity: 1; }
 
 </style>
-<link rel="stylesheet" href="/b70/b70.css">
+<link rel="stylesheet" href="/agentora/agentora.css">
 </head>
 <body>
 <div class="np-wash" id="wash"></div>
 
 <nav class="nav"><div class="nav-in">
   <a class="brand" href="#now">∞ <span>Agentora</span></a>
-  <div data-b70-apps></div>
+  <div data-agentora-apps></div>
   <div class="tabs" role="tablist">
     <a href="#now" data-tab="now">Now Playing</a>
     <a href="#lib" data-tab="lib">Library</a>
@@ -428,7 +428,7 @@ textarea { resize: vertical; max-height: 85vh; }
     <button class="x" id="pinBtn" aria-pressed="false" title="Keep the panel open beside the radio">📌</button>
     <button class="x" id="sideClose" title="Hide the panel" aria-label="Hide the panel">✕</button></div>
   <div class="sb">
-    <section class="card"><h3>Account</h3><div data-b70-account class="small">…</div></section>
+    <section class="card"><h3>Account</h3><div data-agentora-account class="small">…</div></section>
     <section class="card"><h3>Radio</h3>
       <div id="radioState" class="small">…</div>
       <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap"><button class="btn" id="powerBtn">Turn radio off</button></div></section>
@@ -475,7 +475,7 @@ textarea { resize: vertical; max-height: 85vh; }
 
 <div class="asst" id="asst" role="dialog" aria-modal="false" aria-labelledby="asstTitle" hidden>
   <div class="ah"><strong id="asstTitle">💬 Assistant</strong><span class="small muted" id="asstWho"></span>
-    <button data-b70-brain></button>
+    <button data-agentora-brain></button>
     <button class="x" id="asstNew" title="Start a new conversation">New</button>
     <button class="x" id="asstClose" title="Close" aria-label="Close the assistant">✕</button></div>
   <div class="ab" id="asstLog" aria-live="polite"></div>
@@ -498,6 +498,6 @@ textarea { resize: vertical; max-height: 85vh; }
 <script src="/web/radio-library.js"></script>
 <script src="/web/radio-panel.js"></script>
 <script src="/web/radio-extras.js"></script>
-<script src="/b70/b70.js" defer></script>
+<script src="/agentora/agentora.js" defer></script>
 </body>
 </html>

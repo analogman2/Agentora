@@ -1,53 +1,53 @@
-// b70 shared script: the app switcher and the radio's now-playing bar, for every app. Served at /b70/b70.js by both servers.
-// A page says which app it is with <html data-b70-app="home|radio|studio|music"> and puts <div data-b70-apps></div> where
+// Agentora shared script: the app switcher and the radio's now-playing bar, for every app. Served at /agentora/agentora.js by both servers.
+// A page says which app it is with <html data-agentora-app="home|radio|studio|music"> and puts <div data-agentora-apps></div> where
 // the switcher goes. Each app keeps one browser tab; switching jumps to that tab without reloading it (the radio keeps playing).
 (() => {
   const APPS = [["home", "🏠", "Home", ":7870/home"], ["radio", "📻", "Radio", ":7860/radio"],
                 ["studio", "🖼", "Image & Video", ":7870/"], ["music", "🎵", "Music", ":7860/"]];
-  const THIS = document.documentElement.dataset.b70App || "";
+  const THIS = document.documentElement.dataset.agentoraApp || "";
   const url = (key, path = "") => `${location.protocol}//${location.hostname}${APPS.find(a => a[0] === key)[3]}${path}`;
-  if (!window.name || window.name.startsWith("b70-")) window.name = "b70-" + THIS;
+  if (!window.name || /^(b70|agentora)-/.test(window.name)) window.name = "agentora-" + THIS;
 
   function open(key, path) {
     if (key === THIS && !path) return;
     if (key === THIS) { location.href = url(key, path); return; }
-    const w = window.open("", "b70-" + key);
+    const w = window.open("", "agentora-" + key);
     if (!w) { location.href = url(key, path); return; }          // pop-ups blocked: go there in this tab
     let blank = false;
     try { blank = !w.location.href || w.location.href === "about:blank"; } catch (e) { /* another app's page: already open */ }
     if (blank || path) w.location.href = url(key, path);
     w.focus();
   }
-  window.b70Open = open;
+  window.agentoraOpen = open;
 
-  // Assistant brain: <button data-b70-brain> becomes a three-way slider. 🐹 Lemming = quick answers (always fits on the
+  // Assistant brain: <button data-agentora-brain> becomes a three-way slider. 🐹 Lemming = quick answers (always fits on the
   // GPU), ✨ Auto = the GPU broker picks AGI when it can have the card within a few seconds, else Lemming, 🧠 AGI = the
-  // smartest local model (may wait for the card). Remembered per site; chats send b70Brain() ("lemming" | "auto" | "agi").
+  // smartest local model (may wait for the card). Remembered per site; chats send agentoraBrain() ("lemming" | "auto" | "agi").
   const BRAINS = {lemming: ["🐹", "Lemming", "Quick answers (Qwen 3.5 9B), always on the GPU"],
                   auto: ["✨", "Auto", "The smartest model that can have the GPU right now"],
                   agi: ["🧠", "AGI", "The smartest local model (Qwen 3.6 27B); may wait a moment for the GPU"]};
   const ORDER = ["lemming", "auto", "agi"];
-  const brain = () => { try { const v = localStorage.getItem("b70.brain"); return BRAINS[v] ? v : "auto"; } catch (e) { return "auto"; } };
-  window.b70Brain = brain;
-  const drawBrain = () => document.querySelectorAll("[data-b70-brain]").forEach(b => {
+  const brain = () => { try { const v = localStorage.getItem("agentora.brain") || localStorage.getItem("b70.brain") /* its old name */; return BRAINS[v] ? v : "auto"; } catch (e) { return "auto"; } };
+  window.agentoraBrain = brain;
+  const drawBrain = () => document.querySelectorAll("[data-agentora-brain]").forEach(b => {
     const v = brain();
-    b.classList.add("b70-brain"); b.dataset.brain = v; b.type = "button"; b.title = `${BRAINS[v][1]}: ${BRAINS[v][2]}. Tap a name to switch.`;
+    b.classList.add("agentora-brain"); b.dataset.brain = v; b.type = "button"; b.title = `${BRAINS[v][1]}: ${BRAINS[v][2]}. Tap a name to switch.`;
     b.setAttribute("aria-label", `Assistant model: ${BRAINS[v][1]}. ${BRAINS[v][2]}. Press to switch.`);
     b.innerHTML = ORDER.map((k, i) => (i ? (i === 1 ? '<span class="track" aria-hidden="true"><span class="knob"></span></span>' : "") : "")
       + `<span class="opt${k === v ? " on" : ""}" data-v="${k}">${BRAINS[k][0]} ${BRAINS[k][1]}</span>`).join("");
   });
   document.addEventListener("click", e => {
-    const b = e.target.closest("[data-b70-brain]"); if (!b) return;
+    const b = e.target.closest("[data-agentora-brain]"); if (!b) return;
     const opt = e.target.closest("[data-v]");
     const next = opt ? opt.dataset.v : ORDER[(ORDER.indexOf(brain()) + 1) % ORDER.length];   // a name picks it; the track cycles
-    try { localStorage.setItem("b70.brain", next); } catch (e) {}
+    try { localStorage.setItem("agentora.brain", next); } catch (e) {}
     drawBrain();
   });
   drawBrain();
 
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
-  document.querySelectorAll("[data-b70-apps]").forEach(el => {
-    el.className = "b70-apps"; el.setAttribute("role", "navigation"); el.setAttribute("aria-label", "Switch app");
+  document.querySelectorAll("[data-agentora-apps]").forEach(el => {
+    el.className = "agentora-apps"; el.setAttribute("role", "navigation"); el.setAttribute("aria-label", "Switch app");
     el.innerHTML = APPS.map(([k, ic, label], i) => `<a href="${esc(url(k))}" data-app="${k}" class="${k === THIS ? "on" : ""}" ${k === THIS ? 'aria-current="page"' : ""}
       title="${esc(label)} (Alt+${i})"><b aria-hidden="true">${ic}</b><span>${esc(label)}</span></a>`).join("");
   });
@@ -64,10 +64,10 @@
   const onRadio = location.port === "7860";
   const api = onRadio ? {state: "/api/radio/state", act: (a, body) => fetch("/api/radio/" + a, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)})}
                       : {state: "/api/nowplaying", act: (a, body) => fetch("/api/nowplaying/" + a, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)})};
-  const key = "b70.np.closed." + THIS;
+  const key = "agentora.np.closed." + THIS;
   let closedFor = null; try { closedFor = sessionStorage.getItem(key); } catch (e) {}
   const bar = document.createElement("div");
-  bar.className = "b70-np"; bar.hidden = true; bar.setAttribute("role", "region"); bar.setAttribute("aria-label", "Now playing on the radio");
+  bar.className = "agentora-np"; bar.hidden = true; bar.setAttribute("role", "region"); bar.setAttribute("aria-label", "Now playing on the radio");
   bar.innerHTML = `<img alt=""><div class="t" title="Open the radio"><b></b><span></span></div>
     <button data-np="like" title="Thumbs up: more like this" aria-label="Thumbs up">👍</button>
     <button data-np="skip" title="Skip this song (for everyone listening)" aria-label="Skip">⏭</button>
@@ -90,7 +90,7 @@
     try { const r = await fetch(api.state, {cache: "no-store"}); if (!r.ok) throw 0; d = nowFrom(await r.json()); } catch (e) { bar.hidden = true; return; }
     cur = d.now;
     const show = d.on && d.now && closedFor !== d.now.id;
-    bar.hidden = !show; document.body.classList.toggle("b70-np-shown", !!show);
+    bar.hidden = !show; document.body.classList.toggle("agentora-np-shown", !!show);
     if (!show) return;
     const radio = `${location.protocol}//${location.hostname}:7860`;
     bar.querySelector("img").src = d.now.cover ? radio + d.now.cover : d.station && d.station.art ? `${radio}/api/radio/stations/${encodeURIComponent(d.station.id)}/art?v=${d.station.art}` : "";
@@ -103,7 +103,7 @@
     if (t) return open("radio", cur ? "#song/" + encodeURIComponent(cur.id) : "");
     if (!b || !cur) return;
     if (b.dataset.np === "open") return open("radio");
-    if (b.dataset.np === "close") { closedFor = cur.id; try { sessionStorage.setItem(key, cur.id); } catch (e) {} bar.hidden = true; document.body.classList.remove("b70-np-shown"); return; }
+    if (b.dataset.np === "close") { closedFor = cur.id; try { sessionStorage.setItem(key, cur.id); } catch (e) {} bar.hidden = true; document.body.classList.remove("agentora-np-shown"); return; }
     if (b.dataset.np === "like") { await api.act("feedback", {track: cur.id, kind: b.classList.contains("on") ? "clear" : "keep"}).catch(() => {}); }
     if (b.dataset.np === "skip") { await api.act("skip", {track: cur.id, kind: "skip"}).catch(() => {}); }
     setTimeout(poll, 600);
@@ -113,21 +113,21 @@
 })();
 
 // ---- 👤 Account, from any app: the Studio (:7870) holds the accounts, so every page asks it who's signed in and signs
-// out there (one account across the Studio, Home and the Hermes dashboard). A page opts in with <div data-b70-account>.
-window.b70Account = (() => {
+// out there (one account across the Studio, Home and the Hermes dashboard). A page opts in with <div data-agentora-account>.
+window.agentoraAccount = (() => {
   const studio = `${location.protocol}//${location.hostname}:7870`, here = location.port === "7870";
   const url = (p) => here ? p : studio + p;
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
   let last = "";
   const who = () => fetch(url("/api/session"), {credentials: "include", cache: "no-store"}).then(r => r.ok ? r.json() : null).then(d => d && d.user).catch(() => undefined);
-  const html = (u) => u === undefined ? `<p class="b70-muted">Couldn't reach the Image &amp; Video Studio, which holds the accounts.</p>`
-    : u ? `<p>👤 <b>${esc(u.name)}</b>${u.role === "admin" ? ' <span class="b70-muted">· admin</span>' : ""}</p>
-        <div class="b70-links"><button type="button" class="b70-btn" data-b70-signout>Sign out</button></div>`
-    : `<p class="b70-muted">Not signed in.</p><div class="b70-links"><a class="b70-btn" href="${studio}/">Sign in</a></div>`;
+  const html = (u) => u === undefined ? `<p class="agentora-muted">Couldn't reach the Image &amp; Video Studio, which holds the accounts.</p>`
+    : u ? `<p>👤 <b>${esc(u.name)}</b>${u.role === "admin" ? ' <span class="agentora-muted">· admin</span>' : ""}</p>
+        <div class="agentora-links"><button type="button" class="agentora-btn" data-agentora-signout>Sign out</button></div>`
+    : `<p class="agentora-muted">Not signed in.</p><div class="agentora-links"><a class="agentora-btn" href="${studio}/">Sign in</a></div>`;
   async function fill(el) { if (last) el.innerHTML = last; last = html(await who()); el.innerHTML = last; }
-  const fillAll = () => document.querySelectorAll("[data-b70-account]").forEach(fill);
+  const fillAll = () => document.querySelectorAll("[data-agentora-account]").forEach(fill);
   document.addEventListener("click", async (e) => {
-    const b = e.target.closest("[data-b70-signout]"); if (!b) return;
+    const b = e.target.closest("[data-agentora-signout]"); if (!b) return;
     b.disabled = true; b.textContent = "Signing out…";
     await fetch(url("/api/logout"), {method: "POST", credentials: "include"}).catch(() => {});
     if (here) return location.reload();          // a clean page: nothing of this account stays on screen
@@ -138,10 +138,10 @@ window.b70Account = (() => {
 })();
 
 // ---- ☰ control panel for apps without their own (Home, Music Studio): radio, GPU and priority, disk, apps.
-// A page opts in with <button data-b70-panel></button> where the ☰ goes. Works on both servers: the radio's (:7860)
+// A page opts in with <button data-agentora-panel></button> where the ☰ goes. Works on both servers: the radio's (:7860)
 // and the Studio's (:7870) expose the same facts under slightly different paths.
 (() => {
-  const btn = document.querySelector("[data-b70-panel]");
+  const btn = document.querySelector("[data-agentora-panel]");
   if (!btn) return;
   const onRadio = location.port === "7860";
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
@@ -169,10 +169,10 @@ window.b70Account = (() => {
   const setPriority = (v) => fetch(onRadio ? "/api/gpu/priority" : "/api/gpu-priority", {method: "POST",
     headers: {"Content-Type": "application/json"}, body: JSON.stringify({priority: v})});
 
-  btn.className = "b70-panelbtn"; btn.type = "button"; btn.innerHTML = "☰"; btn.title = "Control panel: radio, GPU, disk and apps";
+  btn.className = "agentora-panelbtn"; btn.type = "button"; btn.innerHTML = "☰"; btn.title = "Control panel: radio, GPU, disk and apps";
   btn.setAttribute("aria-label", "Open the control panel"); btn.setAttribute("aria-expanded", "false");
-  const fade = document.createElement("div"); fade.className = "b70-fade"; fade.hidden = true;
-  const side = document.createElement("aside"); side.className = "b70-side"; side.hidden = true; side.setAttribute("aria-label", "Control panel");
+  const fade = document.createElement("div"); fade.className = "agentora-fade"; fade.hidden = true;
+  const side = document.createElement("aside"); side.className = "agentora-side"; side.hidden = true; side.setAttribute("aria-label", "Control panel");
   document.body.append(fade, side);
   let timer = 0;
   const open = (on) => {
@@ -186,32 +186,32 @@ window.b70Account = (() => {
   async function render() {
     let f, msg = "";
     try { f = await facts(); } catch (e) { msg = "Couldn't reach the server."; }
-    const card = (title, body) => `<section class="b70-card"><h3>${title}</h3>${body}</section>`;
-    const bar = (used, total, warn) => `<div class="b70-meter"><i style="width:${Math.min(100, 100 * used / total).toFixed(1)}%"${warn ? ' class="warn"' : ""}></i></div>`;
+    const card = (title, body) => `<section class="agentora-card"><h3>${title}</h3>${body}</section>`;
+    const bar = (used, total, warn) => `<div class="agentora-meter"><i style="width:${Math.min(100, 100 * used / total).toFixed(1)}%"${warn ? ' class="warn"' : ""}></i></div>`;
     const r = f && f.radio;
-    side.innerHTML = `<div class="b70-sidehead"><b>Control panel</b><button type="button" class="b70-x" aria-label="Close the control panel" title="Close">✕</button></div>
-      ${msg ? `<p class="b70-muted">${msg}</p>` : ""}
-      ${card("👤 Account", `<div data-b70-account></div>`)}
-      ${f ? card("📻 Radio", r ? `<p>${r.on ? `<b>${esc(r.now || "Next song on the way…")}</b><br><span class="b70-muted">${esc(r.station || "")} · ${r.listeners} listening</span>`
-              : `<span class="b70-muted">The radio is off.</span>`}</p>
-            <p class="b70-muted">${r.making ? `${r.making} song${r.making === 1 ? "" : "s"} being made` : "Nothing being made"}${r.gpu && r.gpu !== f.waiting ? ` · ${esc(r.gpu)}` : ""}</p>
-            <a class="b70-btn" href="${app(7860, "/radio")}" data-app="radio">Open the radio</a>` : `<p class="b70-muted">The radio isn't answering.</p>`) : ""}
-      ${f ? card("GPU", `${f.vram ? `${bar(f.vram[0], f.vram[1], f.vram[0] / f.vram[1] > 0.92)}<p class="b70-muted">${(f.vram[0] / 1024).toFixed(1)} of ${Math.round(f.vram[1] / 1024)} GB in use · ${esc(f.vram[2])}</p>` : ""}
-            ${f.choices ? `<p class="b70-label">Who goes first</p>
-            <div class="b70-prio" role="group" aria-label="GPU priority">${Object.entries(f.choices || {}).map(([k, l]) =>
+    side.innerHTML = `<div class="agentora-sidehead"><b>Control panel</b><button type="button" class="agentora-x" aria-label="Close the control panel" title="Close">✕</button></div>
+      ${msg ? `<p class="agentora-muted">${msg}</p>` : ""}
+      ${card("👤 Account", `<div data-agentora-account></div>`)}
+      ${f ? card("📻 Radio", r ? `<p>${r.on ? `<b>${esc(r.now || "Next song on the way…")}</b><br><span class="agentora-muted">${esc(r.station || "")} · ${r.listeners} listening</span>`
+              : `<span class="agentora-muted">The radio is off.</span>`}</p>
+            <p class="agentora-muted">${r.making ? `${r.making} song${r.making === 1 ? "" : "s"} being made` : "Nothing being made"}${r.gpu && r.gpu !== f.waiting ? ` · ${esc(r.gpu)}` : ""}</p>
+            <a class="agentora-btn" href="${app(7860, "/radio")}" data-app="radio">Open the radio</a>` : `<p class="agentora-muted">The radio isn't answering.</p>`) : ""}
+      ${f ? card("GPU", `${f.vram ? `${bar(f.vram[0], f.vram[1], f.vram[0] / f.vram[1] > 0.92)}<p class="agentora-muted">${(f.vram[0] / 1024).toFixed(1)} of ${Math.round(f.vram[1] / 1024)} GB in use · ${esc(f.vram[2])}</p>` : ""}
+            ${f.choices ? `<p class="agentora-label">Who goes first</p>
+            <div class="agentora-prio" role="group" aria-label="GPU priority">${Object.entries(f.choices || {}).map(([k, l]) =>
               `<button type="button" data-prio="${k}" aria-pressed="${k === f.priority}">${esc(l)}</button>`).join("")}</div>` : ""}
-            ${f.waiting ? `<p class="b70-muted">${esc(f.waiting)}</p>` : ""}<p class="b70-muted" data-prio-msg></p>`) : ""}
-      ${f && f.disk ? card("Disk", `${bar(f.disk.used, f.disk.total, f.disk.free / f.disk.total < 0.1)}<p class="b70-muted">${gb(f.disk.free)} GB free of ${Math.round(f.disk.total / 2 ** 30)} GB</p>`) : ""}
-      ${card("Apps", `<div class="b70-links">
-          <a class="b70-btn" href="${app(7870, "/home")}" data-app="home">🏠 Home</a><a class="b70-btn" href="${app(7860, "/radio")}" data-app="radio">📻 Radio</a>
-          <a class="b70-btn" href="${app(7870, "/")}" data-app="studio">🖼 Image &amp; Video</a><a class="b70-btn" href="${app(7860, "/")}" data-app="music">🎵 Music</a>
-          <a class="b70-btn" href="${app(7880, "/")}" target="_blank" rel="noopener">☤ Hermes dashboard</a></div>`)}`;
-    side.querySelector(".b70-x").onclick = () => open(false);
-    side.querySelectorAll("[data-b70-account]").forEach(window.b70Account.fill);
+            ${f.waiting ? `<p class="agentora-muted">${esc(f.waiting)}</p>` : ""}<p class="agentora-muted" data-prio-msg></p>`) : ""}
+      ${f && f.disk ? card("Disk", `${bar(f.disk.used, f.disk.total, f.disk.free / f.disk.total < 0.1)}<p class="agentora-muted">${gb(f.disk.free)} GB free of ${Math.round(f.disk.total / 2 ** 30)} GB</p>`) : ""}
+      ${card("Apps", `<div class="agentora-links">
+          <a class="agentora-btn" href="${app(7870, "/home")}" data-app="home">🏠 Home</a><a class="agentora-btn" href="${app(7860, "/radio")}" data-app="radio">📻 Radio</a>
+          <a class="agentora-btn" href="${app(7870, "/")}" data-app="studio">🖼 Image &amp; Video</a><a class="agentora-btn" href="${app(7860, "/")}" data-app="music">🎵 Music</a>
+          <a class="agentora-btn" href="${app(7880, "/")}" target="_blank" rel="noopener">☤ Hermes dashboard</a></div>`)}`;
+    side.querySelector(".agentora-x").onclick = () => open(false);
+    side.querySelectorAll("[data-agentora-account]").forEach(window.agentoraAccount.fill);
   }
   side.addEventListener("click", async (e) => {
     const a = e.target.closest("a[data-app]");
-    if (a && window.b70Open) { e.preventDefault(); open(false); return window.b70Open(a.dataset.app); }
+    if (a && window.agentoraOpen) { e.preventDefault(); open(false); return window.agentoraOpen(a.dataset.app); }
     const p = e.target.closest("[data-prio]"); if (!p) return;
     const r = await setPriority(p.dataset.prio).catch(() => null);
     if (!r || !r.ok) { const m = side.querySelector("[data-prio-msg]"); if (m) m.textContent = r && r.status === 403 ? "Only an admin can change this." : "Couldn't change it."; return; }

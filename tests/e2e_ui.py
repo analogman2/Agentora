@@ -39,7 +39,7 @@ with sync_playwright() as p:
     pg = ctx.new_page()
     pg.on("pageerror", lambda e: errors.append(f"page error: {e}"))
     pg.on("console", lambda m: errors.append(f"console {m.type}: {m.text}") if m.type == "error" else None)
-    pg.on("requestfailed", lambda r: errors.append(f"request failed: {r.url}") if "/web/" in r.url or "/b70/" in r.url else None)
+    pg.on("requestfailed", lambda r: errors.append(f"request failed: {r.url}") if "/web/" in r.url or "/agentora/" in r.url else None)
     js = pg.evaluate
 
     def shot(name):
@@ -110,8 +110,8 @@ with sync_playwright() as p:
         js("document.querySelector('[data-ui=easy]').click()"); time.sleep(0.4)
         easy = js("document.body.classList.contains('easy') && getComputedStyle(document.getElementById('adv')).display === 'none'")
         must(adv and easy, f"advanced={adv} easy={easy}")
-        js("document.querySelector('.b70-panelbtn').click()"); time.sleep(2); shot("music-panel")
-        panel = js("document.querySelector('.b70-side').innerText")
+        js("document.querySelector('.agentora-panelbtn').click()"); time.sleep(2); shot("music-panel")
+        panel = js("document.querySelector('.agentora-side').innerText")
         must("GPU" in panel and "Apps" in panel.title() or "APPS" in panel, "panel content")
         return "Easy/Advanced switch, ☰ panel"
     check("Music Studio", music)
@@ -119,8 +119,8 @@ with sync_playwright() as p:
     print("Home")
     def home():
         pg.goto(A.studio + "/home"); time.sleep(3)
-        js("document.querySelector('.b70-panelbtn').click()"); time.sleep(2); shot("home-panel")
-        panel = js("document.querySelector('.b70-side').innerText")
+        js("document.querySelector('.agentora-panelbtn').click()"); time.sleep(2); shot("home-panel")
+        panel = js("document.querySelector('.agentora-side').innerText")
         must("Radio" in panel or "RADIO" in panel, "panel content"); return "☰ panel"
     check("Home", home)
 

@@ -23,7 +23,7 @@ Agentora is a fork of [zebgop-ops/yue2-xpu-radio](https://github.com/zebgop-ops/
 | <img src="docs/screens/image-studio.png" width="300"> | <img src="docs/screens/video-studio.png" width="300"> | <img src="docs/screens/home.png" width="300"> |
 | Pictures with Z-Image Turbo, ✨ Improve for prompts, LoRAs, ComfyUI workflows | Videos with Wan 2.2, from text or starting from one of your pictures | What's on, GPU and disk, and a chat with the local Hermes assistant |
 
-The **radio and Music Studio** are in this repository (`studio/`). The **Image & Video Studio and Home page** are in `image-studio/` (a small aiohttp front end over ComfyUI on port 7870, plus the sign-in gate for the Hermes dashboard on 7880). They share one look and an app switcher (`/b70/b70.css`, `/b70/b70.js`), so moving between apps keeps the radio playing in its own tab.
+The **radio and Music Studio** are in this repository (`studio/`). The **Image & Video Studio and Home page** are in `image-studio/` (a small aiohttp front end over ComfyUI on port 7870, plus the sign-in gate for the Hermes dashboard on 7880). They share one look and an app switcher (`/agentora/agentora.css`, `/agentora/agentora.js`), so moving between apps keeps the radio playing in its own tab.
 
 ## What it does
 
@@ -81,7 +81,7 @@ The code, by job:
 | `studio/index.html` | the Music Studio |
 | `studio/logsetup.py` | logging for every component |
 | `tests/e2e_radio.py`, `tests/e2e_ui.py` | end-to-end tests (below) |
-| `image-studio/` | the Image & Video Studio and Home page (`server.py`, port 7870), ComfyUI workflows and models (`workflows.py`, `models.py`), users and sign-in (`auth.py`), the Hermes dashboard gate (`hermes_gate.py`, port 7880), and the shared look and app switcher (`shared/b70.css`, `shared/b70.js`). Its own notes: `image-studio/AGENTS.md` |
+| `image-studio/` | the Image & Video Studio and Home page (`server.py`, port 7870), ComfyUI workflows and models (`workflows.py`, `models.py`), users and sign-in (`auth.py`), the Hermes dashboard gate (`hermes_gate.py`, port 7880), and the shared look and app switcher (`shared/agentora.css`, `shared/agentora.js`). Its own notes: `image-studio/AGENTS.md` |
 | `tools/tailnet-relay.py` | serves the apps (7860, 7861, 7870, 7880) on the Tailscale and home-network addresses, with HTTPS from the Tailscale certificate |
 | `systemd/` | user units for every service: `yue2-studio`, `agentora-stream`, `agentora-gpu`, `agentora-speech`, `genstudio`, `hermes-gate`, `tailnet-relay` |
 
@@ -229,7 +229,7 @@ tools/activity.py                 # who's here now (last 10 min), and who's list
 tools/activity.py --since 24h     # a timeline per person and device (--all adds the heartbeats)
 ```
 
-**Manage users** in the Image & Video Studio shows each account's **last seen** time, with its device and app, and how many sign-ins it has active.
+**Manage users** in the Image & Video Studio shows each account's **last seen** time with its device, app and IP address, and lists its active sign-ins: the device and IP each one was made from and last used from (kept in `sessions.json`).
 
 ## Tests
 
