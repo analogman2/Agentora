@@ -1014,20 +1014,36 @@ def agent_user(request):
     return None
 
 
+# Agentora's own apps on this machine (radio + Music Studio, this Studio, the Hermes gate) may ask who's signed in and
+# sign out: one account across every app. Any other site is refused.
+OWN_PORTS = {"7860", "7870", "7880"}
+CORS_PATHS = {"/api/session", "/api/logout"}
+
+
+def own_origin(origin, request):
+    hostport = origin.split("://", 1)[-1]
+    host, _, port = hostport.rpartition(":")
+    return hostport == request.host or (host == request.host.rpartition(":")[0] and port in OWN_PORTS)
+
+
 @web.middleware
 async def guard(request, handler):
     """Every request: who is it (session cookie), are they signed in, and is a change coming from this site."""
     request["user"] = auth.user_for(request.cookies.get(auth.COOKIE)) or agent_user(request)
     if request.method not in ("GET", "HEAD"):
         origin = request.headers.get("Origin")
-        if origin and origin.split("://", 1)[-1] != request.host:      # another website trying to act as the user
-            raise web.HTTPForbidden(text="Cross-site request refused")
+        if origin and not (origin.split("://", 1)[-1] == request.host or (request.path in CORS_PATHS and own_origin(origin, request))):
+            raise web.HTTPForbidden(text="Cross-site request refused")      # another website trying to act as the user
     if request.path not in PUBLIC_PATHS and not request.path.startswith(("/b70/", "/api/nowplaying")) and not request["user"]:
         raise web.HTTPUnauthorized(text="Please sign in")
     try:
-        return await handler(request)
+        resp = await handler(request)
     except auth.AuthError as e:
         raise web.HTTPBadRequest(text=str(e))
+    origin = request.headers.get("Origin")
+    if origin and request.path in CORS_PATHS and own_origin(origin, request):   # the radio's and the gate's account card
+        resp.headers.update({"Access-Control-Allow-Origin": origin, "Access-Control-Allow-Credentials": "true", "Vary": "Origin"})
+    return resp
 
 
 def require_admin(request):

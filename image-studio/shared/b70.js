@@ -112,6 +112,31 @@
   document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
 })();
 
+// ---- 👤 Account, from any app: the Studio (:7870) holds the accounts, so every page asks it who's signed in and signs
+// out there (one account across the Studio, Home and the Hermes dashboard). A page opts in with <div data-b70-account>.
+window.b70Account = (() => {
+  const studio = `${location.protocol}//${location.hostname}:7870`, here = location.port === "7870";
+  const url = (p) => here ? p : studio + p;
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+  let last = "";
+  const who = () => fetch(url("/api/session"), {credentials: "include", cache: "no-store"}).then(r => r.ok ? r.json() : null).then(d => d && d.user).catch(() => undefined);
+  const html = (u) => u === undefined ? `<p class="b70-muted">Couldn't reach the Image &amp; Video Studio, which holds the accounts.</p>`
+    : u ? `<p>👤 <b>${esc(u.name)}</b>${u.role === "admin" ? ' <span class="b70-muted">· admin</span>' : ""}</p>
+        <div class="b70-links"><button type="button" class="b70-btn" data-b70-signout>Sign out</button></div>`
+    : `<p class="b70-muted">Not signed in.</p><div class="b70-links"><a class="b70-btn" href="${studio}/">Sign in</a></div>`;
+  async function fill(el) { if (last) el.innerHTML = last; last = html(await who()); el.innerHTML = last; }
+  const fillAll = () => document.querySelectorAll("[data-b70-account]").forEach(fill);
+  document.addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-b70-signout]"); if (!b) return;
+    b.disabled = true; b.textContent = "Signing out…";
+    await fetch(url("/api/logout"), {method: "POST", credentials: "include"}).catch(() => {});
+    if (here) return location.reload();          // a clean page: nothing of this account stays on screen
+    last = ""; fillAll();                          // elsewhere (the radio) keep playing, just show it signed out
+  });
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", fillAll); else fillAll();
+  return {who, fill, fillAll};
+})();
+
 // ---- ☰ control panel for apps without their own (Home, Music Studio): radio, GPU and priority, disk, apps.
 // A page opts in with <button data-b70-panel></button> where the ☰ goes. Works on both servers: the radio's (:7860)
 // and the Studio's (:7870) expose the same facts under slightly different paths.
@@ -166,6 +191,7 @@
     const r = f && f.radio;
     side.innerHTML = `<div class="b70-sidehead"><b>Control panel</b><button type="button" class="b70-x" aria-label="Close the control panel" title="Close">✕</button></div>
       ${msg ? `<p class="b70-muted">${msg}</p>` : ""}
+      ${card("👤 Account", `<div data-b70-account></div>`)}
       ${f ? card("📻 Radio", r ? `<p>${r.on ? `<b>${esc(r.now || "Next song on the way…")}</b><br><span class="b70-muted">${esc(r.station || "")} · ${r.listeners} listening</span>`
               : `<span class="b70-muted">The radio is off.</span>`}</p>
             <p class="b70-muted">${r.making ? `${r.making} song${r.making === 1 ? "" : "s"} being made` : "Nothing being made"}${r.gpu && r.gpu !== f.waiting ? ` · ${esc(r.gpu)}` : ""}</p>
@@ -181,6 +207,7 @@
           <a class="b70-btn" href="${app(7870, "/")}" data-app="studio">🖼 Image &amp; Video</a><a class="b70-btn" href="${app(7860, "/")}" data-app="music">🎵 Music</a>
           <a class="b70-btn" href="${app(7880, "/")}" target="_blank" rel="noopener">☤ Hermes dashboard</a></div>`)}`;
     side.querySelector(".b70-x").onclick = () => open(false);
+    side.querySelectorAll("[data-b70-account]").forEach(window.b70Account.fill);
   }
   side.addEventListener("click", async (e) => {
     const a = e.target.closest("a[data-app]");
