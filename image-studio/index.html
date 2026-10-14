@@ -1,0 +1,2108 @@
+<!doctype html>
+<html lang="en" data-b70-app="studio">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111214">
+<title>Image Studio</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23f2a65a'/><circle cx='12' cy='12' r='4' fill='%23111214'/><path d='M4 26l9-9 6 6 4-4 5 7z' fill='%23111214'/></svg>">
+<style>
+:root {
+  --bg: #ffffff; --panel: #ffffff; --panel-2: #f4f5f7; --line: #e6e8ec;
+  --text: #1d1f23; --muted: #6b7079; --accent: #3157e0; --accent-ink: #ffffff; --accent-soft: #e8edfd;
+  --ok: #1f9d55; --warn: #c27c0e; --err: #d6453d; --shadow: 0 1px 2px rgba(16,24,40,.06), 0 6px 18px rgba(16,24,40,.07);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1115; --panel: #15181d; --panel-2: #1d2027; --line: #272b33;
+    --text: #e9eaee; --muted: #9ba1ab; --accent: #7d97ff; --accent-ink: #0d1226; --accent-soft: #1d2440;
+    --ok: #5fd08e; --warn: #f2c14e; --err: #ff7b72; --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1115; --panel: #15181d; --panel-2: #1d2027; --line: #272b33;
+  --text: #e9eaee; --muted: #9ba1ab; --accent: #7d97ff; --accent-ink: #0d1226; --accent-soft: #1d2440;
+  --ok: #5fd08e; --warn: #f2c14e; --err: #ff7b72; --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+.nav { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+.nav-in { max-width: 1280px; margin: 0 auto; height: 64px; padding: 0 20px; display: flex; align-items: center; gap: 28px; }
+.brand { font-weight: 800; letter-spacing: .02em; white-space: nowrap; text-decoration: none; font-size: 17px; color: var(--text); }
+.brand span { color: var(--accent); }
+.navtabs { display: flex; gap: 26px; }
+.navtabs a { text-decoration: none; color: var(--muted); font-size: 15px; padding: 21px 0 19px; border-bottom: 2px solid transparent; white-space: nowrap; }
+.navtabs a:hover { color: var(--text); }
+.navtabs a.on { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
+.search { flex: 1; max-width: 340px; margin: 0 auto; position: relative; }
+.search input { width: 100%; border: 0; background: var(--panel-2); border-radius: 999px; padding: 9px 16px 9px 40px; outline: none; font-size: 15px; margin: 0; }
+.search input:focus { box-shadow: 0 0 0 2px var(--accent); }
+.search svg { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--muted); }
+.sidebtn { display: inline-flex; align-items: center; gap: 8px; background: none; border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; font-size: 14px; white-space: nowrap; }
+.sidebtn .dot { font-size: 12px; color: var(--muted); }
+.sidebtn .dot.busy { color: var(--accent); font-weight: 700; }
+@media (max-width: 860px) {
+  .nav-in { gap: 12px; height: auto; flex-wrap: wrap; padding: 10px 14px 0; }
+  .brand { order: 1; } .sidebtn { order: 2; margin-left: auto; }
+  .search { order: 3; flex-basis: 100%; max-width: none; }
+  .navtabs { order: 4; flex-basis: 100%; gap: 16px; overflow-x: auto; scrollbar-width: none; }
+  .navtabs::-webkit-scrollbar { display: none; }
+  .navtabs a { padding: 10px 0 9px; }
+}
+body.view-creations .composer { display: none; }
+body.view-creations .layout { grid-template-columns: 1fr; }
+button, input, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+.wrap { max-width: 1280px; margin: 0 auto; padding: 24px 20px 48px; }
+header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+header h1 { font-size: 19px; margin: 0; letter-spacing: -.01em; }
+.gpu { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+.meter { width: 90px; height: 6px; border-radius: 3px; background: var(--panel-2); overflow: hidden; }
+.meter > i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .4s; }
+.banner { display: none; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 14px; margin-bottom: 16px;
+  border: 1px solid var(--line); border-left: 3px solid var(--warn); border-radius: 10px; background: var(--panel); font-size: 14px; }
+.banner.show { display: flex; }
+.banner span { flex: 1; min-width: 200px; }
+.layout { display: grid; grid-template-columns: 380px 1fr; gap: 20px; align-items: start; }
+@media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; box-shadow: var(--shadow); }
+.layout > * { min-width: 0; }                 /* long inputs/lists must not widen the column */
+.composer { position: sticky; top: 84px; }
+@media (max-width: 860px) { .composer { position: static; } }
+.tabs { display: grid; grid-template-columns: repeat(3, 1fr); background: var(--panel-2); border-radius: 999px; padding: 4px; margin-bottom: 16px; }
+.tabs button { border: 0; background: none; padding: 8px; border-radius: 999px; font-weight: 600; color: var(--muted); font-size: 14px; }
+.tabs button.on { background: var(--text); color: var(--bg); }
+label.lbl { display: block; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .14em; margin: 16px 0 8px; }
+textarea { width: 100%; min-height: 110px; resize: vertical; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--bg); outline: none; }
+textarea:focus, input:focus { border-color: var(--accent); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips button { border: 1px solid var(--line); background: var(--panel); padding: 6px 14px; border-radius: 999px; font-size: 13px; }
+.chips button:hover { border-color: var(--muted); }
+.chips button.on { border-color: var(--text); background: var(--text); color: var(--bg); font-weight: 600; }
+.chips button:disabled { opacity: .45; cursor: default; }
+.wfdrop { border: 2px dashed var(--line); border-radius: 12px; padding: 14px; text-align: center; transition: border-color .15s, background .15s; }
+.wfdrop.over { border-color: var(--accent); background: var(--panel-2); }
+.wfdrop b { display: block; font-size: 15px; }
+.wfdrop .hint { font-size: 12px; color: var(--muted); margin: 4px 0 10px; }
+.wfdrop .row { display: flex; gap: 6px; margin-top: 6px; }
+.wfdrop .row input { flex: 1; min-width: 0; margin: 0; }
+.wflist { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.wflist button { flex: none; width: 82px; border: 2px solid transparent; background: none; padding: 0; border-radius: 10px; text-align: left; font-size: 11px; color: var(--muted); }
+.wflist button.on { border-color: var(--accent); }
+.wflist img, .wflist .noimg { width: 78px; height: 78px; object-fit: cover; border-radius: 8px; display: block; background: var(--panel-2); }
+.wflist span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 3px 2px; }
+.wfhead { display: flex; gap: 10px; align-items: center; margin: 14px 0 4px; }
+.wfhead img { width: 48px; height: 48px; border-radius: 8px; object-fit: cover; }
+.wfhead .t { flex: 1; min-width: 0; } .wfhead .t b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.req { list-style: none; margin: 6px 0 0; padding: 0; font-size: 13px; }
+.req li { padding: 7px 0; border-top: 1px solid var(--line); }
+.req .nm { font-weight: 600; word-break: break-all; }
+.req .st { font-size: 12px; color: var(--muted); }
+.req .ok { color: #2f9e5c; } .req .need { color: #c27c0e; } .req .bad { color: var(--err); }
+.req input { margin-top: 6px; font-size: 13px; padding: 6px 8px; }
+.req .sugg { display: block; font-size: 12px; margin-top: 4px; }
+.lblrow { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.lblrow .improve { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.btn.imp { padding: 3px 10px; font-size: 12px; }
+.impmsg { font-size: 12px; color: var(--muted); }
+.prio { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+#mRate { grid-template-columns: repeat(3, 1fr); }
+.mselbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 8px; font-size: 13px; color: var(--muted); }
+.mselbar .btn { padding: 5px 10px; font-size: 13px; }
+.mselbar .mrate { display: inline-flex; gap: 4px; align-items: center; }
+.mrows li.sel { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 10px; }
+.mrows .tick { flex: none; width: 18px; height: 18px; border-radius: 5px; border: 2px solid var(--line); display: grid; place-items: center; font-size: 12px; font-style: normal; color: #fff; }
+.mrows li.sel .tick { background: var(--accent); border-color: var(--accent); }
+.mrows .tx .rbadge { display: inline-block; width: auto; }
+.rbadge { font-size: 11px; font-weight: 600; border: 1px solid; border-radius: 999px; padding: 0 7px; margin-left: 6px; vertical-align: 1px; white-space: nowrap; }
+.prio button { font-size: 13px; padding: 6px 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+.prio button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.prio button:disabled { cursor: default; }
+.prio button:disabled:not([aria-pressed="true"]) { opacity: .6; }
+#engine { width: 100%; }
+#engineNote { margin-top: 4px; min-height: 0; }
+#engineNote:empty { display: none; }
+.lrow { display: grid; grid-template-columns: minmax(0, 1fr) 76px auto; gap: 6px; align-items: center; margin: 6px 0; }
+.lrow select, .lrow input { min-width: 0; }
+.lrow .words { grid-column: 1 / -1; font-size: 12px; color: var(--muted); margin-top: -2px; }
+#loraBox summary .muted { font-weight: 400; }
+.picgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; padding-bottom: 16px; }
+.picgrid button { padding: 0; border: 2px solid transparent; border-radius: 10px; background: var(--panel-2); aspect-ratio: 1; overflow: hidden; cursor: pointer; }
+.picgrid button:hover, .picgrid button:focus-visible { border-color: var(--accent); }
+.picgrid img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.kindico { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 6px; color: #fff; vertical-align: middle; }
+.kindico svg { width: 14px; height: 14px; }
+.kindico.image { background: #3b82f6; } .kindico.video { background: #a855f7; }
+.wflist button { position: relative; }
+.wflist button > .kindico { position: absolute; top: 4px; left: 4px; box-shadow: 0 1px 3px rgba(0,0,0,.35); }
+body.view-workflows .wflist button > .kindico { position: static; box-shadow: none; order: -1; }
+.wfhead .kindico { width: 26px; height: 26px; } .wfhead .kindico svg { width: 16px; height: 16px; }
+.wfbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.wfbar .btn { padding: 5px 10px; font-size: 13px; }
+.wfbar .btn.primary, .mselbar .btn.primary { width: auto; margin-top: 0; padding: 5px 12px; font-size: 13px; font-weight: 600; }
+#wfSelBar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+.wflist button .tick { flex: none; width: 18px; height: 18px; border-radius: 5px; border: 2px solid var(--line); display: grid; place-items: center; font-size: 12px; color: #fff; }
+.wflist button.sel .tick { background: var(--accent); border-color: var(--accent); }
+.wflist button.sel { border-color: var(--accent); }
+.wflist .needs { font-size: 11px; color: #c27c0e; }
+#wfBatch { margin: 6px 0; } #wfBatch:empty { display: none; }
+#wfBatch .box { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--panel-2); font-size: 13px; }
+#wfBatch .req { max-height: 340px; overflow: auto; }
+.req .for { font-size: 11px; color: var(--muted); }
+.prog2 { height: 5px; border-radius: 3px; background: var(--line); overflow: hidden; margin-top: 4px; } .prog2 i { display: block; height: 100%; background: var(--accent); }
+.fgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.fgrid label { font-size: 12px; color: var(--muted); display: block; }
+.fgrid > div { min-width: 0; }
+.fgrid input[type=number] { margin-top: 3px; width: 100%; min-width: 0; padding: 7px 9px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); }
+.source { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px; border: 1px dashed var(--line); border-radius: 10px; }
+.source img { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; }
+.source .hint { font-size: 13px; color: var(--muted); flex: 1 1 160px; }
+a.btn { text-decoration: none; color: inherit; display: inline-block; }
+.btn { border: 1px solid var(--line); background: var(--panel); padding: 7px 14px; border-radius: 999px; font-size: 14px; color: var(--text); text-decoration: none; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { width: 100%; margin-top: 18px; padding: 12px; border: 0; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 16px; }
+.btn.primary:hover { filter: brightness(1.06); }
+.btn.primary:disabled { opacity: .55; cursor: default; }
+.btn.danger { color: var(--err); }
+.estimate { text-align: center; font-size: 12px; color: var(--muted); margin-top: 8px; }
+details { margin-top: 12px; font-size: 14px; }
+details summary { color: var(--muted); cursor: pointer; }
+input[type=text] { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); outline: none; margin-top: 6px; }
+:root { color-scheme: light dark; }                        /* native dropdown lists follow the theme */
+select, input[type=number] { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text);
+  font: inherit; font-size: 14px; outline: none; max-width: 100%; }
+select:focus, input[type=number]:focus { border-color: var(--accent); }
+.err { color: var(--err); font-size: 13px; margin-top: 8px; min-height: 1em; }
+.gallery-head { display: flex; align-items: baseline; gap: 10px; margin: 2px 0 14px; }
+.gallery-head h2 { font-size: 11px; margin: 0; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.gallery-head .muted { color: var(--muted); font-size: 13px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 18px; }
+@media (max-width: 520px) { .grid { grid-template-columns: repeat(2, 1fr); gap: 8px; } }
+.card { position: relative; border-radius: 8px; overflow: hidden; background: var(--panel-2); aspect-ratio: 1; box-shadow: var(--shadow); }
+.card img, .card video { width: 100%; height: 100%; object-fit: cover; display: block; cursor: zoom-in; transition: transform .25s; }
+.card:hover img, .card:hover video { transform: scale(1.03); }
+.card .cap { position: absolute; left: 0; right: 0; bottom: 0; padding: 26px 56px 10px 12px; color: #fff; font-size: 13px; line-height: 1.35;
+             background: linear-gradient(transparent, rgba(0,0,0,.65)); opacity: 0; transition: opacity .2s; pointer-events: none;
+             display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.card:hover .cap, .card:focus-within .cap { opacity: 1; }
+@media (hover: none) { .card .cap { display: none; } }
+.card .trash { position: absolute; right: 8px; bottom: 8px; width: 38px; height: 38px; border-radius: 50%; border: 0; padding: 0;
+               display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); color: #fff; cursor: pointer;
+               backdrop-filter: blur(4px); transition: background .15s, transform .15s; }
+.card .trash:hover, .card .trash:focus-visible { background: #d93025; transform: scale(1.06); }
+.undo { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%) translateY(16px); z-index: 30; display: flex; align-items: center; gap: 14px;
+        background: #202124; color: #fff; padding: 10px 12px 10px 18px; border-radius: 12px; box-shadow: 0 6px 24px rgba(0,0,0,.3);
+        font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; }
+.undo.show { opacity: 1; transform: translateX(-50%); pointer-events: auto; }
+.undo button { border: 0; background: none; color: #8ab4f8; font-weight: 700; font-size: 14px; cursor: pointer; padding: 4px 8px; border-radius: 6px; }
+.undo button:hover { background: rgba(255,255,255,.1); }
+.card .tag { position: absolute; top: 8px; left: 8px; font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 6px; background: rgba(0,0,0,.6); color: #fff; }
+.card .pending { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; gap: 8px; padding: 14px; font-size: 13px; }
+.card .pending .p { color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.card .pending b { font-size: 14px; }
+.card .bar { height: 5px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.card .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .5s; }
+.card .bar.indet > i { width: 30%; animation: slide 1.4s ease-in-out infinite; }
+@keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+.card .pending .btn { align-self: flex-start; padding: 4px 10px; font-size: 13px; }
+.card.failed .pending b { color: var(--err); }
+.empty { color: var(--muted); padding: 40px 0; text-align: center; grid-column: 1 / -1; }
+.lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.82); display: none; z-index: 10; padding: 16px; overflow: auto; }
+.lightbox.show { display: flex; align-items: center; justify-content: center; }
+.lb-inner { background: var(--panel); border-radius: 14px; max-width: 1100px; width: 100%; display: grid; grid-template-columns: 1fr 300px; overflow: hidden; }
+@media (max-width: 860px) { .lb-inner { grid-template-columns: 1fr; } }
+.lb-media { background: #000; display: flex; align-items: center; justify-content: center; min-height: 240px; }
+.lb-media img, .lb-media video { max-width: 100%; max-height: 82vh; display: block; }
+.lb-side { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.lb-side .prompt { white-space: pre-wrap; font-size: 14px; max-height: 30vh; overflow: auto; }
+.lb-side .meta { font-size: 12px; color: var(--muted); }
+.lb-side .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; }
+.lb-ask { border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 12px; padding: 12px 14px; }
+.lb-ask b { display: block; font-size: 15px; }
+.lb-ask span { display: block; font-size: 13px; color: var(--muted); margin: 2px 0 10px; }
+.lb-ask .row { display: flex; gap: 8px; flex-wrap: wrap; }
+.lb-ask .btn.primary { width: auto; margin: 0; padding: 8px 16px; font-size: 14px; }
+.loaded-note { margin-top: 10px; font-size: 13px; color: var(--muted); }
+.loaded-note .btn { margin-top: 6px; }
+.auth { position: fixed; inset: 0; z-index: 50; background: var(--bg); display: none; align-items: center; justify-content: center; padding: 20px; }
+.auth.show { display: flex; }
+.auth-card { width: min(380px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 26px 24px; box-shadow: var(--shadow); }
+.auth-card h2 { margin: 0 0 4px; font-size: 20px; }
+.auth-card p { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
+.auth-card label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 5px; }
+.auth-card input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); font-size: 15px; outline: none; }
+.auth-card input:focus { border-color: var(--accent); }
+.auth-card .btn.primary { width: 100%; margin-top: 18px; }
+.auth-card .err { margin-top: 10px; }
+.userbtn { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 4px 12px; font-size: 13px; position: relative; }
+.menu { position: absolute; right: 0; top: calc(100% + 6px); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow);
+        min-width: 190px; padding: 6px; display: none; z-index: 15; text-align: left; }
+.menu.show { display: block; }
+.menu button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 8px 10px; border-radius: 8px; font-size: 14px; }
+.menu button:hover { background: var(--panel-2); }
+.menu .who { padding: 6px 10px 8px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.utable { width: 100%; border-collapse: collapse; font-size: 14px; }
+.utable td { padding: 8px 4px; border-top: 1px solid var(--line); vertical-align: middle; }
+.utable select { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); }
+.utable .btn { padding: 4px 9px; font-size: 13px; margin-left: 4px; }
+@media (max-width: 520px) {
+  .utable tr { display: grid; grid-template-columns: 1fr auto; border-top: 1px solid var(--line); }
+  .utable td { border-top: 0; }
+  .utable td:last-child { grid-column: 1 / -1; text-align: left !important; white-space: normal !important; padding-top: 0; }
+  .utable td:last-child .btn:first-child { margin-left: 0; }
+}
+.form-row { display: grid; grid-template-columns: 1fr 1fr auto auto; gap: 6px; margin-top: 8px; }
+@media (max-width: 520px) { .form-row { grid-template-columns: 1fr 1fr; } }
+.form-row input, .form-row select { padding: 7px 9px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); min-width: 0; }
+.setbtn { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 4px 12px; font-size: 13px; }
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; z-index: 20; padding: 16px; overflow: auto; }
+.modal.show { display: flex; align-items: flex-start; justify-content: center; }
+.modal-inner { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; width: min(560px, 100%); margin-top: 4vh; }
+.modal-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.modal-body { padding: 4px 16px 0; max-height: 78vh; overflow: auto; }
+.set h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 16px 0 4px; }
+.set .f { padding: 8px 0; border-top: 1px solid var(--line); }
+.set .f label { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-weight: 600; font-size: 14px; }
+.set .f input[type=number] { width: 90px; flex: none; text-align: right; margin: 0; }
+.set .f select { flex: none; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); }
+.set .f input[type=checkbox] { width: 20px; height: 20px; flex: none; }
+.set .f textarea { min-height: 70px; margin-top: 6px; font-size: 13px; }
+.set .hlp { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.set .def { color: var(--accent); cursor: pointer; text-decoration: underline; }
+.set .bar { position: sticky; bottom: 0; background: var(--panel); display: flex; gap: 8px; align-items: center; padding: 10px 0 12px; border-top: 1px solid var(--line); margin-top: 10px; }
+.set .bar .btn.primary { width: auto; margin: 0; padding: 8px 16px; font-size: 14px; }
+.lb-close { position: fixed; top: 10px; right: 14px; background: none; border: 0; color: #fff; font-size: 30px; line-height: 1; }
+
+/* ---------- control panel (account, GPU, queue, studios, settings) */
+.side { position: fixed; top: 0; right: 0; bottom: 0; width: 310px; max-width: 88vw; z-index: 40; background: var(--panel);
+        border-left: 1px solid var(--line); box-shadow: -12px 0 30px rgba(0,0,0,.18); transform: translateX(105%);
+        transition: transform .22s ease; display: flex; flex-direction: column; }
+.side.open { transform: none; }
+.side .sh { display: flex; align-items: center; gap: 6px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.side .sh strong { flex: 1; }
+.side .sb { padding: 14px 16px 24px; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
+.side .scard { border: 1px solid var(--line); border-radius: 10px; padding: 12px; background: var(--panel); }
+.side .scard h3 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); }
+.side .big { font-size: 22px; font-weight: 700; line-height: 1.2; }
+.side .smeter { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin: 8px 0 4px; }
+.side .smeter i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s; }
+.side .smeter i.warn { background: #d99a1e; } .side .smeter i.full { background: var(--err); }
+.diskparts { list-style: none; margin: 6px 0 0; padding: 0; font-size: 12px; color: var(--muted); }
+.diskparts li { display: flex; justify-content: space-between; gap: 8px; padding: 1px 0; }
+.diskparts li b { font-weight: 500; color: var(--text); white-space: nowrap; }
+.side .links { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.side .links .btn { text-align: left; }
+.side .small { font-size: 13px; color: var(--muted); }
+.side .x { font-size: 16px; line-height: 1; background: none; border: 1px solid transparent; border-radius: 7px; padding: 5px 7px; }
+.side .x:hover { border-color: var(--line); }
+.side .x[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.sidefade { position: fixed; inset: 0; z-index: 39; background: rgba(0,0,0,.35); display: none; }
+.sidefade.show { display: block; }
+#pinBtn { display: none; }
+@media (min-width: 1100px) {
+  #pinBtn { display: inline-block; }
+  body.pinned .side { transform: none; box-shadow: none; z-index: 21; }   /* above the sticky top bar */
+  body.pinned .sidefade { display: none; }
+  body.pinned .wrap, body.pinned .nav-in { margin-right: max(326px, calc((100vw - 1280px) / 2)); }
+  body.pinned #sideBtn { display: none; }
+}
+
+/* ---------- resizable text boxes: auto-grow, a drag bar underneath, ⤢ for a tall editor */
+textarea { resize: vertical; max-height: 85vh; }
+.tawrap { position: relative; }
+.tawrap textarea { display: block; padding-right: 40px; }
+.tagrip { height: 14px; margin-top: -1px; cursor: ns-resize; touch-action: none; display: flex; align-items: center; justify-content: center; }
+.tagrip::before { content: ""; width: 40px; height: 4px; border-radius: 2px; background: var(--line); transition: background .15s; }
+.tagrip:hover::before, .tagrip.drag::before { background: var(--muted); }
+.tabig { position: absolute; top: 6px; right: 6px; width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--line);
+         background: var(--panel); color: var(--muted); font-size: 15px; line-height: 1; padding: 0; opacity: .75; cursor: pointer; }
+.tabig:hover, .tabig:focus-visible { opacity: 1; color: var(--text); }
+.tawrap.big .tabig { color: var(--accent); opacity: 1; }
+
+/* ---------- Models page */
+body.view-models .layout, body.view-models .banner { display: none !important; }
+#modelsPage[hidden] { display: none; }
+.mhead { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+.mhead h1 { font-size: 26px; margin: 0; }
+.pills { display: flex; gap: 8px; flex-wrap: wrap; }
+.pills button { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 6px 16px; font-size: 14px; }
+.pills button.on { background: var(--text); color: var(--bg); border-color: var(--text); }
+.mbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 18px; }
+.mbar input[type=search], .mbar select { padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); font-size: 14px; }
+.mbar input[type=search] { flex: 1; min-width: 200px; }
+.mbar label { font-size: 14px; display: flex; gap: 6px; align-items: center; }
+.mgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 22px 18px; }
+@media (max-width: 520px) { .mgrid { grid-template-columns: repeat(2, 1fr); gap: 16px 12px; } }
+.mtile { text-align: left; background: none; border: 0; padding: 0; min-width: 0; }
+.mtile .art { position: relative; aspect-ratio: 4 / 5; border-radius: 8px; overflow: hidden; background: var(--panel-2); box-shadow: var(--shadow); }
+.mtile .art img, .mtile .art video { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .25s; }
+.mtile:hover .art img { transform: scale(1.04); }
+.mtile .badge { position: absolute; left: 8px; top: 8px; font-size: 11px; font-weight: 700; background: rgba(0,0,0,.65); color: #fff; padding: 2px 8px; border-radius: 999px; }
+.mtile .t1 { font-weight: 600; margin-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mtile .t2 { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.blur { filter: blur(18px); }
+.mrows { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.mrows li { display: flex; gap: 14px; align-items: center; padding: 10px 6px; border-bottom: 1px solid var(--line); }
+.mrows li:hover { background: var(--panel-2); }
+.mrows .th { width: 54px; height: 54px; border-radius: 6px; object-fit: cover; flex: none; background: var(--panel-2); display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.mrows .tx { flex: 1; min-width: 0; } .mrows .tx b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.mrows .tx span { font-size: 13px; color: var(--muted); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mrows .sz { font-size: 13px; color: var(--muted); flex: none; }
+.mgroup { margin-top: 26px; } .mgroup h3 { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
+.dlbox { border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; margin-bottom: 18px; background: var(--panel); }
+.dlbox .it { padding: 6px 0; font-size: 14px; } .dlbox .it + .it { border-top: 1px solid var(--line); }
+.mdlg .modal-inner { width: min(980px, 100%); }
+.mdetail { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+@media (max-width: 760px) { .mdetail { grid-template-columns: 1fr; } }
+.mstrip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 6px; }
+.mstrip img, .mstrip video { height: 220px; border-radius: 8px; flex: none; cursor: pointer; background: var(--panel-2); }
+.mtext { white-space: pre-wrap; font-size: 14px; color: var(--muted); max-height: 260px; overflow: auto; }
+.trig { display: inline-block; font-family: ui-monospace, monospace; font-size: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; margin: 2px; cursor: copy; }
+.mfiles { list-style: none; padding: 0; margin: 0; } .mfiles li { padding: 10px 0; border-top: 1px solid var(--line); }
+.mfiles .row1 { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.mfiles b { word-break: break-all; } .mfiles select { padding: 5px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); }
+.mfiles .btn.primary { width: auto; margin: 0; padding: 7px 14px; font-size: 14px; }
+.okc { color: var(--ok); } .badc { color: var(--err); }
+
+/* ---------- hide creations (privacy switch) */
+.hidebtn { display: inline-flex; align-items: center; gap: 6px; background: none; border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; font-size: 14px; white-space: nowrap; }
+.hidebtn:hover { border-color: var(--muted); }
+body.hide-creations .hidebtn { background: var(--text); color: var(--bg); border-color: var(--text); }
+.hiddennote { display: none; padding: 40px 16px; text-align: center; color: var(--muted); border: 2px dashed var(--line); border-radius: 12px; }
+body.hide-creations .hiddennote { display: block; }
+body.hide-creations #grid, body.hide-creations #lb, body.hide-creations .wflist img, body.hide-creations .wfhead img,
+body.hide-creations [data-imgprev], body.hide-creations #sourceImg, body.hide-creations #picGrid img { display: none !important; }
+body.hide-creations .qp { filter: blur(6px); }
+@media (max-width: 860px) { .hidebtn { order: 2; } .hidebtn .lbl2 { display: none; } }
+
+/* ---------- Workflows view: the whole page is for importing and running workflows (no gallery) */
+body.view-workflows .layout { grid-template-columns: 1fr; }
+body.view-workflows .layout > section:not(.composer), body.view-workflows .banner { display: none !important; }
+body.view-workflows .composer { position: static; max-width: 1180px; width: 100%; }
+body.view-workflows .composer > .tabs { display: none; }
+body.view-workflows #wfPanel:not([hidden]) { display: grid; grid-template-columns: minmax(280px, 380px) minmax(0, 1fr); gap: 32px; align-items: start; }
+body.view-workflows #wfDetail { min-width: 0; border-left: 1px solid var(--line); padding-left: 32px; min-height: 300px; }
+body.view-workflows #wfDetail:empty::before { content: "Import a workflow, or pick one from My workflows."; color: var(--muted); display: block; padding-top: 14px; }
+body.view-workflows .wflist { flex-direction: column; overflow: visible; gap: 2px; }
+body.view-workflows .wflist button { width: 100%; display: flex; align-items: center; gap: 10px; padding: 6px; border: 1px solid transparent; font-size: 14px; color: var(--text); }
+body.view-workflows .wflist button:hover { background: var(--panel-2); }
+body.view-workflows .wflist button.on { border-color: var(--accent); background: var(--accent-soft); }
+body.view-workflows .wflist img, body.view-workflows .wflist .noimg { width: 40px; height: 40px; border-radius: 6px; flex: none; }
+body.view-workflows .wflist span { padding: 0; }
+@media (max-width: 860px) {
+  body.view-workflows #wfPanel:not([hidden]) { grid-template-columns: 1fr; gap: 18px; }
+  body.view-workflows #wfDetail { border-left: 0; padding-left: 0; border-top: 1px solid var(--line); padding-top: 6px; }
+}
+
+/* ---------- assistant panel ---------- */
+.asst { position: fixed; right: 16px; bottom: 16px; width: 600px; max-width: calc(100vw - 32px); height: min(620px, calc(100vh - 32px));
+        z-index: 45; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 8px 32px rgba(0,0,0,.3);
+        display: flex; flex-direction: column; overflow: hidden; }
+.asst[hidden] { display: none; }
+.asst .ah { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.asst .ah strong { flex: 1; }
+.asst .al { flex: 1; overflow: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.asst .m { max-width: 88%; padding: 8px 11px; border-radius: 12px; line-height: 1.45; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.asst .m.me { align-self: flex-end; background: var(--accent, #6c8aff); color: white; border-bottom-right-radius: 4px; }
+.asst .m.ai { align-self: flex-start; background: var(--panel-2, #2a2a30); border-bottom-left-radius: 4px; }
+.asst .m.ai code { background: var(--line, #444); padding: 0 4px; border-radius: 4px; font-size: 13px; }
+.asst .m.err { align-self: stretch; background: transparent; border: 1px solid var(--err, #d33); color: var(--err, #d33); }
+.asst .tools { font-size: 12px; color: var(--muted); margin: 0 0 4px; }
+.asst .af { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
+.asst .af .ia { position: relative; flex: 1; }
+.asst .af textarea { width: 100%; resize: none; min-height: 44px; max-height: 40vh; font: inherit; font-size: 14px; padding: 8px 42px 8px 10px;
+                    border: 1px solid var(--line); border-radius: 10px; background: var(--bg, #1a1a20); color: var(--text, #e0e0e8); display: block; }
+.asst .af .ia button { position: absolute; right: 6px; bottom: 6px; font-size: 13px; padding: 4px 12px; }
+.asst .af[hidden] { display: none; }
+.asst .typing::after { content: "▍"; animation: astBlink 1s steps(2) infinite; }
+@keyframes astBlink { 50% { opacity: 0; } }
+@media (max-width: 560px) { .asst { inset: 0; width: auto; max-width: none; height: auto; border-radius: 0; border: 0; } }
+
+/* app switcher (same in the radio, the Image & Video Studio and the Music Studio) */
+@media (max-width: 440px) { .nav .brand { display: none; } }             /* the switcher already says which app this is */
+@media (max-width: 1200px) { .nav-in { gap: 18px; } .navtabs { gap: 18px; } }
+</style>
+<link rel="stylesheet" href="/b70/b70.css">
+</head>
+<body>
+<nav class="nav"><div class="nav-in">
+  <a class="brand" href="#create">∞ b70 <span>studio</span></a>
+  <div data-b70-apps></div>
+  <div class="navtabs">
+    <a href="#create" data-view="create">Create</a>
+    <a href="#creations" data-view="creations">My creations</a>
+    <a href="#workflows" data-view="workflows">Workflows</a>
+    <a href="#models" data-view="models">Models</a>
+  </div>
+  <label class="search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    <input type="search" id="q" placeholder="Search my creations" aria-label="Search my creations"></label>
+  <button class="hidebtn" id="hideBtn" aria-pressed="false" title="Hide your pictures and videos (H)"><span id="hideIcon">👁</span><span class="lbl2" id="hideLbl">Hide</span></button>
+  <button class="sidebtn" id="sideBtn" aria-controls="side" aria-expanded="false" title="Account, GPU, queue, studios and settings">☰ <span class="dot" id="sideBadge">👤</span></button>
+</div></nav>
+
+<div class="sidefade" id="sideFade"></div>
+<aside class="side" id="side" aria-label="Control panel">
+  <div class="sh"><strong>Control panel</strong>
+    <button class="x" id="pinBtn" aria-pressed="false" title="Keep the panel open beside the studio">📌</button>
+    <button class="x" id="sideClose" title="Hide the panel" aria-label="Hide the panel">✕</button></div>
+  <div class="sb">
+    <section class="scard"><h3>Account</h3>
+      <div class="big">👤 <span id="userName">…</span></div><div class="small" id="userWho"></div>
+      <div class="links"><button class="btn" id="mPw">Change password</button><button class="btn" id="mUsers" hidden>Manage users</button><button class="btn" id="mOut">Sign out</button></div></section>
+    <section class="scard"><h3>Queue</h3><div id="qText" class="small">Nothing being made.</div></section>
+    <section class="scard"><h3>GPU</h3>
+      <div id="gpuWho" class="small">…</div>
+      <div class="smeter" aria-hidden="true"><i id="gpuBar"></i></div><div class="small" id="gpuText">memory —</div>
+      <div class="small" style="margin:10px 0 4px;font-weight:600" id="prioLbl">Priority</div>
+      <div class="prio" id="prio" role="group" aria-labelledby="prioLbl"></div>
+      <div class="small" id="prioNote" style="margin:6px 0 8px"></div>
+      <div class="links"><button class="btn" id="freeBtn2" title="Switches the radio off and unloads chat models">Free the GPU</button></div></section>
+    <section class="scard"><h3>Disk</h3>
+      <div class="smeter" role="meter" aria-label="Disk space used" aria-valuemin="0" aria-valuemax="100" id="diskMeter"><i id="diskBar"></i></div>
+      <div class="small" id="diskText">—</div>
+      <ul class="diskparts" id="diskParts"></ul></section>
+    <section class="scard"><h3>Studios</h3><div class="links">
+      <a class="btn" id="lnRadio" href="#" data-app="radio">📻 Radio</a><a class="btn" id="lnMusic" href="#" data-app="music">🎵 Music Studio</a>
+      <a class="btn" id="lnHermes" href="#" target="_blank" rel="noopener" hidden title="Settings, sessions, skills, tools and chat for the Hermes AI agent (admins)">☤ Hermes dashboard</a>
+      <a class="btn" id="lnComfy" href="http://127.0.0.1:8188/" target="_blank" rel="noopener" hidden>🧩 ComfyUI editor (this PC only)</a></div></section>
+    <section class="scard"><h3>Settings</h3><div class="links"><button class="btn" id="setBtn">⚙ Open settings</button></div></section>
+    <section class="scard"><h3>Assistant</h3><div class="links"><button class="btn" id="asstOpen">💬 Open chat</button></div></section>
+  </div>
+</aside>
+
+<!-- Assistant panel -->
+<div class="asst" id="asst" role="dialog" aria-modal="false">
+  <div class="ah"><strong>✦ <span id="asstUser">Assistant</span></strong>
+    <div class="small" id="asstWho"></div>
+    <button data-b70-brain></button>
+    <button class="x" id="asstClose" title="Close">✕</button></div>
+  <div id="asstLog" class="al"></div>
+  <form class="af" id="asstForm">
+    <div class="ia">
+      <textarea id="asstIn" placeholder="Message…" rows="1" aria-label="Message"></textarea>
+      <button type="submit" id="asstSend" aria-label="Send">➤</button>
+    </div>
+  </form>
+</div>
+
+<div class="wrap">
+
+  <div class="banner" id="banner"><span id="bannerText"></span><button class="btn" id="freeBtn">Free the GPU</button></div>
+
+  <section id="modelsPage" hidden>
+    <div class="mhead"><h1>Models</h1>
+      <div class="pills" id="mTabs"><button data-mt="civitai">Civitai</button><button data-mt="hf">Hugging Face</button><button data-mt="installed">Installed</button></div></div>
+    <div id="mDownloads"></div>
+    <div id="mBody"></div>
+  </section>
+
+  <div class="layout">
+    <section class="panel composer">
+      <div class="tabs">
+        <button data-kind="image" class="on">Picture</button>
+        <button data-kind="video">Video</button>
+        <button data-kind="workflow" title="Use a ComfyUI workflow from a picture or video">Workflow</button>
+      </div>
+
+      <div id="basicPanel">
+      <label class="lbl" for="engine">Model</label>
+      <select id="engine" aria-describedby="engineNote"></select>
+      <div class="hint" id="engineNote"></div>
+      <div class="lblrow"><label class="lbl" for="prompt">Describe it</label><span class="improve"><button type="button" class="btn imp" data-improve="prompt"
+        title="Rewrite your prompt into a fuller one for the picture or video model, keeping your idea">✨ Improve</button><span class="impmsg" data-impmsg="prompt" role="status"></span></span></div>
+      <textarea id="prompt" placeholder="A red fox sitting in fresh snow at golden hour, photorealistic"></textarea>
+
+      <div id="videoOnly" hidden>
+        <label class="lbl">Start from a picture <span style="text-transform:none;font-weight:400">(optional)</span></label>
+        <div class="source" id="source">
+          <img id="sourceImg" hidden alt="">
+          <div class="hint" id="sourceHint">Leave empty to make a video from the text alone, or pick a picture to bring it to life.</div>
+          <button class="btn" id="uploadBtn">Choose picture</button>
+          <button class="btn" id="clearSource" hidden>Remove</button>
+          <input type="file" id="file" accept="image/*" hidden>
+        </div>
+        <label class="lbl">Length</label>
+        <div class="chips" id="seconds"></div>
+      </div>
+
+      <div id="cwfBox" hidden></div>
+      <label class="lbl" id="aspectLbl">Shape</label>
+      <div class="chips" id="aspect"></div>
+
+      <div id="imageOnly">
+        <label class="lbl">How many</label>
+        <div class="chips" id="count"></div>
+      </div>
+
+      <details id="loraBox">
+        <summary>LoRAs <span class="muted" id="loraCount"></span></summary>
+        <div id="loraRows"></div>
+        <button class="btn" id="loraAdd" type="button">+ Add LoRA</button>
+        <div class="hint" id="loraHint"></div>
+      </details>
+
+      <details>
+        <summary>Advanced</summary>
+        <label class="lbl" for="seed">Seed</label>
+        <input type="text" id="seed" inputmode="numeric" placeholder="Random">
+      </details>
+
+      <button class="btn primary" id="go">Create</button>
+      <div class="estimate" id="estimate"></div>
+      <div class="err" id="err"></div>
+      </div>
+
+      <div id="wfPanel" hidden>
+        <div class="wfleft"><div class="wfdrop" id="wfDrop">
+          <b>Use a ComfyUI workflow</b>
+          <div class="hint">Drop pictures or videos made with ComfyUI (several at once is fine), paste files, or paste Civitai image links. The workflow, models and nodes are read from each.</div>
+          <button class="btn" id="wfPick">Choose files</button><input type="file" id="wfFile" accept="image/*,video/*" multiple hidden>
+          <div class="row"><input type="text" id="wfUrl" placeholder="https://civitai.com/images/… (several: separate with spaces)" aria-label="Links to pictures or Civitai images"><button class="btn" id="wfUrlGo">Import</button></div>
+        </div>
+        <div id="wfMsg" role="status"></div><div class="err" id="wfNote" role="status"></div>
+        <div class="wfbar"><label class="lbl">My workflows</label><span id="wfSelBar"></span></div>
+        <div id="wfBatch"></div>
+        <div class="wflist" id="wfList"><span class="hint">None yet.</span></div></div>
+        <div id="wfDetail"></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="gallery-head"><h2>Your creations</h2><span class="muted" id="summary"></span></div>
+      <div class="hiddennote" id="hiddenNote">🙈 <b>Creations hidden</b><br><span style="font-size:13px">Press the eye button or <kbd>H</kbd> to show them again.</span></div>
+      <div class="grid" id="grid"><div class="empty">Nothing yet. Describe something and press Create.</div></div>
+    </section>
+  </div>
+</div>
+
+<div class="auth" id="auth" role="dialog" aria-modal="true" aria-labelledby="authTitle"><form class="auth-card" id="authForm" autocomplete="on">
+  <h2 id="authTitle">Sign in</h2><p id="authSub">Image &amp; Video Studio</p>
+  <label for="aUser">Username</label><input id="aUser" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+  <label for="aPass">Password</label><input id="aPass" name="password" type="password" autocomplete="current-password" required>
+  <div id="aConfirmWrap" hidden><label for="aConfirm">Confirm password</label><input id="aConfirm" type="password" autocomplete="new-password"></div>
+  <button class="btn primary" id="aGo" type="submit">Sign in</button><div class="err" id="aErr" role="alert"></div>
+</form></div>
+
+<div class="modal" id="picDlg" role="dialog" aria-modal="true" aria-labelledby="picTitle">
+  <div class="modal-inner"><div class="modal-head"><strong id="picTitle">Choose a picture</strong><button class="btn" id="picClose">Close</button></div>
+  <div class="modal-body"><div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin:0 0 8px"><span class="hint">Pictures you've made here, newest first.</span><button class="btn" id="picUpload">Upload from device</button></div><div class="picgrid" id="picGrid"></div></div></div>
+</div>
+<div class="modal" id="accDlg" role="dialog" aria-modal="true" aria-labelledby="accTitle">
+  <div class="modal-inner"><div class="modal-head"><strong id="accTitle">Account</strong><button class="btn" id="accClose">Close</button></div>
+  <div class="modal-body" id="accBody" style="padding-bottom:16px"></div></div>
+</div>
+
+<div class="undo" id="undo" role="status" aria-live="polite"><span id="undoText">Deleted</span><button id="undoBtn">Undo</button></div>
+
+<div class="modal" id="setDlg" role="dialog" aria-modal="true" aria-labelledby="setTitle">
+  <div class="modal-inner"><div class="modal-head"><strong id="setTitle">Settings</strong><button class="btn" id="setClose">Close</button></div>
+  <div class="modal-body set" id="setBody"></div></div>
+</div>
+
+<div class="modal mdlg" id="mDlg" role="dialog" aria-modal="true" aria-labelledby="mDlgTitle">
+  <div class="modal-inner"><div class="modal-head"><strong id="mDlgTitle">Model</strong><button class="btn" id="mDlgClose">Close</button></div>
+  <div class="modal-body" id="mDlgBody" style="padding-bottom:18px"></div></div>
+</div>
+
+<div class="lightbox" id="lb">
+  <button class="lb-close" id="lbClose" aria-label="Close">×</button>
+  <div class="lb-inner">
+    <div class="lb-media" id="lbMedia"></div>
+    <div class="lb-side">
+      <div class="lb-ask" id="lbAsk" role="region" aria-label="Load settings">
+        <b>Make another like this?</b><span>Load the settings used to create it into the composer.</span>
+        <div class="row"><button class="btn primary" id="lbLoad">Load settings</button><button class="btn" id="lbNo">No thanks</button></div></div>
+      <div class="prompt" id="lbPrompt"></div>
+      <div class="meta" id="lbMeta"></div>
+      <div class="actions">
+        <a class="btn" id="lbDownload" download>Download</a>
+        <button class="btn" id="lbReuse" title="Load the settings used to create this">Load settings</button>
+        <button class="btn" id="lbAnimate">Animate</button>
+        <button class="btn danger" id="lbDelete">Delete</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const OPTIONS = {
+  image: { aspect: ["1:1", "3:2", "2:3", "16:9", "9:16"] },
+  video: { aspect: ["16:9", "9:16", "1:1"] },
+};
+const ui = { kind: "image", aspect: { image: "1:1", video: "16:9" }, count: 1, seconds: 5, source: null,
+             engine: { image: "builtin", video: "builtin" }, loras: { image: [], video: [] }, wfImages: {}, builtinPrompt: "" };
+const cards = new Map();
+let jobsById = {}, lbJob = null, pollTimer = null;
+
+// the Create panel's draft (prompt, shape, LoRAs...) is kept per account, never shared between people on one browser
+const uiKey = () => "genstudio.ui." + (ME ? ME.name : "");
+function saved() { try { return ME ? JSON.parse(localStorage.getItem(uiKey()) || "{}") : {}; } catch { return {}; } }
+function remember() { if (!ME) return; try { localStorage.setItem(uiKey(), JSON.stringify({ kind: ui.kind, aspect: ui.aspect, count: ui.count, seconds: ui.seconds, engine: ui.engine, loras: ui.loras,
+  prompt: cwfActive() ? ui.builtinPrompt : $("#prompt").value })); } catch {} }
+try { localStorage.removeItem("genstudio"); } catch {}  // the old shared draft from before accounts had their own
+function restoreUi() {
+  Object.assign(ui, (({ kind, aspect, count, seconds, engine, loras }) => ({ ...(kind && { kind }), ...(aspect && { aspect }), ...(count && { count }), ...(seconds && { seconds }),
+    ...(engine && { engine }), ...(loras && { loras }) }))(saved()));
+  $("#prompt").value = ui.builtinPrompt = saved().prompt || "";
+}
+
+function chips(el, values, current, fmt, onPick, disabled) {
+  el.innerHTML = "";
+  for (const v of values) {
+    const b = document.createElement("button");
+    b.textContent = fmt ? fmt(v) : v;
+    b.className = v === current ? "on" : "";
+    b.disabled = !!disabled;
+    b.onclick = () => { onPick(v); render(); remember(); };
+    el.appendChild(b);
+  }
+}
+
+function render() {
+  document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("on", b.dataset.kind === ui.kind));
+  const wfMode = ui.kind === "workflow";
+  $("#basicPanel").hidden = wfMode; $("#wfPanel").hidden = !wfMode;
+  if (wfMode) { if (!wf.loaded && ME) loadWorkflows(); return; }
+  const video = ui.kind === "video";
+  renderEngine(); renderLoras();
+  const wfOn = cwfActive();
+  $("#videoOnly").hidden = !video || wfOn;
+  $("#imageOnly").hidden = video && !wfOn;
+  $("#aspectLbl").hidden = $("#aspect").hidden = wfOn;
+  $("#cwfBox").hidden = !wfOn;
+  chips($("#aspect"), OPTIONS[ui.kind].aspect, video && ui.source ? null : ui.aspect[ui.kind], null,
+        v => ui.aspect[ui.kind] = v, video && ui.source);
+  chips($("#count"), [1, 2, 4], ui.count, null, v => ui.count = v);
+  const maxS = SET ? SET.values.video_max_seconds : 5;
+  chips($("#seconds"), Array.from({length: Math.max(1, maxS - 1)}, (_, i) => i + 2).filter(n => n <= maxS), ui.seconds, v => v + " s", v => ui.seconds = v);
+  $("#sourceImg").hidden = !ui.source;
+  $("#clearSource").hidden = !ui.source;
+  if (ui.source) { $("#sourceImg").src = ui.source.url; $("#sourceHint").textContent = "The video starts from this picture. Its shape is used automatically."; }
+  else $("#sourceHint").textContent = "Leave empty to make a video from the text alone, or pick a picture to bring it to life.";
+  $("#prompt").placeholder = video
+    ? (ui.source ? "What happens? e.g. the fox turns its head and snow starts falling" : "A red fox trotting through snow at golden hour, the camera tracking alongside")
+    : "A red fox sitting in fresh snow at golden hour, photorealistic";
+  if (wfOn) { $("#estimate").textContent = ""; return; }
+  const v = SET ? SET.values : {video_steps: 30, video_fps: "24", video_resolution: "720p", image_steps: 8, image_megapixels: "1"};
+  const vidMin = ui.seconds * (v.video_steps / 30) * (+v.video_fps / 24) * (v.video_resolution === "480p" ? 0.45 : 1);
+  const imgSec = 10 * (v.image_steps / 8) * (+v.image_megapixels);
+  $("#estimate").textContent = video
+    ? `About ${vidMin < 1 ? "1" : Math.round(vidMin)} min on the RTX 4090`
+    : `About ${Math.max(5, Math.round(imgSec * 0.6))}–${Math.round(imgSec * 1.5)} seconds per picture`;
+}
+
+document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => { ui.kind = b.dataset.kind; render(); remember(); });
+$("#prompt").addEventListener("input", () => { if (!cwfActive()) ui.builtinPrompt = $("#prompt").value; remember(); });
+$("#prompt").addEventListener("keydown", e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) create(); });
+$("#uploadBtn").onclick = () => pickPicture(src => { ui.source = src; render(); }, () => $("#file").click());
+$("#clearSource").onclick = () => { ui.source = null; render(); };
+$("#file").onchange = async () => {
+  const f = $("#file").files[0]; if (!f) return;
+  const fd = new FormData(); fd.append("file", f);
+  $("#err").textContent = "Uploading…";
+  try {
+    const r = await fetch("/api/upload", { method: "POST", body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    const d = await r.json();
+    ui.source = { upload: d.upload, url: d.url };
+    $("#err").textContent = "";
+  } catch (e) { $("#err").textContent = e.message; }
+  $("#file").value = ""; render();
+};
+
+// ---------- Create panel: model picker (built-in or one of your imported workflows) and extra LoRAs
+const BUILTIN = { image: "Built-in · Z-Image Turbo", video: "Built-in · Wan 2.2 5B" };
+const cwf = { cards: {}, loading: {}, failed: {} };                  // workflow id -> details (fields, saved values, readiness)
+const cwfActive = () => ui.kind !== "workflow" && ui.engine[ui.kind] !== "builtin" && wf.list.some(x => x.id === ui.engine[ui.kind] && x.kind === ui.kind);
+const posField = (card) => card && card.plan && (card.plan.fields.find(f => f.type === "text" && f.label === "Prompt") || card.plan.fields.find(f => f.type === "text"));
+const savedVal = (card, f) => card.saved && card.saved[f.id] && card.saved[f.id].value != null ? card.saved[f.id].value : f.value;
+
+function renderEngine() {
+  if (!wf.loaded && ME && !cwf.listing) { cwf.listing = true; loadWorkflows().finally(() => { cwf.listing = false; }); }
+  const sel = $("#engine"), mine = wf.list.filter(x => x.kind === ui.kind && !x.blocked);
+  if (ui.engine[ui.kind] !== "builtin" && wf.loaded && !mine.some(x => x.id === ui.engine[ui.kind])) ui.engine[ui.kind] = "builtin";
+  sel.innerHTML = `<option value="builtin">${BUILTIN[ui.kind]}</option>` + (mine.length ? `<optgroup label="Your workflows">${mine.map(x =>
+    `<option value="${x.id}">${escapeHtml(x.name.slice(0, 70))}${x.ready === false ? " (needs downloads)" : ""}</option>`).join("")}</optgroup>` : "");
+  sel.value = ui.engine[ui.kind];
+  const note = $("#engineNote");
+  if (!cwfActive()) { note.innerHTML = !wf.loaded ? "" : mine.length ? "" : `<span>Import ComfyUI workflows in the Workflows tab to use them here.</span>`; return; }
+  const card = cwf.cards[ui.engine[ui.kind]];
+  if (cwf.failed[ui.engine[ui.kind]]) { note.innerHTML = `<span class="err" style="display:inline">${escapeHtml(cwf.failed[ui.engine[ui.kind]])}</span> <a href="#" id="cwfRetry">Try again</a>`;
+    $("#cwfRetry").onclick = (e) => { e.preventDefault(); delete cwf.failed[ui.engine[ui.kind]]; render(); }; return; }
+  if (!card) { note.textContent = "⟳ Checking the workflow…"; loadCwf(ui.engine[ui.kind]); return; }
+  const p = card.plan;
+  if (p.blocked && p.blocked.length) { note.innerHTML = `<span class="err" style="display:inline">This workflow uses models that aren't available on this account.</span>`; return; }
+  note.innerHTML = (p.ready ? `<span style="color:#2f9e5c">Ready ✓</span>` : `<span class="err" style="display:inline">Needs downloads before it can run.</span>`) +
+    ` · <a href="#" id="cwfOpen">${p.ready ? "More settings" : "Open it"} in Workflows</a>` + (posField(card) ? "" : " · This workflow has no prompt box; your text is ignored.");
+  $("#cwfOpen").onclick = (e) => { e.preventDefault(); ui.kind = "workflow"; render(); remember(); openWorkflow(card.id); };
+  renderCwfInputs(card);
+}
+async function loadCwf(id, fresh) {
+  if (cwf.loading[id] && !fresh) return;
+  cwf.loading[id] = true;
+  try {
+    const r = await fetch(`/api/workflows/${id}`);
+    if (!r.ok) cwf.failed[id] = `Couldn't load the workflow: ${(await r.text()).slice(0, 160)}`;
+    if (r.ok) {
+      const card = await r.json(); cwf.cards[id] = card;
+      const pf = posField(card);
+      if (pf && ui.engine[card.plan.kind] === id && cwfActive()) $("#prompt").value = savedVal(card, pf);
+    }
+  } catch (e) { cwf.failed[id] = "Couldn't load the workflow: " + e.message;
+  } finally { cwf.loading[id] = false; }
+  render();
+}
+function renderCwfInputs(card) {
+  const box = $("#cwfBox"), pics = card.plan.fields.filter(f => f.type === "image");
+  box.innerHTML = pics.map(f => {
+    const cur = ui.wfImages[f.id];
+    return `<label class="lbl">${escapeHtml(f.label)}</label><div class="source"><img src="${cur ? escapeHtml(cur.url) : ""}" ${cur ? "" : "hidden"} alt="">
+      <div class="hint" style="flex:1">${cur ? "This picture is used." : "Choose the picture this workflow starts from."}</div><button class="btn" data-cwfpic="${escapeHtml(f.id)}">Choose picture</button></div>`;
+  }).join("");
+  box.querySelectorAll("[data-cwfpic]").forEach(b => b.onclick = () => pickPicture(src => { ui.wfImages[b.dataset.cwfpic] = src; render(); }, () => {
+    const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*";
+    inp.onchange = async () => {
+      const fd = new FormData(); fd.append("file", inp.files[0]); $("#err").textContent = "Uploading…";
+      const r = await fetch("/api/upload", {method: "POST", body: fd});
+      if (!r.ok) { $("#err").textContent = await r.text(); return; }
+      const d = await r.json(); $("#err").textContent = ""; ui.wfImages[b.dataset.cwfpic] = {upload: d.upload, url: d.url}; render();
+    };
+    inp.click();
+  }));
+}
+$("#engine").onchange = () => {
+  const was = cwfActive();
+  if (!was) ui.builtinPrompt = $("#prompt").value;
+  ui.engine[ui.kind] = $("#engine").value;
+  if (cwfActive()) { const card = cwf.cards[ui.engine[ui.kind]], pf = posField(card); if (pf) $("#prompt").value = savedVal(card, pf); }
+  else $("#prompt").value = ui.builtinPrompt;
+  render(); remember();
+};
+let cwfSaveT = 0;
+$("#prompt").addEventListener("input", () => {             // a workflow's prompt is saved with that workflow
+  if (!cwfActive()) return;
+  const card = cwf.cards[ui.engine[ui.kind]], pf = posField(card); if (!pf) return;
+  card.saved = {...(card.saved || {}), [pf.id]: {value: $("#prompt").value}};
+  clearTimeout(cwfSaveT);
+  cwfSaveT = setTimeout(() => saveWorkflowValues(card.id, {[pf.id]: {value: $("#prompt").value}}), 700);
+});
+async function saveWorkflowValues(id, values) {
+  try { await fetch(`/api/workflows/${id}/values`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify({values})}); } catch {}
+  if (wf.cur && wf.cur.id === id) wf.cur.saved = {...(wf.cur.saved || {}), ...values};
+  if (cwf.cards[id]) cwf.cards[id].saved = {...(cwf.cards[id].saved || {}), ...values};
+}
+async function createWithWorkflow(prompt, loras) {
+  const card = cwf.cards[ui.engine[ui.kind]];
+  if (!card) { $("#err").textContent = "Still checking the workflow — try again in a moment."; return; }
+  if (card.plan.blocked && card.plan.blocked.length) { $("#err").textContent = "This workflow uses models that aren't available on this account."; return; }
+  if (!card.plan.ready) { $("#err").textContent = "This workflow needs downloads first: open it in Workflows."; return; }
+  const values = {};
+  for (const f of card.plan.fields) {                    // everything as last saved for this workflow, then this prompt
+    const sv = card.saved && card.saved[f.id];
+    if (sv && ["text", "int", "float", "seed"].includes(f.type)) values[f.id] = {...sv};
+  }
+  const pf = posField(card); if (pf) values[pf.id] = {value: prompt};
+  const seed = $("#seed").value.trim(), sf = card.plan.fields.find(f => f.type === "seed");
+  if (sf && /^-?\d+$/.test(seed)) values[sf.id] = {value: Number(seed), random: false};
+  const images = {};
+  for (const f of card.plan.fields.filter(f => f.type === "image")) {
+    const src = ui.wfImages[f.id];
+    if (!src) { $("#err").textContent = `Choose a picture for “${f.label}” first.`; return; }
+    images[f.id] = src.job ? {job: src.job, index: src.index || 0} : src.upload;
+  }
+  $("#go").disabled = true; $("#err").textContent = "";
+  try {
+    const r = await fetch(`/api/workflows/${card.id}/run`, {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({values, images, count: ui.count, loras})});
+    if (!r.ok) throw new Error(await r.text());
+    await poll();
+  } catch (e) { $("#err").textContent = e.message; }
+  $("#go").disabled = false;
+}
+
+let LORAS = null;
+async function loadLoras() {
+  if (LORAS) return;
+  LORAS = [];
+  try { const r = await fetch("/api/loras"); if (r.ok) LORAS = (await r.json()).loras; } catch {}
+  renderLoras();
+}
+function renderLoras() {
+  const list = ui.loras[ui.kind];
+  $("#loraCount").textContent = list.length ? `(${list.length})` : "";
+  if (LORAS === null) { if ($("#loraBox").open || list.length) loadLoras(); }
+  const opts = (cur) => `<option value="">Choose a LoRA…</option>` + (LORAS || []).map(l =>
+    `<option value="${escapeHtml(l.name)}" ${l.name === cur ? "selected" : ""}>${escapeHtml(l.name.replace(/\.safetensors$/, ""))}${l.base ? " · " + escapeHtml(l.base) : ""}${l.rating && l.rating !== "pg13" ? " · " + (l.rating === "adult" ? "adults only" : "unrated") : ""}</option>`).join("")
+    + (cur && LORAS && !LORAS.some(l => l.name === cur) ? `<option value="${escapeHtml(cur)}" selected>${escapeHtml(cur)} (not installed)</option>` : "");
+  $("#loraRows").innerHTML = list.map((l, i) => {
+    const info = (LORAS || []).find(x => x.name === l.name);
+    return `<div class="lrow"><select data-lname="${i}" aria-label="LoRA ${i + 1}">${opts(l.name)}</select>
+      <input type="number" data-lstr="${i}" value="${l.strength}" step="0.05" min="-4" max="4" aria-label="Strength for LoRA ${i + 1}" title="Strength">
+      <button class="btn" data-ldel="${i}" type="button" aria-label="Remove LoRA ${i + 1}">✕</button>
+      ${info && info.words && info.words.length ? `<div class="words">Trigger words: ${info.words.map(w => escapeHtml(w)).join(", ")} · <a href="#" data-lwords="${i}">add to prompt</a></div>` : ""}</div>`;
+  }).join("");
+  $("#loraHint").textContent = !list.length ? "Add a LoRA to steer the style or subject. Pick ones made for this model."
+    : cwfActive() ? "Added on top of the workflow's own LoRAs." : `Use LoRAs trained for ${ui.kind === "video" ? "Wan 2.2 5B" : "Z-Image"}; others usually do nothing or distort.`;
+  const save = () => { remember(); $("#loraCount").textContent = list.length ? `(${list.length})` : ""; };
+  $("#loraRows").querySelectorAll("[data-lname]").forEach(e => e.onchange = () => { list[+e.dataset.lname].name = e.value; renderLoras(); save(); });
+  $("#loraRows").querySelectorAll("[data-lstr]").forEach(e => e.oninput = () => { list[+e.dataset.lstr].strength = e.value; save(); });
+  $("#loraRows").querySelectorAll("[data-ldel]").forEach(e => e.onclick = () => { list.splice(+e.dataset.ldel, 1); renderLoras(); save(); });
+  $("#loraRows").querySelectorAll("[data-lwords]").forEach(a => a.onclick = (ev) => {
+    ev.preventDefault();
+    const words = (LORAS.find(x => x.name === list[+a.dataset.lwords].name) || {}).words || [];
+    const p = $("#prompt"); p.value = (p.value.trim() + (p.value.trim() ? ", " : "") + words.join(", ")); p.dispatchEvent(new Event("input"));
+  });
+}
+$("#loraAdd").onclick = () => { if (ui.loras[ui.kind].length >= 6) return; ui.loras[ui.kind].push({name: "", strength: 1}); loadLoras(); renderLoras(); remember(); };
+$("#loraBox").addEventListener("toggle", () => { if ($("#loraBox").open) loadLoras(); });
+
+async function create() {
+  const prompt = $("#prompt").value.trim();
+  if (!prompt) { $("#err").textContent = "Describe what you want first."; $("#prompt").focus(); return; }
+  const loras = ui.loras[ui.kind].filter(l => l.name).map(l => ({name: l.name, strength: Number(l.strength)}));
+  if (cwfActive()) return createWithWorkflow(prompt, loras);
+  const body = { kind: ui.kind, prompt, aspect: ui.aspect[ui.kind], seed: $("#seed").value.trim() || null, loras };
+  if (ui.kind === "image") body.count = ui.count;
+  else { body.seconds = ui.seconds; if (ui.source) body.source = ui.source.job ? { job: ui.source.job } : { upload: ui.source.upload }; }
+  $("#go").disabled = true; $("#err").textContent = "";
+  try {
+    const r = await fetch("/api/generate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error(await r.text());
+    await poll();
+  } catch (e) { $("#err").textContent = e.message; }
+  $("#go").disabled = false;
+}
+$("#go").onclick = create;
+
+function fmtTime(s) { s = Math.round(s); return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`; }
+
+function cardFor(job) {
+  let c = cards.get(job.id);
+  if (!c) { c = document.createElement("div"); c.className = "card"; c.dataset.state = ""; cards.set(job.id, c); }
+  const state = job.status + (job.outputs && job.outputs.length ? ":" + job.outputs[0].url : "");
+  const [w, h] = [job.params.width, job.params.height];
+  c.style.aspectRatio = `${w} / ${h}`;
+  if (c.dataset.state !== state) {
+    c.dataset.state = state;
+    c.classList.toggle("failed", job.status === "error");
+    if (job.status === "done" && job.outputs.length) {
+      const o = job.outputs[0];
+      c.innerHTML = isVideo(o.path)
+        ? `<video src="${o.url}#t=0.5" muted loop playsinline preload="metadata"></video><span class="tag">VIDEO ${job.params.seconds}s</span>`
+        : `<img src="${o.url}" loading="lazy" alt="">`;
+      c.insertAdjacentHTML("beforeend", `<div class="cap"></div>`); c.querySelector(".cap").textContent = job.prompt || "";
+      c.insertAdjacentHTML("beforeend", `<button class="trash" title="Delete this ${job.kind === "video" ? "video" : "picture"}" aria-label="Delete"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg></button>`);
+      c.querySelector(".trash").onclick = (e) => { e.stopPropagation(); deleteJob(job.id); };
+      const m = c.firstElementChild;
+      m.onclick = () => openLightbox(job.id);
+      if (isVideo(o.path)) { c.onmouseenter = () => m.play().catch(() => {}); c.onmouseleave = () => m.pause(); }
+    } else {
+      const label = { queued: "Waiting", running: "Working", error: "Failed", cancelled: "Cancelled" }[job.status] || job.status;
+      c.innerHTML = `<div class="pending"><b>${label}${job.kind === "video" ? " · video" : ""}</b><div class="bar"><i></i></div>
+        <div class="p"></div><div class="info" style="font-size:12px;color:var(--muted)"></div>
+        ${job.status === "queued" || job.status === "running" ? '<button class="btn">Cancel</button>' : '<button class="btn">Remove</button>'}</div>`;
+      c.querySelector(".p").textContent = job.error && job.status === "error" ? job.error : job.prompt;
+      const btn = c.querySelector(".btn");
+      btn.onclick = async () => {
+        btn.disabled = true;
+        if (job.status === "queued" || job.status === "running") await fetch(`/api/jobs/${job.id}/cancel`, { method: "POST" });
+        else await fetch(`/api/jobs/${job.id}`, { method: "DELETE" });
+        poll();
+      };
+      if (job.status !== "queued" && job.status !== "running") c.querySelector(".bar").remove();
+    }
+  }
+  if (job.status === "running" || job.status === "queued") {
+    const bar = c.querySelector(".bar"), info = c.querySelector(".info");
+    if (bar) {
+      const p = job.progress;
+      bar.classList.toggle("indet", !p);
+      bar.firstElementChild.style.width = p ? (100 * p[0] / p[1]) + "%" : "";
+      const elapsed = job.started ? fmtTime(Date.now() / 1000 - job.started) : "";
+      info.textContent = job.status === "queued"
+        ? (job.position ? `Number ${job.position} in line` : "In line")
+        : `${job.stage || "Starting"}${p ? ` · step ${p[0]}/${p[1]}` : ""}${elapsed ? " · " + elapsed : ""}`;
+    }
+  }
+  return c;
+}
+
+function renderGallery(jobs) {
+  const grid = $("#grid");
+  const ids = new Set(jobs.map(j => j.id));
+  for (const [id, c] of cards) if (!ids.has(id)) { c.remove(); cards.delete(id); }
+  if (!jobs.length) { grid.innerHTML = '<div class="empty">Nothing yet. Describe something and press Create.</div>'; return; }
+  grid.querySelector(".empty")?.remove();
+  jobs.forEach((j, i) => { const c = cardFor(j); if (grid.children[i] !== c) grid.insertBefore(c, grid.children[i] || null); });
+  const active = jobs.filter(j => j.status === "queued" || j.status === "running").length;
+  const done = jobs.filter(j => j.status === "done");
+  const n = (k, w) => { const c = done.filter(j => j.kind === k).length; return `${c} ${w}${c === 1 ? "" : "s"}`; };
+  $("#summary").textContent = `${n("image", "picture")} · ${n("video", "video")}${active ? ` · ${active} in progress` : ""}`;
+}
+
+function renderGpu(g) {
+  if (g.used_mb != null) {
+    $("#gpuBar").style.width = (100 * g.used_mb / g.total_mb) + "%";
+    $("#gpuText").textContent = `${(g.used_mb / 1024).toFixed(1)} of ${Math.round(g.total_mb / 1024)} GB in use`;
+  }
+  const holders = [];
+  if (g.radio && g.radio.holding) holders.push("the music radio");
+  for (const m of g.ollama || []) if (m.vram_mb > 1500) holders.push(`the chat model ${m.name}`);
+  $("#gpuWho").textContent = holders.length ? `Shared with ${holders.join(" and ")}` : "Free for the studio";
+  const show = holders.length && g.used_mb > 6000;
+  $("#banner").classList.toggle("show", !!show);
+  if (show) $("#bannerText").textContent = `The GPU is shared with ${holders.join(" and ")}. Creating may be slow or fail until it is freed.` +
+    (g.radio && g.radio.holding ? " Freeing it switches the radio off; you can turn it back on in the radio page." : "");
+}
+
+$("#freeBtn").onclick = async () => {
+  $("#freeBtn").disabled = true;
+  try { await fetch("/api/free-gpu", { method: "POST" }); } catch {}
+  setTimeout(() => { $("#freeBtn").disabled = false; poll(); }, 3000);
+};
+
+async function poll() {
+  clearTimeout(pollTimer);
+  let active = false;
+  try {
+    const d = await (await fetch("/api/state")).json();
+    jobsById = Object.fromEntries(d.jobs.map(j => [j.id, j]));
+    const q = $("#q").value.trim().toLowerCase();
+    renderGallery(d.jobs.filter(j => !pendingDelete.has(j.id) && (!q || (j.prompt || "").toLowerCase().includes(q) || (j.params.workflow || "").toLowerCase().includes(q))));
+    renderGpu(d.gpu); renderQueue(d.jobs);
+    active = d.jobs.some(j => j.status === "queued" || j.status === "running");
+  } catch {}
+  pollTimer = setTimeout(poll, active ? 1200 : 5000);
+}
+
+function openLightbox(id) {
+  const j = jobsById[id]; if (!j || !j.outputs.length || document.body.classList.contains("hide-creations")) return;
+  lbJob = j;
+  const o = j.outputs[0];
+  $("#lbMedia").innerHTML = isVideo(o.path) ? `<video src="${o.url}" controls autoplay loop playsinline></video>` : `<img src="${o.url}" alt="">`;
+  $("#lbPrompt").textContent = j.prompt;
+  const took = j.started && j.finished ? ` · made in ${fmtTime(j.finished - j.started)}` : "";
+  $("#lbMeta").textContent = `${j.params.workflow ? "Workflow: " + j.params.workflow + " · " : ""}${j.params.width}×${j.params.height}${j.kind === "video" && j.params.seconds ? ` · ${j.params.seconds}s` : ""} · seed ${j.params.seed}${took} · ${new Date(j.created * 1000).toLocaleString()}`;
+  $("#lbDownload").href = o.url + (o.url.includes("?") ? "&" : "?") + "download=1";
+  $("#lbAnimate").hidden = j.kind !== "image" || isVideo(o.path);
+  $("#lbAsk").hidden = false;
+  $("#lb").classList.add("show");
+}
+function closeLightbox() { $("#lb").classList.remove("show"); $("#lbMedia").innerHTML = ""; lbJob = null; }
+$("#lbClose").onclick = closeLightbox;
+$("#lb").onclick = e => { if (e.target === $("#lb")) closeLightbox(); };
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeLightbox(); });
+$("#lbReuse").onclick = () => loadSettings(lbJob);
+$("#lbLoad").onclick = () => loadSettings(lbJob);
+$("#lbNo").onclick = () => { $("#lbAsk").hidden = true; };
+
+// ---------- "Load settings": put everything a creation was made with back into the composer
+function settingsDiff(made) {
+  if (!made || !SET) return [];
+  return Object.entries(made).filter(([k, v]) => SET.values[k] !== undefined && String(SET.values[k]) !== String(v))
+    .map(([k, v]) => ({key: k, label: (SET.schema.find(f => f.key === k) || {}).label || k, then: v, now: SET.values[k]}));
+}
+function loadedNote(html) {
+  const box = ui.kind === "workflow" ? $("#wfErr") : $("#err");
+  if (box) { box.style.color = "var(--muted)"; box.innerHTML = html; }
+}
+async function loadSettings(j) {
+  if (!j) return;
+  closeLightbox();
+  const p = j.params || {};
+  if (p.recipe) {                                   // made with an imported workflow: reopen it with the values used
+    location.hash = "#workflows"; route();
+    if (!wf.loaded) await loadWorkflows();
+    if (!wf.list.some(w => w.id === p.recipe)) {
+      ui.kind = "image"; location.hash = "#create"; route(); $("#prompt").value = j.prompt; render();
+      loadedNote(`The workflow “${escapeHtml(p.workflow || "")}” is no longer in your library, so only the prompt was loaded.`);
+      return;
+    }
+    await openWorkflow(p.recipe);
+    const d = $("#wfDetail");
+    for (const [fid, v] of Object.entries(p.values || {})) {
+      const el = d.querySelector(`[data-f="${CSS.escape(fid)}"]`); if (!el || v == null) continue;
+      el.value = v; el.dispatchEvent(new Event("input"));
+      const rnd = d.querySelector(`[data-rand="${CSS.escape(fid)}"]`);
+      if (rnd) { rnd.checked = false; el.disabled = false; }          // same seed -> the same result
+    }
+    for (const [fid, name] of Object.entries(p.images || {})) {
+      wf.images[fid] = name;
+      const im = d.querySelector(`[data-imgprev="${CSS.escape(fid)}"]`); if (im) { im.src = "/input/" + encodeURIComponent(name); im.hidden = false; }
+    }
+    loadedNote(`Settings loaded from that ${j.kind === "video" ? "video" : "picture"} — the seed is fixed so Create makes the same result. Tick “random each time” for variations.`);
+    $("#wfPanel").scrollIntoView({behavior: "smooth", block: "start"});
+    return;
+  }
+  // made in the composer
+  location.hash = "#create"; route();
+  ui.kind = j.kind === "video" ? "video" : "image";
+  ui.engine[ui.kind] = "builtin"; ui.loras[ui.kind] = (p.loras || []).map(l => ({...l}));
+  if (p.loras && p.loras.length) { $("#loraBox").open = true; loadLoras(); }
+  $("#prompt").value = j.prompt || ""; $("#prompt").dispatchEvent(new Event("input"));
+  if (p.aspect && OPTIONS[ui.kind].aspect.includes(p.aspect)) ui.aspect[ui.kind] = p.aspect;
+  if (ui.kind === "video") {
+    if (p.seconds) ui.seconds = +p.seconds;
+    ui.source = null;
+    if (p.source && p.source.job && jobsById[p.source.job] && jobsById[p.source.job].outputs.length) ui.source = {job: p.source.job, url: jobsById[p.source.job].outputs[0].url};
+    else if (p.source && p.source.upload) ui.source = {upload: p.source.upload, url: "/input/" + encodeURIComponent(p.source.upload)};
+  }
+  if (p.seed != null) { $("#seed").value = p.seed; $("#seed").closest("details").open = true; }
+  render(); remember();
+  const diff = settingsDiff(p.settings);
+  let html = `Settings loaded — the seed is fixed so Create makes the same ${j.kind === "video" ? "video" : "picture"}. Clear the seed (Advanced) for variations.`;
+  if (p.source && ui.kind === "video" && !ui.source) html += ` Its starting picture has been deleted, so none is set.`;
+  if (diff.length) {
+    html += `<div class="loaded-note">Made with different studio settings: ${diff.map(x => `${escapeHtml(x.label)} <b>${escapeHtml(String(x.then))}</b> (now ${escapeHtml(String(x.now))})`).join(", ")}.`
+      + (ME && ME.role === "admin" ? `<br><button class="btn" id="useMade">Use those studio settings</button>` : ` Only an admin can change studio settings.`) + `</div>`;
+  } else if (!p.settings) html += ` (Made before studio settings were recorded, so steps and sampler may differ.)`;
+  loadedNote(html);
+  const btn = $("#useMade");
+  if (btn) btn.onclick = async () => { await saveSettings(Object.fromEntries(diff.map(x => [x.key, x.then])), "Saved ✓"); loadedNote("Studio settings changed back to the ones used for that creation ✓"); };
+  $("#prompt").focus(); window.scrollTo({top: 0, behavior: "smooth"});
+}
+$("#lbAnimate").onclick = () => {
+  ui.kind = "video"; ui.source = { job: lbJob.id, url: lbJob.outputs[0].url };
+  $("#prompt").value = "";
+  closeLightbox(); render(); remember();
+  $("#prompt").focus(); window.scrollTo({ top: 0, behavior: "smooth" });
+};
+$("#lbDelete").onclick = () => { const id = lbJob.id; closeLightbox(); deleteJob(id); };
+
+// ---------- delete with undo: the item disappears at once; the file is removed after a few seconds unless undone
+const pendingDelete = new Map();          // job id -> timer
+const UNDO_MS = 6000;
+function deleteJob(id) {
+  const c = cards.get(id); if (c) { c.remove(); cards.delete(id); }
+  clearTimeout(pendingDelete.get(id));
+  pendingDelete.set(id, setTimeout(() => commitDelete(id), UNDO_MS));
+  const n = pendingDelete.size;
+  $("#undoText").textContent = n === 1 ? "Deleted" : `Deleted ${n} items`;
+  $("#undo").classList.add("show");
+  clearTimeout(deleteJob.hide); deleteJob.hide = setTimeout(() => $("#undo").classList.remove("show"), UNDO_MS);
+  poll();
+}
+async function commitDelete(id, keepalive = false) {
+  pendingDelete.delete(id);
+  try { await fetch(`/api/jobs/${id}`, {method: "DELETE", keepalive}); } catch {}
+  if (!pendingDelete.size) $("#undo").classList.remove("show");
+}
+$("#undoBtn").onclick = () => {
+  for (const t of pendingDelete.values()) clearTimeout(t);
+  pendingDelete.clear(); $("#undo").classList.remove("show"); poll();
+};
+// leaving the page finishes any deletes that are still waiting
+window.addEventListener("pagehide", () => { for (const id of [...pendingDelete.keys()]) commitDelete(id, true); });
+
+// ---------- ⚙ settings (saved on the server; apply to the next job)
+let SET = null;
+function applyDefaults() {
+  const v = SET.values;
+  ui.aspect.image = v.image_shape; ui.aspect.video = v.video_shape; ui.count = +v.image_count;
+  ui.seconds = Math.min(v.video_default_seconds, v.video_max_seconds);
+}
+function renderSettings(msg) {
+  let html = "", group = "";
+  for (const f of SET.schema) {
+    if (f.group !== group) { group = f.group; html += `<h3>${escapeHtml(group)}</h3>`; }
+    const val = SET.values[f.key], d = SET.defaults[f.key];
+    const def = val !== d && f.type !== "text" ? ` · <span class="def" data-def="${f.key}">default ${escapeHtml(String(d))}</span>` : val !== d ? ` · <span class="def" data-def="${f.key}">restore default</span>` : "";
+    const help = `<div class="hlp">${escapeHtml(f.help || "")}${f.min != null ? ` (${f.min}–${f.max})` : ""}${def}</div>`;
+    let input;
+    if (f.type === "choice") input = `<select id="g_${f.key}" data-k="${f.key}">${f.options.map(o => `<option ${o === val ? "selected" : ""}>${escapeHtml(o)}</option>`).join("")}</select>`;
+    else if (f.type === "bool") input = `<input type="checkbox" id="g_${f.key}" data-k="${f.key}" ${val ? "checked" : ""}>`;
+    else if (f.type === "secret") {
+      const set = SET.secret_set && SET.secret_set[f.key];
+      input = `<input type="password" id="g_${f.key}" data-k="${f.key}" autocomplete="off" placeholder="${set ? "saved — leave blank to keep" : "not set"}" style="max-width:200px">`;
+      html += `<div class="f"><label for="g_${f.key}">${escapeHtml(f.label)}${input}</label><div class="hlp">${escapeHtml(f.help || "")}${set && ME && ME.role === "admin" ? ` · <span class="def" data-clear="${f.key}">remove saved key</span>` : ""}</div></div>`;
+      continue;
+    }
+    else if (f.type === "text") { html += `<div class="f"><label for="g_${f.key}">${escapeHtml(f.label)}</label><textarea id="g_${f.key}" data-k="${f.key}">${escapeHtml(val)}</textarea>${help}</div>`; continue; }
+    else input = `<input type="number" id="g_${f.key}" data-k="${f.key}" value="${val}" min="${f.min}" max="${f.max}" step="${f.type === "int" ? 1 : "any"}">`;
+    html += `<div class="f"><label for="g_${f.key}">${escapeHtml(f.label)}${input}</label>${help}</div>`;
+  }
+  const admin = ME && ME.role === "admin";
+  html += `<p class="hlp" style="margin-top:12px">Settings apply to the next picture or video${admin ? "" : " for everyone. Only an admin can change them"}. Model files and ComfyUI itself are set up outside this page.</p>
+    ${admin ? `<div class="bar"><button class="btn primary" id="setSave">Save</button><button class="btn" id="setReset">Reset all</button><span class="hlp" id="setMsg" style="margin:0">${msg || ""}</span></div>` : ""}`;
+  $("#setBody").innerHTML = html;
+  $("#setBody").querySelectorAll("[data-clear]").forEach(e => e.onclick = () => saveSettings({[e.dataset.clear + "_clear"]: true}, "Key removed ✓"));
+  $("#setBody").querySelectorAll("[data-def]").forEach(e => e.onclick = () => {
+    const k = e.dataset.def, inp = $("#g_" + k), d = SET.defaults[k];
+    if (inp.type === "checkbox") inp.checked = d; else inp.value = d;
+    $("#setMsg").textContent = "Press Save to apply.";
+  });
+  if (!admin) { $("#setBody").querySelectorAll("[data-k]").forEach(e => e.disabled = true); return; }
+  $("#setSave").onclick = () => saveSettings(Object.fromEntries([...$("#setBody").querySelectorAll("[data-k]")].map(e => [e.dataset.k, e.type === "checkbox" ? e.checked : e.value])), "Saved ✓");
+  $("#setReset").onclick = () => { if (confirm("Reset every setting to its default?")) saveSettings({reset: true}, "Defaults restored ✓"); };
+}
+async function saveSettings(body, okMsg) {
+  try {
+    const r = await fetch("/api/settings", {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+    if (!r.ok) throw new Error(await r.text());
+    SET = await r.json(); applyDefaults(); render(); renderSettings(okMsg);
+  } catch (e) { $("#setMsg").innerHTML = `<span style="color:var(--err)">${escapeHtml(e.message)}</span>`; }
+}
+function escapeHtml(t) { return String(t ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c])); }
+$("#setBtn").onclick = () => { renderSettings(); $("#setDlg").classList.add("show"); };
+$("#setClose").onclick = () => $("#setDlg").classList.remove("show");
+$("#setDlg").onclick = e => { if (e.target === $("#setDlg")) $("#setDlg").classList.remove("show"); };
+document.addEventListener("keydown", e => { if (e.key === "Escape") $("#setDlg").classList.remove("show"); });
+
+// ---------- picture picker: the person's own pictures first, uploading from the device as the fallback
+const ICON = {
+  image: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m21 16-5-5-9 9"/></svg>`,
+  video: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="6" width="13" height="12" rx="2.5"/><path d="m15.5 10.5 6-3.5v10l-6-3.5z"/></svg>`};
+const kindIcon = (k) => `<span class="kindico ${k === "video" ? "video" : "image"}" title="${k === "video" ? "Makes videos" : "Makes pictures"}" role="img" aria-label="${k === "video" ? "Video workflow" : "Picture workflow"}">${ICON[k === "video" ? "video" : "image"]}</span>`;
+function pickPicture(onPick, onUpload) {
+  const mine = Object.values(jobsById).filter(j => j.kind === "image" && j.status === "done" && j.outputs && j.outputs.length)
+    .sort((a, b) => b.created - a.created);
+  const close = () => $("#picDlg").classList.remove("show");
+  $("#picGrid").innerHTML = mine.length ? mine.flatMap(j => j.outputs.map((o, i) => `<button data-job="${j.id}" data-i="${i}" title="${escapeHtml(j.prompt || "")}"><img src="${o.url}" alt="${escapeHtml((j.prompt || "picture").slice(0, 80))}" loading="lazy"></button>`)).join("")
+    : `<p class="hint">You haven't made any pictures yet — upload one instead.</p>`;
+  $("#picGrid").querySelectorAll("[data-job]").forEach(b => b.onclick = () => {
+    const j = jobsById[b.dataset.job], i = Number(b.dataset.i);
+    close(); onPick({job: j.id, index: i, url: j.outputs[i].url});
+  });
+  $("#picUpload").onclick = () => { close(); onUpload(); };
+  $("#picClose").onclick = close;
+  $("#picDlg").onclick = e => { if (e.target === $("#picDlg")) close(); };
+  $("#picDlg").classList.add("show");
+  const first = $("#picGrid").querySelector("button") || $("#picUpload"); first.focus();
+}
+document.addEventListener("keydown", e => { if (e.key === "Escape") $("#picDlg").classList.remove("show"); });
+
+// ---------- Workflow tab: import ComfyUI workflows from pictures / videos / Civitai, install what they need, run them
+const isVideo = (p) => /\.(mp4|webm|mov|mkv)$/i.test(p || "");
+const wf = {loaded: false, list: [], cur: null, task: null, images: {}, links: {}};
+const gb = (n) => n == null ? "?" : n >= 2 ** 30 ? (n / 2 ** 30).toFixed(1) + " GB" : n >= 2 ** 20 ? Math.round(n / 2 ** 20) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
+const wfSay = (t, bad) => { $("#wfNote").style.color = bad ? "var(--err)" : "var(--muted)"; $("#wfNote").textContent = t || ""; };
+async function loadWorkflows(selectId) {
+  const r = await fetch("/api/workflows"); if (!r.ok) return;
+  wf.list = (await r.json()).workflows; wf.loaded = true;
+  renderWorkflowList();
+  if (selectId) openWorkflow(selectId);
+  if ((ME && ME.role === "admin") && !wf.batch) {                          // pick a running combined install back up after a reload
+    const t = await fetch("/api/installs").then(r => r.ok ? r.json() : {tasks: []}).catch(() => ({tasks: []}));
+    if (t.tasks.length && !wf.batch) { wf.batch = t.tasks[0]; pollBatch(); }
+  }
+}
+function renderWorkflowList() {
+  if (ui.kind !== "workflow") render();
+  const sel = wf.selecting;
+  $("#wfList").setAttribute("aria-multiselectable", sel ? "true" : "false");
+  $("#wfList").innerHTML = wf.list.length ? wf.list.map(x => `<button data-wf="${x.id}" class="${!sel && wf.cur && wf.cur.id === x.id ? "on" : ""} ${sel && wf.picked.has(x.id) ? "sel" : ""}" title="${escapeHtml(x.name)}" ${sel ? `aria-pressed="${wf.picked.has(x.id)}"` : ""}>
+      ${sel ? `<i class="tick" aria-hidden="true">${wf.picked.has(x.id) ? "✓" : ""}</i>` : ""}${kindIcon(x.kind)}${x.thumb ? `<img src="${x.thumb}" alt="">` : `<div class="noimg"></div>`}<span>${escapeHtml(x.name)}${x.ready === false ? `<span class="needs">needs downloads</span>` : ""}</span></button>`).join("") : `<span class="hint">None yet — import one above.</span>`;
+  $("#wfList").querySelectorAll("[data-wf]").forEach(b => b.onclick = () => {
+    if (!wf.selecting) return openWorkflow(b.dataset.wf);
+    wf.picked.has(b.dataset.wf) ? wf.picked.delete(b.dataset.wf) : wf.picked.add(b.dataset.wf);
+    renderWorkflowList();
+  });
+  renderSelBar();
+}
+// several workflows at once (admins): pick them, then one combined install — shared files download once, ComfyUI restarts once
+wf.picked = new Set(); wf.saved = {};
+function renderSelBar() {
+  const bar = $("#wfSelBar"), admin = ME && ME.role === "admin";
+  if (!ME || !wf.list.length) { bar.innerHTML = ""; return; }
+  if (!wf.selecting) {
+    bar.innerHTML = `<button class="btn" id="wfSelStart" title="Pick several workflows to delete${admin ? " or install everything for" : ""}">Select…</button>`;
+    $("#wfSelStart").onclick = () => { wf.selecting = true; wf.picked.clear(); renderWorkflowList(); }; return;
+  }
+  const n = wf.picked.size;
+  bar.innerHTML = `<span>${n} selected</span><button class="btn" id="wfSelAll">${n === wf.list.length ? "None" : "All"}</button>
+    <button class="btn danger" id="wfSelDel" ${n ? "" : "disabled"}>Delete</button>
+    ${admin ? `<button class="btn primary" id="wfSelGo" ${n ? "" : "disabled"}>Install everything</button>` : ""}<button class="btn" id="wfSelCancel">Done</button>`;
+  $("#wfSelAll").onclick = () => { n === wf.list.length ? wf.picked.clear() : wf.list.forEach(x => wf.picked.add(x.id)); renderWorkflowList(); };
+  $("#wfSelCancel").onclick = () => { wf.selecting = false; renderWorkflowList(); };
+  $("#wfSelDel").onclick = deleteMany;
+  if ($("#wfSelGo")) $("#wfSelGo").onclick = installMany;
+}
+async function deleteMany() {
+  const ids = [...wf.picked], names = wf.list.filter(x => wf.picked.has(x.id)).map(x => "• " + x.name);
+  if (!confirm(`Remove ${ids.length} workflow${ids.length === 1 ? "" : "s"} from your list? Pictures and videos you made with them stay.\n\n${names.slice(0, 15).join("\n")}${names.length > 15 ? "\n…" : ""}`)) return;
+  let failed = 0;
+  for (const id of ids) {
+    const r = await fetch(`/api/workflows/${id}`, {method: "DELETE"}).catch(() => null);
+    if (!r || !r.ok) failed++;
+    delete cwf.cards[id];
+    if (wf.cur && wf.cur.id === id) { wf.cur = null; $("#wfDetail").innerHTML = ""; }
+  }
+  wf.picked.clear(); wf.selecting = false;
+  await loadWorkflows();
+  wfSay(failed ? `${failed} couldn't be removed.` : `Removed ${ids.length} workflow${ids.length === 1 ? "" : "s"}.`, !!failed);
+}
+function savedFor(id) {                                  // model links / node pack links typed on each workflow's page
+  const v = id === (wf.cur && wf.cur.id) ? {links: wf.links, extraPacks: wf.extraPacks} : wf.saved[id];
+  if (!v) return {};
+  const extra = {};
+  for (const [node, ref] of Object.entries(v.extraPacks || {})) if (ref) (extra[ref] = extra[ref] || []).push(node);
+  return {links: v.links || {}, extra_packs: extra};
+}
+async function installMany() {
+  const ids = [...wf.picked], per = Object.fromEntries(ids.map(i => [i, savedFor(i)]));
+  const go = $("#wfSelGo"); go.disabled = true; go.textContent = "Looking up downloads…";
+  $("#wfBatch").innerHTML = `<div class="box">⟳ Checking what ${ids.length} workflows need — this can take a little while the first time…</div>`;
+  const ask = await fetch("/api/workflows/install-many", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ids, per, dry_run: true})});
+  if (!ask.ok) { $("#wfBatch").innerHTML = `<div class="box err">${escapeHtml(await ask.text())}</div>`; renderSelBar(); return; }
+  const s = await ask.json();
+  const left = s.unresolved.map(u => `• ${u.name}: ${u.error || [...u.models, ...u.nodes.map(n => n + " (node)")].join(", ")}`);
+  if (!s.models && !s.packs.length) {
+    $("#wfBatch").innerHTML = `<div class="box">Nothing to download — ${left.length ? "what's still missing has no known source yet. Open each workflow to paste a link:<br>" + left.map(escapeHtml).join("<br>") : "those workflows have everything."}</div>`;
+    renderSelBar(); return;
+  }
+  const lines = s.packs.map(k => `• ${k.title} — ${k.repo}${k.listed === false ? "  (you added it · not vetted by any registry)" : ""}`);
+  const space = s.download_bytes > s.free_bytes ? `\n\n⚠ That's more than the ${gb(s.free_bytes)} free on disk — some downloads will fail.` : "";
+  const msg = `For ${s.workflows} workflows: download ${s.models} model file${s.models === 1 ? "" : "s"} (${gb(s.download_bytes)})` +
+    (s.packs.length ? ` and install ${s.packs.length} node pack${s.packs.length === 1 ? "" : "s"} (third-party code from GitHub); ComfyUI restarts once at the end` : "") + "?" + space +
+    (lines.length ? "\n\n" + lines.join("\n") : "") + (left.length ? `\n\nStill without a source (open the workflow to paste a link):\n${left.join("\n")}` : "");
+  if (!confirm(msg)) { $("#wfBatch").innerHTML = ""; renderSelBar(); return; }
+  const r = await fetch("/api/workflows/install-many", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ids, per})});
+  if (!r.ok) { $("#wfBatch").innerHTML = `<div class="box err">${escapeHtml(await r.text())}</div>`; renderSelBar(); return; }
+  wf.batch = await r.json(); wf.selecting = false; renderWorkflowList(); pollBatch();
+}
+function stepsHtml(t) {
+  return `<ul class="req">${t.steps.map(s => `<li><div class="nm">${s.kind === "restart" ? "↻ " : s.kind === "pack" ? "🧩 " : "⤓ "}${escapeHtml(s.label)}</div>
+      ${s.for && s.for.length > 1 ? `<div class="for">for ${s.for.length} workflows</div>` : ""}
+      <div class="st">${s.status === "done" ? `<span class="ok">✓ ${escapeHtml(s.detail === "already downloaded" ? "already downloaded" : "done")}</span>` : s.status === "error" ? `<span class="bad">✗ ${escapeHtml(s.error || "failed")}</span>` : s.status === "running" ? `<span class="need">${escapeHtml(s.detail || "working")}${s.total ? ` · ${gb(s.done)} of ${gb(s.total)}` : s.done ? ` · ${gb(s.done)}` : ""}</span>` : s.status === "cancelled" ? "cancelled" : "waiting"}</div>
+      ${s.status === "running" && s.total ? `<div class="prog2"><i style="width:${(100 * s.done / s.total).toFixed(1)}%"></i></div>` : ""}</li>`).join("")}</ul>`;
+}
+async function pollBatch() {
+  const t = wf.batch; if (!t) return;
+  const r = await fetch(`/api/installs/${t.id}`); if (!r.ok) { wf.batch = null; $("#wfBatch").innerHTML = ""; return; }
+  const cur = wf.batch = await r.json(), live = cur.status === "running" || cur.status === "queued";
+  const done = cur.steps.filter(s => s.status === "done").length;
+  $("#wfBatch").innerHTML = `<div class="box"><b>${live ? (cur.status === "queued" ? "Waiting for another install to finish" : "Installing") : cur.status === "done" ? "Installed ✓" : "Finished with problems"}</b> · ${escapeHtml(cur.label)} · ${done} of ${cur.steps.length} done
+    ${live ? "" : ` <button class="btn" id="wfBatchClose" style="padding:2px 8px;font-size:12px">Close</button>`}${stepsHtml(cur)}</div>`;
+  if (live) return setTimeout(pollBatch, 1500);
+  $("#wfBatchClose").onclick = () => { wf.batch = null; $("#wfBatch").innerHTML = ""; };
+  loadWorkflows(); if (wf.cur) openWorkflow(wf.cur.id, true);
+}
+async function openWorkflow(id, refresh) {
+  const seq = wf.openSeq = (wf.openSeq || 0) + 1;              // only the newest request may draw (lookups finish out of order)
+  wf.opening = id;
+  $("#wfDetail").innerHTML = `<p class="hint" style="margin-top:14px">⟳ Checking what this workflow needs and looking up downloads — usually a few seconds…</p>`;
+  document.querySelectorAll("#wfList [data-wf]").forEach(b => b.classList.toggle("on", b.dataset.wf === id));
+  const r = await fetch(`/api/workflows/${id}${refresh ? "?refresh=1" : ""}`);
+  if (seq !== wf.openSeq) return;
+  if (!r.ok) { $("#wfDetail").innerHTML = `<p class="err">${escapeHtml(await r.text())}</p>`; return; }
+  const data = await r.json();
+  if (seq !== wf.openSeq) return;
+  if (wf.cur) wf.saved[wf.cur.id] = {links: wf.links, extraPacks: wf.extraPacks};
+  const kept = wf.saved[id] || {};
+  wf.cur = data; wf.images = {}; wf.links = kept.links || {}; wf.extraPacks = kept.extraPacks || {}; wf.opening = null;
+  renderWorkflow();
+}
+// several imports at once: a queue that runs one at a time, with a status line for each
+const importQ = {items: [], running: false};
+const importLabel = (x) => typeof x === "string" ? x.replace(/^https?:\/\/(www\.)?/, "").slice(0, 60) : x.name;
+function queueImports(list) {
+  list = [...list].filter(Boolean);
+  if (!list.length) return;
+  for (const x of list) importQ.items.push({src: x, name: importLabel(x), status: "waiting", single: list.length === 1});
+  renderImportQ(); runImportQ();
+}
+function importWorkflow(fileOrUrl) { queueImports([fileOrUrl]); }      // kept for older call sites
+async function importOne(src) {
+  let r;
+  if (typeof src === "string") r = await fetch("/api/workflows/import", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({url: src})});
+  else { const fd = new FormData(); fd.append("file", src); r = await fetch("/api/workflows/import", {method: "POST", body: fd}); }
+  if (r.status === 422) return {a1111: (await r.json()).a1111};
+  if (!r.ok) throw new Error((await r.text()) || r.statusText);
+  return r.json();
+}
+async function runImportQ() {
+  if (importQ.running) return;
+  importQ.running = true;
+  let last = null, next;
+  while ((next = importQ.items.find(i => i.status === "waiting"))) {
+    next.status = "importing"; renderImportQ();
+    try {
+      const d = await importOne(next.src);
+      if (d.a1111) { next.status = "a1111"; next.a1111 = d.a1111; }
+      else {
+        next.status = "done"; next.id = d.id; next.name = d.name || next.name;
+        next.missing = d.summary ? d.summary.missing : 0;
+        last = d; await loadWorkflows();
+        if (next.single || (!wf.cur && !wf.opening)) openWorkflow(d.id);   // a batch opens its first one; lookups finish in the background
+      }
+    } catch (e) { next.status = "error"; next.error = e.message; }
+    renderImportQ();
+  }
+  importQ.running = false;
+  renderImportQ();
+}
+function renderImportQ() {
+  const items = importQ.items, box = $("#wfMsg");
+  if (!items.length) { box.innerHTML = ""; return; }
+  const left = items.filter(i => i.status === "waiting" || i.status === "importing").length;
+  box.style.color = "var(--text)";
+  box.innerHTML = `<div class="hint" style="margin:8px 0 4px">${left ? `Importing — ${left} to go. Model lookups can take a few seconds each.` : `Imports finished.`}
+      ${left ? "" : ` <a href="#" id="wfQClear">Clear</a>`}</div>
+    <ul class="req" style="margin-top:0">${items.map((it, n) => `<li data-q="${n}" style="${it.id ? "cursor:pointer" : ""}"><div class="nm">${
+      it.status === "waiting" ? "⏳" : it.status === "importing" ? "⟳" : it.status === "done" ? "✓" : it.status === "a1111" ? "ⓘ" : "✗"} ${escapeHtml(it.name)}</div>
+      <div class="st">${it.status === "waiting" ? "waiting" : it.status === "importing" ? '<span class="need">reading the workflow and looking up models…</span>'
+        : it.status === "done" ? (it.missing ? `<span class="need">imported · needs ${it.missing} thing${it.missing === 1 ? "" : "s"}</span>` : '<span class="ok">imported · ready</span>')
+        : it.status === "a1111" ? "made with Automatic1111 / Forge — no ComfyUI workflow to run" : `<span class="bad">${escapeHtml(it.error)}</span>`}</div></li>`).join("")}</ul>`;
+  box.querySelectorAll("[data-q]").forEach(li => li.onclick = () => {
+    const it = items[+li.dataset.q];
+    if (it.id) openWorkflow(it.id);
+    else if (it.a1111) $("#wfDetail").innerHTML = `<p class="hint" style="margin-top:12px"><b>${escapeHtml(it.name)}</b> was made with Automatic1111 / Forge, so there's no workflow to run. Its settings:</p><pre style="white-space:pre-wrap;font-size:12px;background:var(--panel-2);padding:8px;border-radius:8px">${escapeHtml(it.a1111)}</pre>`;
+  });
+  if ($("#wfQClear")) $("#wfQClear").onclick = (e) => { e.preventDefault(); importQ.items = []; renderImportQ(); };
+}
+const splitLinks = (t) => (t || "").split(/\s+/).map(x => x.trim()).filter(x => /^https?:\/\//.test(x));
+
+const linkBox = (m) => `<input type="text" data-link="${escapeHtml(m.name)}" placeholder="paste a link: Civitai model page or download, Hugging Face file or repo page" value="${escapeHtml(wf.links[m.name] || "")}">`;
+function renderWorkflow() {
+  const w = wf.cur, p = w.plan, admin = ME && ME.role === "admin";
+  const models = p.models.map(m => {
+    const src = m.source;
+    let status;
+    if (m.installed && m.substitute) status = `<span class="ok">✓ using your ${escapeHtml(m.substitute)}</span> · the same model in another precision, so nothing to download`
+      + (admin ? ` · <a href="#" data-exact="${escapeHtml(m.name)}">download the exact file instead</a>` : "");
+    else if (m.installed) status = `<span class="ok">✓ installed</span> · ${escapeHtml(m.folder)}`;
+    else if (src) status = `<span class="need">⤓ will download</span> ${src.size ? gb(src.size) : ""} · ${escapeHtml(src.source)}${src.page ? ` · <a href="${escapeHtml(src.page)}" target="_blank" rel="noopener">page</a>` : ""}${src.note ? `<br><span class="need">${escapeHtml(src.note)}</span>` : ""}` +
+      (admin ? (wf.links[m.name] ? linkBox(m) : ` · <a href="#" data-relink="${escapeHtml(m.name)}">use a different link</a>`) : "");
+    else status = `<span class="bad">✗ not found automatically</span> · goes in ${escapeHtml(m.folder)}` +
+      (admin ? linkBox(m) +
+        (m.suggestions && m.suggestions.length ? `<span class="sugg">Possible matches — check before using: ${m.suggestions.map(s => `<a href="${escapeHtml(s.page)}" target="_blank" rel="noopener">${escapeHtml(s.title)}</a> (${escapeHtml(s.file || "")}${s.size ? ", " + gb(s.size) : ""}) <a href="#" data-use="${escapeHtml(m.name)}" data-url="${escapeHtml(s.url)}">use</a>`).join(" · ")}</span>` : "") : "");
+    const alt = !m.installed && m.similar && admin ? `<div class="st">You have ${escapeHtml(m.similar)}, the same model in another precision · <a href="#" data-inexact="${escapeHtml(m.name)}">use it instead</a></div>` : "";
+    const skipped = !m.installed && m.refused && m.refused.length ? `<div class="st">Skipped copies you can't download: ${m.refused.map(escapeHtml).join(", ")}</div>` : "";
+    return `<li><div class="nm">${m.lora ? "LoRA · " : ""}${escapeHtml(m.name)}</div><div class="st">${status}</div>${alt}${skipped}</li>`;
+  }).join("");
+  const packs = p.packs.map(k => `<li><div class="nm">${escapeHtml(k.title)}${k.author ? ` <span class="st">by ${escapeHtml(k.author)}</span>` : ""}</div>
+      <div class="st"><span class="need">⤓ node pack${k.manager ? " · via ComfyUI-Manager" : ""}</span> · <a href="${escapeHtml(k.repo)}" target="_blank" rel="noopener">${escapeHtml(k.repo.replace("https://github.com/", ""))}</a> · provides ${k.provides.length} node${k.provides.length === 1 ? "" : "s"}${k.found_by ? " · " + escapeHtml(k.found_by) : ""}${k.listed ? "" : " · <span class='bad'>not in a registry</span>"}</div>
+      ${k.description ? `<div class="st">${escapeHtml(k.description)}</div>` : ""}</li>`).join("")
+    + (p.core_nodes && p.core_nodes.length ? `<li><div class="nm">Built into a newer ComfyUI</div><div class="st"><span class="need">${p.core_nodes.map(escapeHtml).join(", ")}</span> — these come with ComfyUI itself; updating ComfyUI adds them.</div></li>` : "")
+    + p.unknown_nodes.map(n => `<li><div class="nm">${escapeHtml(n)}</div><div class="st"><span class="bad">✗ no known node pack provides this node</span>${admin
+        ? `<input type="text" data-pack="${escapeHtml(n)}" value="${escapeHtml((wf.extraPacks || {})[n] || "")}" placeholder="GitHub link (https://github.com/owner/repo) or Comfy Registry id">
+           <span class="sugg">Search GitHub for “${escapeHtml(n)}” (<a href="https://github.com/search?q=${encodeURIComponent('"' + n + '"')}&type=code" target="_blank" rel="noopener">code search</a>) or the <a href="https://registry.comfy.org/?search=${encodeURIComponent(n)}" target="_blank" rel="noopener">Comfy Registry</a>, then paste the pack's link here. If one pack provides several missing nodes, paste the same link for each.</span>`
+        : " · an admin can add the pack that provides it"}</div></li>`).join("");
+  const installable = p.models.some(m => !m.installed && m.source) || p.packs.length || p.unknown_nodes.length;
+  const needs = p.models.filter(m => !m.installed).length + p.missing_nodes.length;
+  const fieldsHtml = p.fields.map(f => {
+    const id = "wff_" + f.id.replace(/\W/g, "_");
+    const isPrompt = /prompt/i.test(f.label) && !/negative/i.test(f.label);
+    if (f.type === "text") return `<div>${isPrompt ? `<div class="lblrow"><label class="lbl" for="${id}">${escapeHtml(f.label)}</label><span class="improve"><button type="button" class="btn imp" data-improve="${id}" title="Rewrite this prompt into a fuller one, keeping your idea">✨ Improve</button><span class="impmsg" data-impmsg="${id}" role="status"></span></span></div>` : `<label class="lbl" for="${id}">${escapeHtml(f.label)}</label>`}<textarea id="${id}" data-f="${escapeHtml(f.id)}" style="min-height:${f.label === "Prompt" ? 110 : 60}px">${escapeHtml(savedVal(w, f))}</textarea></div>`;
+    if (f.type === "image" || f.type === "video") return `<div><label class="lbl">${escapeHtml(f.label)}</label><div class="source"><img data-imgprev="${escapeHtml(f.id)}" hidden alt=""><div class="hint" style="flex:1">${f.type === "video" ? "Videos as input aren't supported yet" : "Choose the picture this workflow starts from."}</div>${f.type === "image" ? `<button class="btn" data-upimg="${escapeHtml(f.id)}">Choose</button>` : ""}</div></div>`;
+    return null;
+  }).filter(Boolean).join("");
+  const nums = p.fields.filter(f => ["int", "float", "seed"].includes(f.type));
+  const numHtml = nums.length ? `<label class="lbl">Settings</label><div class="fgrid">${nums.map(f => {
+    const id = "wff_" + f.id.replace(/\W/g, "_");
+    const rnd = f.type === "seed" && !(w.saved && w.saved[f.id] && w.saved[f.id].random === false);
+    return `<div><label for="${id}">${escapeHtml(f.label)}</label><input type="number" id="${id}" data-f="${escapeHtml(f.id)}" value="${escapeHtml(String(savedVal(w, f)))}" step="${f.type === "float" ? "any" : 1}" ${rnd ? "disabled" : ""}>${f.type === "seed" ? `<label style="display:flex;gap:6px;align-items:center;margin-top:3px"><input type="checkbox" data-rand="${escapeHtml(f.id)}" ${rnd ? "checked" : ""} style="width:auto;margin:0"> random each time</label>` : ""}</div>`;
+  }).join("")}</div>` : "";
+  $("#wfDetail").innerHTML = `
+    <div class="wfhead">${w.thumb ? `<img src="${w.thumb}" alt="">` : ""}${kindIcon(p.kind)}<div class="t"><b title="${escapeHtml(w.name)}">${escapeHtml(w.name)}</b><span class="hint">${p.kind === "video" ? "Makes videos" : "Makes pictures"} · ${p.ready ? `<span style="color:#2f9e5c">ready ✓</span>` : `${needs} thing${needs === 1 ? "" : "s"} missing`}</span></div>
+      <button class="btn" id="wfRecheck" title="Check again">↻</button><button class="btn danger" id="wfDel" title="Remove from my workflows">🗑</button></div>
+    ${p.notes.map(n => `<p class="hint" style="margin:4px 0">${escapeHtml(n)}</p>`).join("")}
+    ${!p.ready && p.models.some(m => !m.installed && !m.source) && /civitai\.(com|green|red)\//.test(w.source || "") === false && /civitai/.test(w.source || "")
+      ? `<p class="hint" style="margin:4px 0">Tip: this came from a Civitai file link. Importing the picture's page link instead (civitai.com/images/…) lets the studio see exactly which models and LoRAs it used.</p>` : ""}
+    ${p.ready ? "" : `<label class="lbl">What it needs</label><ul class="req">${models}${packs}</ul>
+      <p class="hint" style="margin:8px 0">${p.download_bytes ? `About ${gb(p.download_bytes)} to download · ${gb(p.free_bytes)} free on disk. ` : ""}${p.packs.length ? "Node packs are code from their authors (listed in the ComfyUI-Manager registry); installing restarts ComfyUI for a moment." : ""}</p>
+      ${admin ? (installable ? `<button class="btn primary" id="wfInstall" style="margin-top:4px">Install everything</button>` : "") : `<p class="hint">An admin needs to install these before this workflow can run.</p>`}
+      <div id="wfTask"></div>`}
+    <div style="margin-top:6px">${fieldsHtml}${numHtml}</div>
+    <label class="lbl">How many runs</label><div class="chips" id="wfCount"></div>
+    ${p.blocked && p.blocked.length ? `<p class="err" style="display:block">This workflow uses models that aren't available on this account: ${p.blocked.map(escapeHtml).join(", ")}.</p>` : ""}
+    <button class="btn primary" id="wfGo" ${p.ready && !(p.blocked && p.blocked.length) ? "" : "disabled"}>Create</button>
+    <div class="err" id="wfErr"></div>`;
+  chips($("#wfCount"), [1, 2, 4], wf.count || 1, null, v => { wf.count = v; renderWorkflowCount(); });
+  $("#wfRecheck").onclick = () => openWorkflow(w.id, true);
+  $("#wfDel").onclick = async () => { if (!confirm(`Remove “${w.name}” from your workflows? Pictures you made with it stay.`)) return; await fetch(`/api/workflows/${w.id}`, {method: "DELETE"}); wf.cur = null; $("#wfDetail").innerHTML = ""; loadWorkflows(); };
+  $("#wfDetail").querySelectorAll("[data-link]").forEach(i => i.oninput = () => { wf.links[i.dataset.link] = i.value.trim(); });
+  $("#wfDetail").querySelectorAll("[data-exact],[data-inexact]").forEach(a => a.onclick = async (e) => {
+    e.preventDefault();
+    const name = a.dataset.exact || a.dataset.inexact;
+    await fetch(`/api/workflows/${w.id}/exact`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify({name, exact: !!a.dataset.exact})});
+    delete cwf.cards[w.id]; openWorkflow(w.id, true);
+  });
+  $("#wfDetail").querySelectorAll("[data-relink]").forEach(a => a.onclick = (e) => {
+    e.preventDefault();
+    a.insertAdjacentHTML("afterend", linkBox({name: a.dataset.relink}));
+    const i = a.nextElementSibling; a.remove();
+    i.oninput = () => { wf.links[i.dataset.link] = i.value.trim(); }; i.focus();
+  });
+  $("#wfDetail").querySelectorAll("[data-pack]").forEach(i => i.oninput = () => { (wf.extraPacks = wf.extraPacks || {})[i.dataset.pack] = i.value.trim(); });
+  $("#wfDetail").querySelectorAll("[data-use]").forEach(a => a.onclick = (e) => { e.preventDefault(); wf.links[a.dataset.use] = a.dataset.url; const i = $("#wfDetail").querySelector(`[data-link="${CSS.escape(a.dataset.use)}"]`); if (i) i.value = a.dataset.url; });
+  $("#wfDetail").querySelectorAll("[data-rand]").forEach(c => c.onchange = () => { $("#wfDetail").querySelector(`input[type=number][data-f="${CSS.escape(c.dataset.rand)}"]`).disabled = c.checked; queueWfSave(); });
+  $("#wfDetail").querySelectorAll("[data-f]").forEach(e => e.addEventListener("input", queueWfSave));
+  $("#wfDetail").querySelectorAll("[data-upimg]").forEach(b => b.onclick = () => pickPicture(src => {
+    wf.images[b.dataset.upimg] = {job: src.job, index: src.index};
+    const im = $("#wfDetail").querySelector(`[data-imgprev="${CSS.escape(b.dataset.upimg)}"]`); im.src = src.url; im.hidden = false;
+  }, () => {
+    const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*";
+    inp.onchange = async () => {
+      const fd = new FormData(); fd.append("file", inp.files[0]); $("#wfErr").textContent = "Uploading…";
+      const r = await fetch("/api/upload", {method: "POST", body: fd});
+      if (!r.ok) { $("#wfErr").textContent = await r.text(); return; }
+      const d = await r.json(); wf.images[b.dataset.upimg] = d.upload; $("#wfErr").textContent = "";
+      const im = $("#wfDetail").querySelector(`[data-imgprev="${CSS.escape(b.dataset.upimg)}"]`); im.src = d.url; im.hidden = false;
+    };
+    inp.click();
+  }));
+  if ($("#wfInstall")) $("#wfInstall").onclick = startInstall;
+  $("#wfGo").onclick = runWorkflow;
+  if (wf.task && wf.task.label === w.name && (wf.task.status === "running" || wf.task.status === "queued")) pollInstall();
+}
+function renderWorkflowCount() { chips($("#wfCount"), [1, 2, 4], wf.count || 1, null, v => { wf.count = v; renderWorkflowCount(); }); }
+async function startInstall() {
+  const p = wf.cur.plan, packs = p.packs;
+  const extra = {};                                      // packs an admin named for unmatched nodes: {link: [nodes]}
+  for (const [node, ref] of Object.entries(wf.extraPacks || {})) if (ref && p.unknown_nodes.includes(node)) (extra[ref] = extra[ref] || []).push(node);
+  const total = packs.length + Object.keys(extra).length;
+  if (!total && !p.models.some(m => !m.installed && (m.source || wf.links[m.name]))) { $("#wfTask").innerHTML = `<p class="err">Nothing to install yet — paste a link for the missing nodes or models first.</p>`; return; }
+  const lines = packs.map(k => "• " + k.title + " — " + k.repo + (k.manager ? "  (via ComfyUI-Manager)" : "")).concat(Object.entries(extra).map(([ref, nodes]) => "• " + ref + "  (you added it · not vetted by any registry · for " + nodes.join(", ") + ")"));
+  if (total && !confirm(`Install ${total} node pack${total === 1 ? "" : "s"} (third-party code from GitHub) and download ${gb(p.download_bytes)} of models? ComfyUI restarts afterwards.\n\n${lines.join("\n")}`)) return;
+  $("#wfInstall").disabled = true;
+  if (Object.values(wf.links).some(Boolean)) $("#wfTask").innerHTML = `<p class="hint">Checking your links…</p>`;
+  const r = await fetch(`/api/workflows/${wf.cur.id}/install`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({links: wf.links, extra_packs: extra})});
+  if (!r.ok) { $("#wfTask").innerHTML = `<p class="err">${escapeHtml(await r.text())}</p>`; $("#wfInstall").disabled = false; return; }
+  wf.task = await r.json(); pollInstall();
+}
+async function pollInstall() {
+  const t = wf.task; if (!t) return;
+  const r = await fetch(`/api/installs/${t.id}`); if (!r.ok) return;
+  wf.task = await r.json();
+  if ($("#wfTask")) $("#wfTask").innerHTML = (wf.task.status === "queued" ? `<p class="hint">Waiting for another install to finish…</p>` : "") + stepsHtml(wf.task);
+  if (wf.task.status === "running" || wf.task.status === "queued") setTimeout(pollInstall, 1500);
+  else { wfSay(wf.task.status === "done" ? "Installed ✓" : "Some steps failed — see above. You can try again.", wf.task.status !== "done"); setTimeout(() => openWorkflow(wf.cur.id, true), 800); }
+}
+function wfValues() {
+  const values = {};
+  $("#wfDetail").querySelectorAll("[data-f]").forEach(e => { values[e.dataset.f] = {value: e.type === "number" ? Number(e.value) : e.value}; });
+  $("#wfDetail").querySelectorAll("[data-rand]").forEach(c => { (values[c.dataset.rand] = values[c.dataset.rand] || {}).random = c.checked; });
+  return values;
+}
+let wfSaveT = 0;
+function queueWfSave() {                                 // what you type in a workflow is kept for next time
+  const id = wf.cur && wf.cur.id; if (!id) return;
+  clearTimeout(wfSaveT); wfSaveT = setTimeout(() => saveWorkflowValues(id, wfValues()), 700);
+}
+async function runWorkflow() {
+  clearTimeout(wfSaveT);
+  const values = wfValues();
+  $("#wfGo").disabled = true; $("#wfErr").textContent = "";
+  try {
+    const r = await fetch(`/api/workflows/${wf.cur.id}/run`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({values, images: wf.images, count: wf.count || 1})});
+    if (!r.ok) throw new Error(await r.text());
+    poll(); $("#wfErr").style.color = "var(--muted)"; $("#wfErr").textContent = "Started ✓ — it appears in your gallery.";
+  } catch (e) { $("#wfErr").style.color = "var(--err)"; $("#wfErr").textContent = e.message; }
+  $("#wfGo").disabled = false;
+}
+$("#wfPick").onclick = () => $("#wfFile").click();
+$("#wfFile").onchange = () => { queueImports($("#wfFile").files); $("#wfFile").value = ""; };
+$("#wfUrlGo").onclick = () => { const links = splitLinks($("#wfUrl").value); if (links.length) { queueImports(links); $("#wfUrl").value = ""; } else if ($("#wfUrl").value.trim()) { importQ.items.push({name: $("#wfUrl").value.trim(), status: "error", error: "That isn't an http(s) link"}); renderImportQ(); } };
+$("#wfUrl").addEventListener("keydown", e => { if (e.key === "Enter") $("#wfUrlGo").click(); });
+["dragover", "dragenter"].forEach(ev => $("#wfDrop").addEventListener(ev, e => { e.preventDefault(); $("#wfDrop").classList.add("over"); }));
+["dragleave", "drop"].forEach(ev => $("#wfDrop").addEventListener(ev, () => $("#wfDrop").classList.remove("over")));
+$("#wfDrop").addEventListener("drop", e => { e.preventDefault(); if (e.dataTransfer.files.length) queueImports(e.dataTransfer.files); else queueImports(splitLinks(e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain"))); });
+document.addEventListener("paste", e => {                    // Ctrl+V a copied file or a link on the Workflow tab
+  if (ui.kind !== "workflow" || /INPUT|TEXTAREA/.test(document.activeElement.tagName) && document.activeElement.id !== "wfUrl") return;
+  const files = [...(e.clipboardData.files || [])];
+  if (files.length) { e.preventDefault(); queueImports(files); return; }
+  const links = splitLinks(e.clipboardData.getData("text"));
+  if (links.length && document.activeElement.id !== "wfUrl") { e.preventDefault(); queueImports(links); }
+});
+// ---------- control panel + views (Create / My creations / Workflows)
+const side = {open: false, pinned: false};
+try { Object.assign(side, JSON.parse(localStorage.getItem("genstudio.side") || "{}")); } catch {}
+const wide = () => window.matchMedia("(min-width: 1100px)").matches;
+function renderSide() {
+  const pinned = side.pinned && wide(), open = side.open || pinned;
+  $("#side").classList.toggle("open", open); document.body.classList.toggle("pinned", pinned);
+  $("#sideFade").classList.toggle("show", open && !pinned);
+  $("#sideBtn").setAttribute("aria-expanded", open); $("#pinBtn").setAttribute("aria-pressed", side.pinned);
+}
+function setSide(open, pinned = side.pinned) { side.open = open; side.pinned = pinned; try { localStorage.setItem("genstudio.side", JSON.stringify(side)); } catch {} renderSide(); }
+$("#sideBtn").onclick = () => setSide(true);
+$("#sideClose").onclick = () => setSide(false, false);
+$("#sideFade").onclick = () => setSide(false);
+$("#pinBtn").onclick = () => setSide(true, !side.pinned);
+document.addEventListener("keydown", e => { if (e.key === "Escape" && side.open && !(side.pinned && wide())) setSide(false); });
+window.matchMedia("(min-width: 1100px)").addEventListener("change", renderSide);
+$("#freeBtn2").onclick = () => $("#freeBtn").click();
+$("#lnRadio").href = `${location.protocol}//${location.hostname}:7860/radio`;
+$("#lnMusic").href = `${location.protocol}//${location.hostname}:7860/`;
+$("#lnHermes").href = `${location.protocol}//${location.hostname}:7880/`;
+$("#lnComfy").hidden = !["127.0.0.1", "localhost"].includes(location.hostname);
+function renderQueue(jobs) {
+  const run = jobs.filter(j => j.status === "running"), wait = jobs.filter(j => j.status === "queued");
+  $("#qText").innerHTML = run.length || wait.length
+    ? `${run.length ? `<b>Making:</b> <span class="qp">${escapeHtml((run[0].prompt || "").slice(0, 60))}</span>${run[0].stage ? ` — ${escapeHtml(run[0].stage)}` : ""}` : ""}${wait.length ? `<br>${wait.length} waiting` : ""}`
+    : "Nothing being made.";
+  const n = run.length + wait.length;
+  $("#sideBadge").textContent = n ? `${n} in progress` : "👤";
+  $("#sideBadge").classList.toggle("busy", !!n);
+}
+function route() {
+  const v = (location.hash.slice(1) || "create").split("/")[0];
+  const view = ["create", "creations", "workflows", "models"].includes(v) ? v : "create";
+  document.querySelectorAll(".navtabs a").forEach(a => a.classList.toggle("on", a.dataset.view === view));
+  document.body.classList.toggle("view-creations", view === "creations");
+  document.body.classList.toggle("view-models", view === "models");
+  document.body.classList.toggle("view-workflows", view === "workflows");
+  $("#modelsPage").hidden = view !== "models";
+  if (view === "models") { mShow(); return; }
+  if (view === "workflows" && ui.kind !== "workflow") { ui.kind = "workflow"; render(); remember(); }
+  if (view === "create" && ui.kind === "workflow") { ui.kind = "image"; render(); remember(); }
+}
+window.addEventListener("hashchange", route);
+document.querySelectorAll(".tabs button").forEach(b => b.addEventListener("click", () => {     // composer tabs keep the nav in step
+  const want = b.dataset.kind === "workflow" ? "#workflows" : "#create";
+  if (location.hash !== want && !(want === "#create" && !location.hash)) history.replaceState(null, "", want), route();
+}));
+let qT = 0;
+$("#q").addEventListener("input", () => { clearTimeout(qT); qT = setTimeout(() => { if (ME) poll(); }, 200); });
+renderSide();
+// ---------- Models page: browse Civitai / Hugging Face, download into the right folder with pictures + info, see what's installed
+const MS = {tab: localStorage.getItem("genstudio.mtab") || "civitai", folders: null,
+            civ: {query: "", types: "", sort: "Most Downloaded", base: "", nsfw: false, items: [], next: null, loaded: false},
+            hf: {query: "", items: [], loaded: false}, installed: null, polling: false};
+const isAdmin = () => ME && ME.role === "admin";
+const gbs = (n) => !n ? "" : n >= 2 ** 30 ? (n / 2 ** 30).toFixed(1) + " GB" : n >= 2 ** 20 ? Math.round(n / 2 ** 20) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
+const kfmt = (n) => n == null ? "" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : String(n);
+async function mShow() {
+  document.querySelectorAll("#mTabs [data-mt]").forEach(b => b.classList.toggle("on", b.dataset.mt === MS.tab));
+  if (!MS.folders) MS.folders = (await jsonCall("/api/models/folders", "GET").catch(() => ({folders: []}))).folders;
+  pollDownloads();
+  if (MS.tab === "civitai") renderCivitai(); else if (MS.tab === "hf") renderHf(); else renderInstalled();
+}
+document.querySelectorAll("#mTabs [data-mt]").forEach(b => b.onclick = () => { MS.tab = b.dataset.mt; localStorage.setItem("genstudio.mtab", MS.tab); mShow(); });
+function folderSelect(sel) { return `<select data-folder aria-label="Folder">${(MS.folders || []).map(f => `<option ${f === sel ? "selected" : ""}>${escapeHtml(f)}</option>`).join("")}${(MS.folders || []).includes(sel) ? "" : `<option selected>${escapeHtml(sel)}</option>`}</select>`; }
+
+// Civitai
+const CIV_TYPES = [["", "All types"], ["Checkpoint", "Checkpoints"], ["LORA", "LoRAs"], ["LoCon", "LyCORIS"], ["VAE", "VAEs"], ["Controlnet", "ControlNets"], ["Upscaler", "Upscalers"], ["TextualInversion", "Embeddings"]];
+const CIV_BASES = ["", "SD 1.5", "SDXL 1.0", "Pony", "Illustrious", "NoobAI", "Flux.1 D", "Flux.1 S", "Qwen", "HiDream", "Chroma", "Wan Video 14B t2v", "Wan Video 2.2 T2V-A14B"];
+function renderCivitai() {
+  const c = MS.civ;
+  $("#mBody").innerHTML = `<div class="mbar">
+      <input type="search" id="cq" placeholder="Search Civitai models" value="${escapeHtml(c.query)}" aria-label="Search Civitai">
+      <select id="ct" aria-label="Type">${CIV_TYPES.map(([v, l]) => `<option value="${v}" ${v === c.types ? "selected" : ""}>${l}</option>`).join("")}</select>
+      <select id="cb" aria-label="Base model">${CIV_BASES.map(v => `<option value="${escapeHtml(v)}" ${v === c.base ? "selected" : ""}>${v || "Any base model"}</option>`).join("")}</select>
+      <select id="cs" aria-label="Sort">${["Most Downloaded", "Highest Rated", "Newest"].map(v => `<option ${v === c.sort ? "selected" : ""}>${v}</option>`).join("")}</select>
+      <label><input type="checkbox" id="cn" ${c.nsfw ? "checked" : ""}> include adult</label>
+      <button class="btn" id="cgo">Search</button></div>
+    <div class="mgrid" id="cgrid"></div><div style="text-align:center;margin-top:18px"><button class="btn" id="cmore" hidden>Load more</button></div>`;
+  const go = () => { Object.assign(c, {query: $("#cq").value.trim(), types: $("#ct").value, base: $("#cb").value, sort: $("#cs").value, nsfw: $("#cn").checked, items: [], next: null}); civSearch(); };
+  $("#cgo").onclick = go; $("#cq").onkeydown = e => { if (e.key === "Enter") go(); };
+  ["ct", "cb", "cs", "cn"].forEach(id => $("#" + id).onchange = go);
+  $("#cmore").onclick = () => civSearch(true);
+  if (!c.loaded) civSearch(); else civGrid();
+}
+async function civSearch(more) {
+  const c = MS.civ; c.loaded = true;
+  if (!more) $("#cgrid").innerHTML = `<p class="hint">Searching Civitai…</p>`;
+  const qs = new URLSearchParams({query: c.query, types: c.types, base: c.base, sort: c.sort, nsfw: c.nsfw ? "1" : "", cursor: more && c.next ? c.next : ""});
+  try { const d = await jsonCall("/api/models/civitai?" + qs, "GET"); c.items = more ? c.items.concat(d.items) : d.items; c.next = d.next; civGrid(); }
+  catch (e) { $("#cgrid").innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`; }
+}
+function civGrid() {
+  const c = MS.civ;
+  $("#cgrid").innerHTML = c.items.length ? c.items.map(m => `<button class="mtile" data-civ="${m.id}"><div class="art">${m.image ? (m.image_type === "video"
+      ? `<video src="${escapeHtml(m.image)}" muted loop playsinline autoplay></video>` : `<img src="${escapeHtml(m.image)}" alt="" loading="lazy" referrerpolicy="no-referrer">`) : ""}<span class="badge">${escapeHtml(m.type || "")}</span></div>
+      <div class="t1" title="${escapeHtml(m.name)}">${escapeHtml(m.name)}</div><div class="t2">${escapeHtml(m.base || "")} · ⤓ ${kfmt(m.downloads)}${m.creator ? " · " + escapeHtml(m.creator) : ""}</div></button>`).join("")
+    : `<p class="hint">No models found. Try other words or "Any base model".</p>`;
+  $("#cmore").hidden = !c.next;
+  $("#cgrid").querySelectorAll("[data-civ]").forEach(b => b.onclick = () => openCivitai(b.dataset.civ));
+}
+async function openCivitai(id) {
+  $("#mDlgTitle").textContent = "Loading…"; $("#mDlgBody").innerHTML = `<p class="hint">Fetching the model from Civitai…</p>`; $("#mDlg").classList.add("show");
+  let m; try { m = await jsonCall(`/api/models/civitai/${id}?nsfw=${MS.civ.nsfw ? 1 : 0}`, "GET"); } catch (e) { $("#mDlgBody").innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`; return; }
+  let vi = 0;
+  const draw = () => {
+    const v = m.versions[vi] || {images: [], files: [], trained_words: []};
+    $("#mDlgTitle").textContent = m.name;
+    $("#mDlgBody").innerHTML = `<p class="hint" style="margin-top:0">${escapeHtml(m.type)}${v.base ? " · " + escapeHtml(v.base) : ""}${m.creator ? " · by " + escapeHtml(m.creator) : ""} · ⤓ ${kfmt(m.stats.downloadCount)} · 👍 ${kfmt(m.stats.thumbsUpCount)} · <a href="${escapeHtml(m.page)}" target="_blank" rel="noopener">Open on Civitai</a></p>
+      ${m.versions.length > 4 ? `<label class="lbl">Version</label><select id="mVer" style="padding:7px 10px;border-radius:999px;border:1px solid var(--line);background:var(--panel);margin-bottom:12px;max-width:100%">${m.versions.map((x, i) => `<option value="${i}" ${i === vi ? "selected" : ""}>${escapeHtml(x.name)}${x.base ? " · " + escapeHtml(x.base) : ""}</option>`).join("")}</select>`
+        : m.versions.length > 1 ? `<div class="pills" style="margin:8px 0 12px">${m.versions.map((x, i) => `<button data-v="${i}" class="${i === vi ? "on" : ""}">${escapeHtml(x.name)}</button>`).join("")}</div>` : ""}
+      <div class="mstrip">${v.images.map(im => im.type === "video" ? `<video src="${escapeHtml(im.url)}" muted loop playsinline autoplay class="${im.nsfw && !MS.civ.nsfw ? "blur" : ""}"></video>`
+        : `<img src="${escapeHtml(im.url)}" alt="" loading="lazy" referrerpolicy="no-referrer" class="${im.nsfw && !MS.civ.nsfw ? "blur" : ""}" title="${im.nsfw && !MS.civ.nsfw ? "Adult image — tap to show" : ""}">`).join("") || '<p class="hint">No example pictures.</p>'}</div>
+      <div class="mdetail" style="margin-top:14px"><div>
+        ${v.trained_words.length ? `<label class="lbl">Trigger words <span style="text-transform:none;letter-spacing:0;font-weight:400">(tap to copy)</span></label><div>${v.trained_words.map(w => `<span class="trig" title="Copy">${escapeHtml(w)}</span>`).join("")}</div>` : ""}
+        <label class="lbl">About</label><div class="mtext">${escapeHtml(m.description || "No description.")}</div>
+        ${v.notes ? `<label class="lbl">This version</label><div class="mtext">${escapeHtml(v.notes)}</div>` : ""}
+        ${m.tags.length ? `<p class="hint">${m.tags.slice(0, 12).map(escapeHtml).join(" · ")}</p>` : ""}</div>
+      <div><label class="lbl">Files</label>${m.downloadable ? `<ul class="mfiles">${v.files.map(f => `<li data-file="${f.id}">
+          <div class="row1"><b>${escapeHtml(f.name)}</b><span class="hint">${gbs(f.size)}${f.fp ? " · " + escapeHtml(f.fp) : ""}${f.variant ? " · " + escapeHtml(f.variant) : ""}${f.type && f.type !== "Model" ? " · " + escapeHtml(f.type) : ""}</span></div>
+          <div class="row1" style="margin-top:6px">${f.installed ? `<span class="okc">✓ installed</span>` : isAdmin()
+            ? `<span class="hint">into</span> ${folderSelect(f.folder)} <button class="btn primary" data-dl>Download</button>` : `<span class="hint">Goes in ${escapeHtml(f.folder)} · an admin can download it</span>`}</div></li>`).join("")}</ul>
+          <p class="hint">The example pictures, trigger words and description are saved with the model.</p>` : `<p class="hint">Civitai “${escapeHtml(m.type)}” entries aren't model files, so they can't be installed here.</p>`}</div></div>`;
+    $("#mDlgBody").querySelectorAll("[data-v]").forEach(b => b.onclick = () => { vi = +b.dataset.v; draw(); });
+    if ($("#mVer")) $("#mVer").onchange = () => { vi = +$("#mVer").value; draw(); };
+    $("#mDlgBody").querySelectorAll(".blur").forEach(e => e.onclick = () => e.classList.remove("blur"));
+    $("#mDlgBody").querySelectorAll(".trig").forEach((t, i) => { t.dataset.w = v.trained_words[i]; t.onclick = () => { navigator.clipboard.writeText(t.dataset.w).catch(() => {}); t.textContent = "copied ✓"; setTimeout(() => t.textContent = t.dataset.w, 900); }; });
+    $("#mDlgBody").querySelectorAll("[data-dl]").forEach(b => b.onclick = async () => {
+      const li = b.closest("[data-file]"); b.disabled = true;
+      try { await jsonCall("/api/models/download", "POST", {source: "civitai", model_id: m.id, version_id: v.id, file_id: +li.dataset.file, folder: li.querySelector("[data-folder]").value});
+            b.replaceWith(Object.assign(document.createElement("span"), {className: "okc", textContent: "⤓ downloading — see progress on the Models page"})); pollDownloads(); }
+      catch (e) { b.disabled = false; li.insertAdjacentHTML("beforeend", `<div class="badc">${escapeHtml(e.message)}</div>`); }
+    });
+  };
+  draw();
+}
+
+// Hugging Face
+function renderHf() {
+  const h = MS.hf;
+  $("#mBody").innerHTML = `<div class="mbar"><input type="search" id="hq" placeholder="Search Hugging Face (e.g. Comfy-Org, flux, wan2.2)" value="${escapeHtml(h.query)}" aria-label="Search Hugging Face"><button class="btn" id="hgo">Search</button></div>
+    <ul class="mrows" id="hlist">${h.items.length ? "" : `<li><span class="hint">Search for a repository. Comfy-Org's repositories hold ready-to-use ComfyUI files.</span></li>`}</ul>`;
+  const go = async () => { h.query = $("#hq").value.trim(); if (!h.query) return; $("#hlist").innerHTML = `<li><span class="hint">Searching…</span></li>`;
+    try { h.items = (await jsonCall("/api/models/hf?query=" + encodeURIComponent(h.query), "GET")).items; hfList(); } catch (e) { $("#hlist").innerHTML = `<li class="badc">${escapeHtml(e.message)}</li>`; } };
+  $("#hgo").onclick = go; $("#hq").onkeydown = e => { if (e.key === "Enter") go(); };
+  if (h.items.length) hfList();
+}
+function hfList() {
+  $("#hlist").innerHTML = MS.hf.items.length ? MS.hf.items.map(r => `<li data-repo="${escapeHtml(r.id)}" style="cursor:pointer"><div class="th">🤗</div>
+      <div class="tx"><b>${escapeHtml(r.id)}</b><span>⤓ ${kfmt(r.downloads)} · ♥ ${kfmt(r.likes)}${r.pipeline ? " · " + escapeHtml(r.pipeline) : ""}${r.tags.length ? " · " + r.tags.map(escapeHtml).join(", ") : ""}</span></div></li>`).join("")
+    : `<li><span class="hint">Nothing found.</span></li>`;
+  $("#hlist").querySelectorAll("[data-repo]").forEach(li => li.onclick = () => openHf(li.dataset.repo));
+}
+async function openHf(repo) {
+  $("#mDlgTitle").textContent = repo; $("#mDlgBody").innerHTML = `<p class="hint">Reading the repository…</p>`; $("#mDlg").classList.add("show");
+  let r; try { r = await jsonCall("/api/models/hf/" + repo, "GET"); } catch (e) { $("#mDlgBody").innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`; return; }
+  $("#mDlgBody").innerHTML = `<p class="hint" style="margin-top:0">⤓ ${kfmt(r.downloads)} · ♥ ${kfmt(r.likes)}${r.license ? " · license " + escapeHtml(r.license) : ""}${r.gated ? ` · <span class="badc">gated: needs a Hugging Face token with access (Settings)</span>` : ""} · <a href="${escapeHtml(r.page)}" target="_blank" rel="noopener">Open on Hugging Face</a></p>
+    ${r.images.length ? `<div class="mstrip">${r.images.map(u => `<img src="${escapeHtml(u)}" alt="" loading="lazy" referrerpolicy="no-referrer">`).join("")}</div>` : ""}
+    <div class="mdetail" style="margin-top:14px"><div><label class="lbl">About</label><div class="mtext">${escapeHtml(r.readme || "No description.")}</div></div>
+    <div><label class="lbl">Model files (${r.files.length})</label><ul class="mfiles">${r.files.map(f => `<li data-path="${escapeHtml(f.path)}">
+        <div class="row1"><b>${escapeHtml(f.path)}</b><span class="hint">${gbs(f.size)}</span></div>
+        <div class="row1" style="margin-top:6px">${f.installed ? `<span class="okc">✓ installed</span>` : isAdmin() ? `<span class="hint">into</span> ${folderSelect(f.folder)} <button class="btn primary" data-dl>Download</button>` : `<span class="hint">Goes in ${escapeHtml(f.folder)} · an admin can download it</span>`}</div></li>`).join("") || '<li class="hint">No model files in this repository.</li>'}</ul></div></div>`;
+  $("#mDlgBody").querySelectorAll("[data-dl]").forEach(b => b.onclick = async () => {
+    const li = b.closest("[data-path]"); b.disabled = true;
+    try { await jsonCall("/api/models/download", "POST", {source: "huggingface", repo, path: li.dataset.path, folder: li.querySelector("[data-folder]").value});
+          b.replaceWith(Object.assign(document.createElement("span"), {className: "okc", textContent: "⤓ downloading — see progress on the Models page"})); pollDownloads(); }
+    catch (e) { b.disabled = false; li.insertAdjacentHTML("beforeend", `<div class="badc">${escapeHtml(e.message)}</div>`); }
+  });
+}
+
+// Installed
+const RATING = {pg13: ["PG-13", "#2f9e5c", "Everyone can use it"], adult: ["Adults only", "var(--err)", "Only admins can use it"],
+                unknown: ["Unrated", "#c27c0e", "Only admins can use it until it's rated"]};
+const ratingBadge = (m) => m.content && isAdmin() ? ` <span class="rbadge" style="border-color:${RATING[m.rating][1]};color:${RATING[m.rating][1]}">${RATING[m.rating][0]}</span>` : "";
+async function renderInstalled() {
+  $("#mBody").innerHTML = `<p class="hint">Reading your model folders…</p>`;
+  let d; try { d = await jsonCall("/api/models/installed", "GET"); } catch (e) { $("#mBody").innerHTML = `<p class="err">${escapeHtml(e.message)}</p>`; return; }
+  MS.installed = d.models;
+  const groups = {};
+  d.models.forEach(m => (groups[m.folder] = groups[m.folder] || []).push(m));
+  const total = d.models.reduce((a, m) => a + m.size, 0);
+  MS.picked = MS.picked || new Set();
+  const missingInfo = d.models.filter(m => !m.link && (!m.meta || m.meta.not_found)).length;
+  $("#mBody").innerHTML = (isAdmin() ? `<div class="mselbar" id="mSelBar"></div>` : "") + `<p class="hint" style="margin-top:0">${d.models.length} models · ${gbs(total)} · ${gbs(d.free)} free on disk${isAdmin()
+      ? ` · <button class="btn" id="mInfoAll" style="padding:3px 10px;font-size:13px">Download info for all models</button> · LoRAs, checkpoints and diffusion models need a PG-13 rating before non-admin accounts can use them${d.rating && d.rating.running ? " (checking ratings with Civitai now…)" : ""}` : ""}</p>` +
+    Object.entries(groups).map(([folder, list]) => `<div class="mgroup"><h3>${escapeHtml(folder)} (${list.length})</h3><ul class="mrows">${list.map((m, i) => `
+      <li data-inst="${escapeHtml(folder)}|${escapeHtml(m.file)}" style="cursor:pointer" class="${MS.selecting && MS.picked.has(folder + "|" + m.file) ? "sel" : ""}">${MS.selecting ? `<i class="tick" aria-hidden="true">${MS.picked.has(folder + "|" + m.file) ? "✓" : ""}</i>` : ""}${m.preview ? (/\.(mp4|webm)$/.test(m.preview) ? `<video class="th" src="/model-media/${encodeURI(m.preview)}" muted></video>` : `<img class="th" src="/model-media/${encodeURI(m.preview)}" alt="" loading="lazy">`) : `<div class="th">◆</div>`}
+        <div class="tx"><b>${escapeHtml(m.meta && m.meta.model ? m.meta.model : m.file)}${ratingBadge(m)}</b><span>${escapeHtml(m.file)}${m.meta && m.meta.base ? " · " + escapeHtml(m.meta.base) : ""}${m.meta && m.meta.trained_words && m.meta.trained_words.length ? " · triggers: " + escapeHtml(m.meta.trained_words.slice(0, 3).join(", ")) : ""}${m.link ? " · linked" : ""}</span></div>
+        <span class="sz">${gbs(m.size)}</span></li>`).join("")}</ul></div>`).join("");
+  $("#mBody").querySelectorAll("[data-inst]").forEach(li => li.onclick = () => {
+    if (MS.selecting) { const k = li.dataset.inst; MS.picked.has(k) ? MS.picked.delete(k) : MS.picked.add(k); renderInstalledRows(); return; }
+    const [f, file] = li.dataset.inst.split("|"); openInstalled(MS.installed.find(m => m.folder === f && m.file === file));
+  });
+  renderMSelBar();
+  if ($("#mInfoAll")) {
+    $("#mInfoAll").title = missingInfo ? `${missingInfo} models have no information yet` : "Every model has its information";
+    $("#mInfoAll").onclick = async () => {
+      try { await jsonCall("/api/models/fetch-info", "POST", {}); $("#mInfoAll").disabled = true; $("#mInfoAll").textContent = "Looking up… (see Downloads above)"; pollDownloads(); }
+      catch (e) { $("#mBody").insertAdjacentHTML("afterbegin", `<p class="err">${escapeHtml(e.message)}</p>`); }
+    };
+  }
+}
+function renderInstalledRows() {                         // redraw ticks without re-reading the folders
+  $("#mBody").querySelectorAll("[data-inst]").forEach(li => {
+    const on = MS.picked.has(li.dataset.inst); li.classList.toggle("sel", on);
+    const t = li.querySelector(".tick"); if (t) t.textContent = on ? "✓" : "";
+  });
+  renderMSelBar();
+}
+function renderMSelBar() {
+  const bar = $("#mSelBar"); if (!bar) return;
+  if (!MS.selecting) { bar.innerHTML = `<button class="btn" id="mSelStart">Select…</button>`; $("#mSelStart").onclick = () => { MS.selecting = true; MS.picked.clear(); renderInstalled(); }; return; }
+  const picked = MS.installed.filter(m => MS.picked.has(m.folder + "|" + m.file)), n = picked.length;
+  const bytes = picked.reduce((a, m) => a + m.size, 0), content = picked.filter(m => m.content).length;
+  bar.innerHTML = `<span>${n} selected${n ? " · " + gbs(bytes) : ""}</span><button class="btn" id="mSelAll">${n === MS.installed.length ? "None" : "All"}</button>
+    <button class="btn danger" id="mSelDel" ${n ? "" : "disabled"}>Delete</button>
+    <span class="mrate">Rate: <button class="btn" data-mrate="pg13" ${content ? "" : "disabled"}>PG-13</button><button class="btn" data-mrate="adult" ${content ? "" : "disabled"}>Adults only</button><button class="btn" data-mrate="auto" ${content ? "" : "disabled"}>Automatic</button></span>
+    <button class="btn" id="mSelDone">Done</button>`;
+  $("#mSelAll").onclick = () => { n === MS.installed.length ? MS.picked.clear() : MS.installed.forEach(m => MS.picked.add(m.folder + "|" + m.file)); renderInstalledRows(); };
+  $("#mSelDone").onclick = () => { MS.selecting = false; MS.picked.clear(); renderInstalled(); };
+  $("#mSelDel").onclick = async () => {
+    if (!confirm(`Delete ${n} model file${n === 1 ? "" : "s"} (${gbs(bytes)}) for good? Their pictures and information go too, and workflows that use them will need them again.\n\n${picked.slice(0, 15).map(m => "• " + m.folder + "/" + m.file).join("\n")}${n > 15 ? "\n…" : ""}`)) return;
+    let failed = [];
+    for (const m of picked) {
+      try { await jsonCall(`/api/models/installed?folder=${encodeURIComponent(m.folder)}&file=${encodeURIComponent(m.file)}`, "DELETE"); MS.picked.delete(m.folder + "|" + m.file); }
+      catch (e) { failed.push(m.file + ": " + e.message); }
+    }
+    await renderInstalled(); loadDisk();
+    if (failed.length) $("#mBody").insertAdjacentHTML("afterbegin", `<p class="err">Couldn't delete: ${failed.map(escapeHtml).join("; ")}</p>`);
+  };
+  bar.querySelectorAll("[data-mrate]").forEach(b => b.onclick = async () => {
+    for (const m of picked.filter(m => m.content)) await jsonCall("/api/models/rating", "POST", {folder: m.folder, file: m.file, rating: b.dataset.mrate}).catch(() => {});
+    LORAS = null; await renderInstalled();
+  });
+}
+function openInstalled(m) {
+  const meta = m.meta || {};
+  $("#mDlgTitle").textContent = meta.model || m.file;
+  $("#mDlgBody").innerHTML = `<p class="hint" style="margin-top:0">${escapeHtml(m.folder)}/${escapeHtml(m.file)} · ${gbs(m.size)}${meta.version ? " · " + escapeHtml(meta.version) : ""}${meta.base ? " · " + escapeHtml(meta.base) : ""}${meta.page ? ` · <a href="${escapeHtml(meta.page)}" target="_blank" rel="noopener">source</a>` : ""}</p>
+    ${(meta.previews || []).length ? `<div class="mstrip">${meta.previews.map(pv => pv.type === "video" ? `<video src="/model-media/${encodeURI(pv.file)}" muted loop playsinline autoplay class="${pv.nsfw ? "blur" : ""}"></video>` : `<img src="/model-media/${encodeURI(pv.file)}" alt="" loading="lazy" class="${pv.nsfw ? "blur" : ""}">`).join("")}</div>` : ""}
+    <div class="mdetail" style="margin-top:14px"><div>
+      ${(meta.trained_words || []).length ? `<label class="lbl">Trigger words</label><div>${meta.trained_words.map(w => `<span class="trig">${escapeHtml(w)}</span>`).join("")}</div>` : ""}
+      <label class="lbl">About</label><div class="mtext">${escapeHtml(meta.description || (meta.not_found ? "Not found on Civitai or Hugging Face by its fingerprint or name." : m.meta ? "No description." : "No information saved yet."))}</div>
+      ${isAdmin() ? `<button class="btn" id="mInfoOne" style="margin-top:8px">${m.meta && !meta.not_found ? "Refresh its information" : "Look up its information"}</button>` : ""}</div>
+    <div>${meta.sha256 ? `<label class="lbl">SHA-256</label><div class="hint" style="word-break:break-all">${escapeHtml(meta.sha256)}</div>` : ""}
+      ${isAdmin() && m.content ? `<label class="lbl">Who can use it</label><div class="prio" id="mRate">${[["pg13", "PG-13 · everyone"], ["adult", "Adults only"], ["auto", "Automatic"]].map(([k, l]) =>
+        `<button type="button" data-rate="${k}" aria-pressed="${k === (m.rated_by === "admin" ? m.rating : "auto")}">${l}</button>`).join("")}</div>
+        <p class="hint">Now: <b>${RATING[m.rating][0]}</b> — ${RATING[m.rating][2]}.${m.rated_by && m.rated_by !== "admin" ? ` Rated by ${escapeHtml(m.rated_by)}${m.level ? ` (Civitai level ${m.level})` : ""}.` : ""} Automatic uses Civitai's rating for this exact file, else adult-sounding names count as adults only.</p>` : ""}
+      ${isAdmin() ? `<label class="lbl">Remove</label><button class="btn danger" id="mDel">Delete this model</button><p class="hint">Deletes the file, its pictures and its information. Workflows that use it will need it again.</p>` : ""}</div></div>`;
+  $("#mDlgBody").querySelectorAll(".blur").forEach(e => e.onclick = () => e.classList.remove("blur"));
+  $("#mDlgBody").querySelectorAll(".trig").forEach(t => t.onclick = () => navigator.clipboard.writeText(t.textContent).catch(() => {}));
+  if ($("#mInfoOne")) $("#mInfoOne").onclick = async () => {
+    try { await jsonCall("/api/models/fetch-info", "POST", {folder: m.folder, file: m.file}); $("#mInfoOne").disabled = true; $("#mInfoOne").textContent = "Looking it up… (see Downloads)"; pollDownloads(); }
+    catch (e) { $("#mDlgBody").insertAdjacentHTML("beforeend", `<p class="err">${escapeHtml(e.message)}</p>`); }
+  };
+  $("#mDlgBody").querySelectorAll("[data-rate]").forEach(b => b.onclick = async () => {
+    try { await jsonCall("/api/models/rating", "POST", {folder: m.folder, file: m.file, rating: b.dataset.rate}); $("#mDlg").classList.remove("show"); renderInstalled(); LORAS = null; }
+    catch (e) { $("#mDlgBody").insertAdjacentHTML("beforeend", `<p class="err">${escapeHtml(e.message)}</p>`); }
+  });
+  if ($("#mDel")) $("#mDel").onclick = async () => {
+    if (!confirm(`Delete ${m.file} (${gbs(m.size)}) for good?`)) return;
+    try { await jsonCall(`/api/models/installed?folder=${encodeURIComponent(m.folder)}&file=${encodeURIComponent(m.file)}`, "DELETE"); $("#mDlg").classList.remove("show"); renderInstalled(); }
+    catch (e) { $("#mDlgBody").insertAdjacentHTML("beforeend", `<p class="err">${escapeHtml(e.message)}</p>`); }
+  };
+  $("#mDlg").classList.add("show");
+}
+$("#mDlgClose").onclick = () => $("#mDlg").classList.remove("show");
+$("#mDlg").onclick = e => { if (e.target === $("#mDlg")) $("#mDlg").classList.remove("show"); };
+document.addEventListener("keydown", e => { if (e.key === "Escape") $("#mDlg").classList.remove("show"); });
+
+// downloads in progress (shown on the Models page)
+async function pollDownloads() {
+  if (MS.polling) return; MS.polling = true;
+  let running = false;
+  try {
+    const d = await jsonCall("/api/models/tasks", "GET");
+    const shown = d.tasks.filter(t => t.status === "running" || Date.now() / 1000 - (t.finished || 0) < 600).slice(0, 8);
+    running = shown.some(t => t.status === "running");
+    $("#mDownloads").innerHTML = shown.length ? `<div class="dlbox"><label class="lbl" style="margin-top:4px">Downloads</label>${shown.map(t => { const s = t.steps[0];
+      if (s.kind === "info") return `<div class="it"><b>${escapeHtml(t.label)}</b><br>${s.status === "done" ? `<span class="okc">✓ ${escapeHtml(s.detail || "done")}</span>`
+        : `<span class="hint">${escapeHtml(s.detail || "")} · ${s.done} of ${s.total} models</span>`}${s.status !== "done" && s.total ? `<div class="prog2"><i style="width:${(100 * s.done / s.total).toFixed(1)}%"></i></div>` : ""}</div>`;
+      return `<div class="it"><b>${escapeHtml(t.label)}</b> <span class="hint">→ ${escapeHtml(s.folder)}</span><br>${s.status === "done" ? `<span class="okc">✓ installed with its pictures and information</span>`
+        : s.status === "error" ? `<span class="badc">✗ ${escapeHtml(s.error || "failed")}</span>` : `<span class="hint">${escapeHtml(s.detail || "")}${s.total ? ` · ${gbs(s.done)} of ${gbs(s.total)}` : s.done ? " · " + gbs(s.done) : ""}</span>
+        ${s.total ? `<div class="prog2"><i style="width:${(100 * s.done / s.total).toFixed(1)}%"></i></div>` : ""}`}</div>`; }).join("")}</div>` : "";
+    if (!running && MS.wasRunning && MS.tab === "installed") renderInstalled();
+    MS.wasRunning = running;
+  } catch {}
+  MS.polling = false;
+  if (running && !$("#modelsPage").hidden) setTimeout(pollDownloads, 1500);
+}
+// ---------- hide creations: one tap (or H) hides every picture and video; remembered on this device
+let hidden = false;
+try { hidden = localStorage.getItem("genstudio.hidden") === "1"; } catch {}
+function setHidden(on) {
+  hidden = on;
+  document.body.classList.toggle("hide-creations", on);
+  $("#hideBtn").setAttribute("aria-pressed", on);
+  $("#hideIcon").textContent = on ? "🙈" : "👁";
+  $("#hideLbl").textContent = on ? "Show" : "Hide";
+  $("#hideBtn").title = on ? "Show your pictures and videos (H)" : "Hide your pictures and videos (H)";
+  if (on) { closeLightbox(); document.querySelectorAll("#grid video").forEach(v => v.pause()); }
+  try { localStorage.setItem("genstudio.hidden", on ? "1" : "0"); } catch {}
+}
+$("#hideBtn").onclick = () => setHidden(!hidden);
+document.addEventListener("keydown", e => {
+  if ((e.key === "h" || e.key === "H") && !e.ctrlKey && !e.metaKey && !e.altKey && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) && !document.activeElement.isContentEditable) setHidden(!hidden);
+});
+setHidden(hidden);
+// ---------- accounts: sign in, first-run setup, password, user management
+let ME = null, started = false;
+const _fetch = window.fetch.bind(window);
+window.fetch = async (...args) => {                 // a lapsed session anywhere -> back to the sign-in screen
+  const r = await _fetch(...args);
+  if (r.status === 401 && !String(args[0]).includes("/api/login")) showAuth("login");
+  return r;
+};
+async function jsonCall(url, method, body) {
+  const r = await fetch(url, {method, headers: {"Content-Type": "application/json"}, body: body ? JSON.stringify(body) : undefined});
+  if (!r.ok) throw new Error((await r.text()) || r.statusText);
+  return r.json();
+}
+let authMode = "login";
+function showAuth(mode) {
+  authMode = mode; ME = null;
+  $("#authTitle").textContent = mode === "setup" ? "Create the admin account" : "Sign in";
+  $("#authSub").textContent = mode === "setup" ? "First run: this account owns everything made so far and can add other users." : "Image & Video Studio";
+  $("#aConfirmWrap").hidden = mode !== "setup";
+  $("#aPass").autocomplete = mode === "setup" ? "new-password" : "current-password";
+  $("#aGo").textContent = mode === "setup" ? "Create account" : "Sign in";
+  $("#aErr").textContent = ""; $("#auth").classList.add("show"); setTimeout(() => $("#aUser").focus(), 0);
+}
+$("#authForm").onsubmit = async (e) => {
+  e.preventDefault();
+  if (authMode === "setup" && $("#aPass").value !== $("#aConfirm").value) { $("#aErr").textContent = "The passwords don't match."; return; }
+  $("#aGo").disabled = true; $("#aErr").textContent = "";
+  try {
+    const d = await jsonCall(authMode === "setup" ? "/api/setup" : "/api/login", "POST", {username: $("#aUser").value, password: $("#aPass").value});
+    $("#aPass").value = $("#aConfirm").value = ""; signedIn(d.user);
+  } catch (err) { $("#aErr").textContent = err.message; }
+  $("#aGo").disabled = false;
+};
+let startedAs = null;
+function signedIn(user) {
+  if (startedAs && startedAs !== user.name) { location.reload(); return; }   // someone else signed in on this page: start clean
+  startedAs = user.name;
+  ME = user; $("#auth").classList.remove("show"); loadPrio(); loadDisk();
+  $("#lnHermes").hidden = user.role !== "admin";
+  $("#userName").textContent = user.name; $("#userWho").textContent = `Signed in as ${user.name}${user.role === "admin" ? " · admin" : ""}`;
+  $("#mUsers").hidden = user.role !== "admin";
+  cards.forEach(c => c.remove()); cards.clear();
+  if (!started) { started = true; restoreUi(); render(); route(); }
+  poll();
+  fetch("/api/settings").then(r => r.json()).then(d => { SET = d; applyDefaults(); render(); }).catch(() => {});
+}
+
+$("#mOut").onclick = async () => { await jsonCall("/api/logout", "POST").catch(() => {}); location.reload(); };   // a clean page: nothing of this account stays on screen
+const openAcc = (title, html) => { $("#accTitle").textContent = title; $("#accBody").innerHTML = html; $("#accDlg").classList.add("show"); };
+$("#accClose").onclick = () => $("#accDlg").classList.remove("show");
+$("#mPw").onclick = () => {
+  openAcc("Change password", `<div class="set"><div class="f"><label>Current password</label><input id="pwOld" type="password" autocomplete="current-password" style="width:100%;margin-top:6px"></div>
+    <div class="f"><label>New password</label><input id="pwNew" type="password" autocomplete="new-password" style="width:100%;margin-top:6px"></div>
+    <div class="f"><label>Confirm new password</label><input id="pwNew2" type="password" autocomplete="new-password" style="width:100%;margin-top:6px"></div>
+    <p class="hlp">At least 8 characters. Your other devices are signed out.</p>
+    <button class="btn primary" id="pwGo" style="width:auto">Change password</button> <span class="hlp" id="pwMsg"></span></div>`);
+  $("#pwGo").onclick = async () => {
+    if ($("#pwNew").value !== $("#pwNew2").value) return ($("#pwMsg").textContent = "The new passwords don't match.");
+    try { await jsonCall("/api/password", "POST", {current: $("#pwOld").value, new: $("#pwNew").value}); $("#pwMsg").textContent = "Password changed ✓"; ["pwOld", "pwNew", "pwNew2"].forEach(i => $("#" + i).value = ""); }
+    catch (err) { $("#pwMsg").innerHTML = `<span style="color:var(--err)">${escapeHtml(err.message)}</span>`; }
+  };
+};
+async function renderUsers(msg) {
+  const d = await jsonCall("/api/users", "GET").catch(err => ({users: [], error: err.message}));
+  openAcc("Manage users", `<p class="hlp" style="margin-top:0">Each person sees only their own pictures and videos. Admins can manage accounts and change studio settings.</p>
+    <table class="utable"><tbody>${d.users.map(u => `<tr data-u="${escapeHtml(u.name)}"><td><b>${escapeHtml(u.name)}</b>${u.name === ME.name ? " (you)" : ""}<div class="hlp" style="margin:0">${u.items} item${u.items === 1 ? "" : "s"}</div></td>
+      <td><select data-role aria-label="Role for ${escapeHtml(u.name)}"><option value="user" ${u.role === "user" ? "selected" : ""}>User</option><option value="admin" ${u.role === "admin" ? "selected" : ""}>Admin</option></select></td>
+      <td style="text-align:right;white-space:nowrap"><button class="btn" data-reset>Reset password</button>${u.name === ME.name ? "" : `<button class="btn danger" data-del>Delete</button>`}</td></tr>`).join("")}</tbody></table>
+    <h3 style="margin:18px 0 0;font-size:13px">Add a user</h3>
+    <div class="form-row"><input id="nuName" placeholder="username" autocapitalize="none" spellcheck="false" aria-label="New username"><input id="nuPass" type="password" placeholder="password (8+ characters)" autocomplete="new-password" aria-label="Password for the new user">
+      <select id="nuRole" aria-label="Role"><option value="user">User</option><option value="admin">Admin</option></select><button class="btn primary" id="nuGo" style="width:auto;margin:0">Add</button></div>
+    <p class="hlp" id="uMsg">${msg || d.error || ""}</p>`);
+  const say = (t, bad) => { $("#uMsg").innerHTML = bad ? `<span style="color:var(--err)">${escapeHtml(t)}</span>` : escapeHtml(t); };
+  $("#nuGo").onclick = async () => {
+    try { await jsonCall("/api/users", "POST", {username: $("#nuName").value, password: $("#nuPass").value, role: $("#nuRole").value}); renderUsers(`Added ${$("#nuName").value.trim().toLowerCase()} ✓ — give them the password; they can change it after signing in.`); }
+    catch (err) { say(err.message, true); }
+  };
+  $("#accBody").querySelectorAll("tr[data-u]").forEach(tr => {
+    const name = tr.dataset.u;
+    tr.querySelector("[data-role]").onchange = async (e) => { try { await jsonCall(`/api/users/${encodeURIComponent(name)}`, "PUT", {role: e.target.value}); renderUsers(`${name} is now ${e.target.value === "admin" ? "an admin" : "a user"} ✓`); } catch (err) { say(err.message, true); renderUsers(); } };
+    tr.querySelector("[data-reset]").onclick = async () => {
+      const pw = prompt(`New password for ${name} (at least 8 characters):`); if (!pw) return;
+      try { await jsonCall(`/api/users/${encodeURIComponent(name)}`, "PUT", {password: pw}); say(`Password for ${name} changed ✓ — they're signed out everywhere.`); } catch (err) { say(err.message, true); }
+    };
+    const del = tr.querySelector("[data-del]");
+    if (del) del.onclick = async () => {
+      if (!confirm(`Delete ${name}? Their pictures and videos are deleted too. This can't be undone.`)) return;
+      try { await jsonCall(`/api/users/${encodeURIComponent(name)}`, "DELETE"); renderUsers(`${name} deleted.`); } catch (err) { say(err.message, true); }
+    };
+  });
+}
+$("#mUsers").onclick = () => renderUsers();
+document.addEventListener("keydown", e => { if (e.key === "Escape") $("#accDlg").classList.remove("show"); });
+
+_fetch("/api/session").then(r => r.json()).then(d => d.user ? signedIn(d.user) : showAuth(d.setup ? "setup" : "login")).catch(() => showAuth("login"));
+
+// ---------- resizable text boxes: grow while typing, drag the bar underneath (mouse or touch), ⤢ for a tall editor
+(() => {
+  const MAX = () => Math.round(innerHeight * 0.7);
+  const fit = (ta) => { if (ta.dataset.manual) return; ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight + 2, MAX()) + "px"; };
+  function enhance(ta) {
+    if (ta.dataset.rz || !ta.parentNode) return;
+    ta.dataset.rz = "1";
+    const wrap = document.createElement("div"); wrap.className = "tawrap";
+    ta.parentNode.insertBefore(wrap, ta); wrap.appendChild(ta);
+    const big = document.createElement("button"); big.type = "button"; big.className = "tabig"; big.textContent = "⤢";
+    big.title = "Make this box bigger (again to shrink)"; big.setAttribute("aria-label", "Toggle a bigger text box");
+    const grip = document.createElement("div"); grip.className = "tagrip"; grip.title = "Drag to resize · double-click to fit the text";
+    wrap.append(big, grip);
+    big.onclick = () => {
+      const on = !wrap.classList.contains("big"); wrap.classList.toggle("big", on);
+      ta.dataset.manual = on ? "1" : ""; ta.style.height = on ? Math.round(Math.max(innerHeight * 0.8, ta.offsetHeight + 160)) + "px" : "";
+      if (!on) fit(ta); ta.focus();
+    };
+    grip.addEventListener("pointerdown", (e) => {
+      e.preventDefault(); grip.setPointerCapture(e.pointerId); grip.classList.add("drag");
+      const y0 = e.clientY, h0 = ta.offsetHeight;
+      const move = (ev) => { ta.dataset.manual = "1"; ta.style.height = Math.max(44, h0 + ev.clientY - y0) + "px"; };
+      const up = () => { grip.classList.remove("drag"); grip.removeEventListener("pointermove", move); grip.removeEventListener("pointerup", up); grip.removeEventListener("pointercancel", up); };
+      grip.addEventListener("pointermove", move); grip.addEventListener("pointerup", up); grip.addEventListener("pointercancel", up);
+    });
+    grip.addEventListener("dblclick", () => { ta.dataset.manual = ""; wrap.classList.remove("big"); fit(ta); });
+    ta.addEventListener("input", () => fit(ta));
+    ta.addEventListener("focus", () => fit(ta));
+    requestAnimationFrame(() => fit(ta));
+  }
+  const scan = (root) => { if (root.tagName === "TEXTAREA") enhance(root); else if (root.querySelectorAll) root.querySelectorAll("textarea").forEach(enhance); };
+  scan(document.body);
+  new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach(scan))).observe(document.body, {childList: true, subtree: true});
+})();
+
+/* ---------- Assistant chat ---------- */
+(function(){
+  let A = {prev: null};
+
+  const asst   = document.getElementById("asst");
+  const asstLog = document.getElementById("asstLog");
+  const asstIn  = document.getElementById("asstIn");
+  const asstOpen  = document.getElementById("asstOpen");
+  const asstClose = document.getElementById("asstClose");
+  const asstForm  = document.getElementById("asstForm");
+  const asstSend  = document.getElementById("asstSend");
+
+  // Open/close
+  if (asstOpen) asstOpen.addEventListener("click", () => { asst.hidden = false; asstIn.focus(); });
+  if (asstClose) asstClose.addEventListener("click", () => { asst.hidden = true; });
+
+  // Auto-resize textarea
+  if (asstIn) {
+    asstIn.addEventListener("input", () => {
+      asstIn.style.height = "auto";
+      asstIn.style.height = Math.min(asstIn.scrollHeight, window.innerHeight * 0.4) + "px";
+    });
+  }
+
+  // Append message to chat log
+  function msg(text, cls) {
+    const el = document.createElement("div");
+    el.className = "m " + cls;
+    el.textContent = text;
+    asstLog.appendChild(el);
+    asstLog.scrollTop = asstLog.scrollHeight;
+    return el;
+  }
+
+  // Stream a single turn
+  async function chat(text) {
+    if (A.busy) return;
+    A.busy = true;
+    asstSend.disabled = true;
+    msg(text, "me");
+
+    try {
+      const r = await fetch("/api/assistant/chat", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({message: text, previous: A.prev, model: window.b70Brain ? b70Brain() : "agi"})});
+      if (!r.ok) throw new Error(`Server ${r.status}`);
+      const reader = r.body.getReader();
+      let buf = "";
+      const aiEl = msg("", "ai typing");
+
+      while (true) {
+        const {value, done} = await reader.read();
+        if (done) break;
+        buf += new TextDecoder().decode(value);
+        const lines = buf.split("\n\n");
+        buf = lines.pop();
+        for (const raw of lines) {
+          const m = raw.match(/^data: (.+)$/);
+          if (!m) continue;
+          const d = JSON.parse(m[1]);
+          if (d.delta) aiEl.textContent += d.delta;
+          else if (d.tool) {
+            aiEl.classList.remove("typing");
+            const t = document.createElement("div");
+            t.className = "tools";
+            t.textContent = "⚡ " + d.tool;
+            asstLog.appendChild(t);
+            aiEl.classList.add("typing");
+          } else if (d.done) {
+            A.prev = d.done;
+            aiEl.classList.remove("typing");
+          } else if (d.error) {
+            msg("✖ " + d.error, "err");
+            aiEl.classList.remove("typing");
+            if (aiEl.textContent.length === 0) aiEl.remove();
+          }
+        }
+      }
+      if (asstLog.lastElementChild && asstLog.lastElementChild.classList.contains("typing"))
+        asstLog.lastElementChild.classList.remove("typing");
+    } catch(e) {
+      msg("✖ " + e.message, "err");
+    }
+    A.busy = false;
+    asstSend.disabled = false;
+    asstIn.focus();
+  }
+
+  // Form submit
+  if (asstForm) {
+    asstForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const text = asstIn.value.trim();
+      if (!text) return;
+      asstIn.value = "";
+      asstIn.style.height = "auto";
+      chat(text);
+    });
+  }
+
+  // Init: hide panel
+  if (asst) asst.hidden = true;
+})();
+
+// ---------- GPU priority (shared with the radio): which AI tool gets the graphics card first. Admins choose.
+const PRIO = [["shared", "Shared"], ["studio", "Image studio"], ["radio", "Radio"], ["assistant", "Assistant"]];
+const PRIO_HELP = {
+  shared: "Everyone takes turns. The radio makes room before recording a song.",
+  studio: "Pictures and videos come first: the radio pauses new songs while the studio works and chat models are unloaded before each job.",
+  radio: "The radio comes first: creating here won't switch it off, so jobs can be slower while it records.",
+  assistant: "Hermes comes first: its model stays loaded, and the radio waits while it's in use. Jobs here can be slower."};
+function drawPrio(v) {
+  const admin = ME && ME.role === "admin";
+  $("#prio").innerHTML = PRIO.map(([k, l]) => `<button type="button" data-prio="${k}" aria-pressed="${k === v}" ${admin ? "" : "disabled"} title="${escapeHtml(PRIO_HELP[k])}">${l}</button>`).join("");
+  $("#prioNote").textContent = PRIO_HELP[v] + (admin ? "" : " Only an admin can change this.");
+  $("#prio").querySelectorAll("[data-prio]").forEach(b => b.onclick = async () => {
+    const r = await fetch("/api/gpu-priority", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({priority: b.dataset.prio})});
+    if (r.ok) drawPrio((await r.json()).priority); else $("#prioNote").textContent = await r.text();
+  });
+}
+async function loadPrio() { if (!ME) return; try { const r = await fetch("/api/gpu-priority"); if (r.ok) drawPrio((await r.json()).priority); } catch {} }
+setInterval(() => { if (!document.hidden) loadPrio(); }, 15000);
+
+// ---------- disk usage (side panel)
+const diskSize = (n) => n >= 2 ** 40 ? (n / 2 ** 40).toFixed(2) + " TB" : n >= 2 ** 30 ? (n / 2 ** 30).toFixed(n >= 100 * 2 ** 30 ? 0 : 1) + " GB" : Math.round(n / 2 ** 20) + " MB";
+async function loadDisk() {
+  if (!ME) return;
+  try {
+    const r = await fetch("/api/disk"); if (!r.ok) return;
+    const d = await r.json(), pct = 100 * d.used / d.total;
+    const bar = $("#diskBar"); bar.style.width = pct.toFixed(1) + "%"; bar.className = d.free < 15 * 2 ** 30 ? "full" : pct > 85 ? "warn" : "";
+    $("#diskMeter").setAttribute("aria-valuenow", Math.round(pct));
+    $("#diskText").innerHTML = `${diskSize(d.free)} free of ${diskSize(d.total)}` + (d.free < 15 * 2 ** 30 ? ` · <span style="color:var(--err)">almost full: big downloads will be refused</span>` : "");
+    $("#diskParts").innerHTML = d.parts.filter(p => p.bytes > 0).sort((a, b) => b.bytes - a.bytes).map(p => `<li><span>${escapeHtml(p.label)}</span><b>${diskSize(p.bytes)}</b></li>`).join("")
+      + (d.partial_downloads > 2 ** 28 ? `<li><span>Unfinished downloads</span><b>${diskSize(d.partial_downloads)}</b></li>` : "");
+  } catch {}
+}
+setInterval(() => { if (!document.hidden) loadDisk(); }, 60000);
+
+
+// ---------- ✨ Improve prompt: the local GPU model rewrites the prompt into a fuller one (Undo puts yours back)
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-improve]"); if (!b) return;
+  const box = document.getElementById(b.dataset.improve), msg = document.querySelector(`[data-impmsg="${CSS.escape(b.dataset.improve)}"]`);
+  if (!box || !box.value.trim()) { if (msg) msg.textContent = "Write a few words first."; return; }
+  const before = box.value;
+  const kind = box.id === "prompt" ? (ui.kind === "video" ? "video" : "image") : (wf.cur && wf.cur.plan && wf.cur.plan.kind) || "image";
+  b.disabled = true; if (msg) msg.textContent = "Improving…";
+  try {
+    const r = await fetch("/api/prompt/improve", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({prompt: before, kind})});
+    if (!r.ok) throw new Error(await r.text());
+    box.value = (await r.json()).prompt; box.dispatchEvent(new Event("input", {bubbles: true}));
+    if (msg) { msg.innerHTML = `Improved ✓ <a href="#" data-undo>Undo</a>`; msg.querySelector("[data-undo]").onclick = (ev) => { ev.preventDefault(); box.value = before; box.dispatchEvent(new Event("input", {bubbles: true})); msg.textContent = "Back to yours."; }; }
+  } catch (err) { if (msg) msg.textContent = err.message.slice(0, 160); }
+  b.disabled = false;
+});
+</script>
+<script src="/b70/b70.js" defer></script>
+</body>
+</html>

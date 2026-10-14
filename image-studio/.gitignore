@@ -1,0 +1,14 @@
+# secrets and per-machine data: never commit
+agent.token
+ratings.json
+settings.json
+users.json
+sessions.json
+jobs.json
+uploads.json
+workflows/
+# backups and caches
+*.bak-*
+*.orig
+__pycache__/
+logs/
