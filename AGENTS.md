@@ -41,6 +41,7 @@ Read this whole file before changing anything. `README.md` has the user-facing d
 | `agentora-speech` | 7895 | `studio/speech_server.py` (`~/venv-speech`) | OpenAI audio API: Qwen3-TTS voice, whisper listening, both under leases |
 | `genstudio` | 7870 | `image-studio/server.py` | Image & Video Studio (`/`), Home (`/home`), accounts, shared look `/agentora/agentora.{css,js}` |
 | `hermes-gate` | 7880 | `image-studio/hermes_gate.py` | Studio-admin sign-in in front of the Hermes dashboard |
+| `jim-gate` | 7885 | `image-studio/hermes_gate.py` (`GATE_*` settings) | Studio-admin sign-in in front of Jim-o-Lantern's control panel (`~/claude/ledProject`, `jim-panel` on 127.0.0.1:8790) |
 | `tailnet-relay` | all of the above | `tools/tailnet-relay.py` (symlinked from `~/.local/bin`) | serves the apps on the Tailscale and LAN addresses (jt's phone), notes real client IPs |
 | `agentora-ollama-amd` | 11436 | `systemd/agentora-ollama-amd.service` (`~/.local/ollama-rocm`) | second Ollama, RX 7900 XTX only (ROCm); the broker's proxy sends Hermes's 35B here without a lease |
 | `comfyui` | 8188 | `~/ComfyUI` | image/video backend |

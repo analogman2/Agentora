@@ -1,4 +1,5 @@
-"""Gate in front of the Hermes web dashboard (http://127.0.0.1:9119), on port 7880.
+"""Gate in front of the Hermes web dashboard (http://127.0.0.1:9119), on port 7880. The same gate fronts other admin-only
+pages with GATE_UPSTREAM / GATE_PORT / GATE_NAME / GATE_ID (e.g. Jim's control panel: systemd/jim-gate.service).
 
 The dashboard binds to loopback with no login of its own, and it can read and write Hermes's keys and run the agent.
 This gate lets only signed-in Studio *admins* through, reusing the Studio's sign-in (its gs_session cookie is shared
@@ -9,9 +10,12 @@ import asyncio, json, os, time
 import aiohttp
 from aiohttp import web
 
-DASH = os.environ.get("HERMES_DASHBOARD", "http://127.0.0.1:9119")
+DASH = os.environ.get("GATE_UPSTREAM") or os.environ.get("HERMES_DASHBOARD", "http://127.0.0.1:9119")
 STUDIO = os.environ.get("GEN_STUDIO", "http://127.0.0.1:7870")
 PORT = int(os.environ.get("GATE_PORT", "7880"))
+NAME = os.environ.get("GATE_NAME", "Hermes Dashboard")
+ICON = os.environ.get("GATE_ICON", "☤")
+GATE = os.environ.get("GATE_ID", "hermes-gate")             # log file and activity-log component
 COOKIE = "gs_session"
 HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers", "transfer-encoding",
        "upgrade", "host", "content-length", "content-encoding"}
@@ -19,7 +23,7 @@ seen = {}                                   # session cookie -> (checked at, use
 http: aiohttp.ClientSession = None
 
 LOGIN_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Hermes Dashboard</title><style>
+<title>__NAME__</title><style>
 :root{--bg:#f4f5f7;--card:#fff;--text:#1d1f23;--muted:#6b7079;--line:#e6e8ec;--accent:#3157e0;--ink:#fff;--err:#c62828}
 @media (prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#15181d;--text:#e9eaee;--muted:#9ba1ab;--line:#272b33;--accent:#7d97ff;--ink:#0d1226;--err:#ff7b72}}
 body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,sans-serif;padding:16px;box-sizing:border-box}
@@ -28,7 +32,7 @@ h1{font-size:20px;margin:0}p{margin:0;color:var(--muted);font-size:14px}
 input{font:inherit;padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--text)}
 button{font:inherit;font-weight:600;padding:10px;border:0;border-radius:10px;background:var(--accent);color:var(--ink);cursor:pointer}
 #e{color:var(--err);font-size:14px;min-height:1em}</style></head><body>
-<form id="f"><h1>☤ Hermes Dashboard</h1><p>Sign in with a Studio <b>admin</b> account. The dashboard can change the agent's settings and keys.</p>
+<form id="f"><h1>__ICON__ __NAME__</h1><p>Sign in with a Studio <b>admin</b> account.</p>
 <input id="u" autocomplete="username" placeholder="Studio username" aria-label="Studio username" required>
 <input id="p" type="password" autocomplete="current-password" placeholder="Password" aria-label="Password" required>
 <button>Sign in</button><div id="e" role="alert"></div></form>
@@ -82,7 +86,7 @@ async def login(request):
             return web.json_response({"error": text[:200] or "Wrong username or password"}, status=400)
         user = json.loads(text)["user"]
         if user["role"] != "admin":
-            logsetup.activity("hermes-gate", "refused: not an admin", user["name"], **w)
+            logsetup.activity(GATE, "refused: not an admin", user["name"], **w)
             return web.json_response({"error": "That account isn't a Studio admin"}, status=403)
         resp = web.json_response({"ok": True})
         for c in r.headers.getall("Set-Cookie", []):
@@ -107,11 +111,12 @@ async def proxy(request):
     user = await studio_user(request.cookies.get(COOKIE))
     if not user or user.get("role") != "admin":
         if request.method == "GET" and "text/html" in request.headers.get("Accept", ""):
-            return web.Response(text=LOGIN_PAGE, content_type="text/html", headers={"Cache-Control": "no-store"})
+            return web.Response(text=LOGIN_PAGE.replace("__NAME__", NAME).replace("__ICON__", ICON), content_type="text/html",
+                                headers={"Cache-Control": "no-store"})
         raise web.HTTPUnauthorized(text="Sign in with a Studio admin account")
     if not same_site(request):
         raise web.HTTPForbidden(text="Cross-site request refused")
-    logsetup.activity("hermes-gate", "use the Hermes dashboard", user["name"], **who(request), every=600)
+    logsetup.activity(GATE, f"use {NAME}", user["name"], **who(request), every=600)
     url = DASH + request.rel_url.path_qs
     if request.headers.get("Upgrade", "").lower() == "websocket":
         return await bridge(request, url)
@@ -165,5 +170,5 @@ app.router.add_route("*", "/{path:.*}", proxy)
 if __name__ == "__main__":
     import logging, logsetup
     from pathlib import Path
-    logsetup.setup("hermes-gate", Path(__file__).resolve().parent / "logs")
-    web.run_app(app, host="127.0.0.1", port=PORT, access_log=None, print=lambda *_: logging.getLogger("hermes-gate").info(f"Hermes dashboard gate on :{PORT}"))
+    logsetup.setup(GATE, Path(__file__).resolve().parent / "logs")
+    web.run_app(app, host="127.0.0.1", port=PORT, access_log=None, print=lambda *_: logging.getLogger(GATE).info(f"{NAME} gate on :{PORT} -> {DASH}"))
