@@ -8,7 +8,7 @@ For every downloaded model <folder>/<name>.<ext> this writes:
 """
 import asyncio, hashlib, html, json, re, time, uuid
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlparse
 
 import aiohttp
 
@@ -217,6 +217,12 @@ async def download(info, label):
                     step["detail"] = "already on disk — refreshing its information"
                 else:
                     await W._download(step, info["url"], dest)
+                if info["folder"] in W.NOT_LORA_FOLDERS and W.file_kind(dest) == "lora":   # it's really a LoRA: file it as one
+                    (W.MODELS / "loras").mkdir(exist_ok=True)
+                    moved = W.MODELS / "loras" / dest.name
+                    dest.replace(moved)
+                    step["note"] = f"It's a LoRA, not a {info['folder'].rstrip('s').replace('_', ' ')}: saved in loras/ instead"
+                    info["folder"], dest = "loras", moved
                 step["detail"] = "saving pictures and information"
                 stem = Path(info["name"]).stem
                 previews = await _save_previews(info.get("images") or [], info["folder"], stem)
@@ -231,6 +237,28 @@ async def download(info, label):
     return task
 
 
+def installed_with_sha(sha):
+    """An installed model with this SHA-256 (from the ratings' hashes and the saved model information), or None."""
+    if not sha:
+        return None
+    sha = sha.lower()
+    try:
+        import ratings
+        for key, r in ratings.ratings.items():
+            if (r.get("sha256") or "").lower() == sha and (W.MODELS / key).exists():
+                return key
+    except Exception:
+        pass
+    for meta in W.MODELS.glob("*/*.genstudio.json"):
+        try:
+            m = json.loads(meta.read_text())
+        except (OSError, ValueError):
+            continue
+        if (m.get("sha256") or "").lower() == sha and (meta.parent / (m.get("file") or "")).exists():
+            return f"{meta.parent.name}/{m['file']}"
+    return None
+
+
 async def start_civitai(model_id, version_id, file_id, folder=None):
     m = await civitai_model(model_id, nsfw=True)
     v = next((v for v in m["versions"] if v["id"] == int(version_id)), None)
@@ -239,6 +267,9 @@ async def start_civitai(model_id, version_id, file_id, folder=None):
         raise W.WorkflowError("That version or file isn't on Civitai any more")
     if not m["downloadable"]:
         raise W.WorkflowError(f"Civitai {m['type']} entries aren't model files")
+    have = installed_with_sha(f.get("sha256"))
+    if have and Path(have).name != f["name"]:          # the same file, already here under another name
+        raise W.WorkflowError(f"You already have this file: {have}")
     folder = check_folder(folder or f["folder"])
     meta = {"source": "civitai", "page": f"{m['page']}?modelVersionId={v['id']}", "model": m["name"], "version": v["name"], "type": m["type"],
             "base": v["base"], "trained_words": v["trained_words"], "creator": m["creator"], "description": m["description"],
@@ -257,6 +288,57 @@ async def start_hf(repo, path, folder=None):
             "creator": repo.split("/")[0], "description": r["readme"][:4000], "license": r["license"], "tags": r["tags"], "size": f["size"]}
     return await download({"url": f"https://huggingface.co/{repo}/resolve/main/{quote(path)}", "folder": folder, "name": Path(path).name,
                            "size": f["size"], "meta": meta, "images": r["images"]}, f"{repo} · {Path(path).name}")
+
+
+async def start_link(url, folder=None, name=None):
+    """A pasted link: a Civitai model or version page (or its download link), a Hugging Face file link, or any direct
+    https link to a model file (then the folder must be chosen). Civitai and Hugging Face links bring their pictures,
+    description and trigger words along, like downloads from the Civitai / Hugging Face tabs."""
+    url = (url or "").strip()
+    if not re.match(r"^https://\S+$", url):
+        raise W.WorkflowError("Paste an https link")
+    u = urlparse(url)
+    if W._is_civitai(url):
+        q = dict(x.split("=", 1) for x in u.query.split("&") if "=" in x)
+        mid = re.search(r"/models/(\d+)", u.path)
+        vid = re.search(r"/api/download/models/(\d+)", u.path) or re.search(r"/model-versions/(\d+)", u.path)
+        vid = int(vid.group(1)) if vid else int(q["modelVersionId"]) if q.get("modelVersionId", "").isdigit() else None
+        if not mid:
+            if not vid:
+                raise W.WorkflowError("That Civitai link has no model in it: open the model's page and copy that link")
+            v = await W._json_get(f"https://civitai.com/api/v1/model-versions/{vid}", _civitai_headers())
+            if not v or not v.get("modelId"):
+                raise W.WorkflowError("Couldn't read that Civitai version: check the link, or add a Civitai API key in Settings")
+            model_id = int(v["modelId"])
+        else:
+            model_id = int(mid.group(1))
+        m = await civitai_model(model_id, nsfw=True)
+        ver = next((v for v in m["versions"] if v["id"] == vid), None) if vid else (m["versions"] or [None])[0]
+        if not ver:
+            raise W.WorkflowError("That version isn't on Civitai any more")
+        f = next((f for f in ver["files"] if f.get("primary")), (ver["files"] or [None])[0])
+        if not f:
+            raise W.WorkflowError("That Civitai version has no files to download")
+        return await start_civitai(model_id, ver["id"], f["id"], folder or None)
+    if W._is_hf(url):
+        hm = re.match(r"^/([\w.-]+/[\w.-]+)/(?:blob|resolve)/[^/]+/(.+)$", u.path)
+        if not hm:
+            raise W.WorkflowError("Link the model file itself on Hugging Face (its page has /blob/ in the address), not the repository")
+        return await start_hf(hm.group(1), unquote(hm.group(2)), folder or None)
+    # any other site: a direct link to the file
+    name = Path(unquote(name or u.path.rstrip("/").rsplit("/", 1)[-1])).name
+    if not name.lower().endswith(W.MODEL_EXT):
+        raise W.WorkflowError("That link doesn't end in a model file name (.safetensors, .gguf, .ckpt …): type the file name, or use a Civitai / Hugging Face link")
+    if not folder:
+        raise W.WorkflowError("Choose the folder for a link from another site")
+    folder = check_folder(folder)
+    await asyncio.get_running_loop().run_in_executor(None, W._public_host, u.hostname)
+    src = {"url": url}
+    await W._check_download(src, name)
+    meta = {"source": "link", "page": url, "model": Path(name).stem, "version": "", "type": "", "base": "", "trained_words": [],
+            "creator": u.hostname, "description": ""}
+    return await download({"url": src["url"], "folder": folder, "name": name, "size": src.get("size"), "meta": meta, "images": []},
+                          f"{name} (from {u.hostname})")
 
 
 # ---------------------------------------------------------------- what's installed

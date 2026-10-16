@@ -1035,7 +1035,7 @@ ACTIONS = {   # (method, route) -> event name
     ("POST", "/api/workflows/install-many"): "install workflows", ("POST", "/api/workflows/{id}/run"): "run a workflow",
     ("POST", "/api/prompt/improve"): "improve a prompt", ("POST", "/api/assistant/chat"): "chat with Hermes",
     ("POST", "/api/assistant/internet"): "switch Hermes internet", ("POST", "/api/nowplaying/{action}"): "radio",
-    ("POST", "/api/gpu-priority"): "set GPU priority", ("POST", "/api/models/download"): "download a model",
+    ("POST", "/api/gpu-priority"): "set GPU priority", ("POST", "/api/models/download"): "download a model", ("POST", "/api/models/tasks/{id}/cancel"): "cancel a download",
     ("DELETE", "/api/models/installed"): "remove a model", ("POST", "/api/models/rating"): "rate models"}
 PAGES = {"/": "Image & Video Studio", "/home": "Home"}
 
@@ -1648,9 +1648,21 @@ async def models_download(request):
         task = await M.start_civitai(b.get("model_id"), b.get("version_id"), b.get("file_id"), b.get("folder"))
     elif b.get("source") == "huggingface":
         task = await M.start_hf(str(b.get("repo", "")), str(b.get("path", "")), b.get("folder"))
+    elif b.get("source") == "link":                      # a pasted Civitai / Hugging Face / direct link
+        task = await M.start_link(str(b.get("url", "")), b.get("folder") or None, b.get("name") or None)
     else:
         raise web.HTTPBadRequest(text="Unknown source")
     return web.json_response(W.public_task(task))
+
+
+async def models_task_cancel(request):
+    require_admin(request)
+    t = W.tasks.get(request.match_info["id"])
+    if not t:
+        raise web.HTTPNotFound()
+    for st in t["steps"]:
+        st["cancel"] = True                            # the download stops at its next chunk; the .part file stays (resumable)
+    return web.json_response({"ok": True})
 
 
 async def models_tasks(request):
@@ -1776,6 +1788,7 @@ def main():
     app.router.add_get("/api/models/hf/{repo:.+}", models_hf_repo)
     app.router.add_post("/api/models/download", models_download)
     app.router.add_get("/api/models/tasks", models_tasks)
+    app.router.add_post("/api/models/tasks/{id}/cancel", models_task_cancel)
     app.router.add_get("/api/models/installed", models_installed)
     app.router.add_delete("/api/models/installed", models_remove)
     app.router.add_post("/api/assistant/chat", assistant_chat)

@@ -494,6 +494,12 @@ body.view-workflows .wflist span { padding: 0; }
   <section id="modelsPage" hidden>
     <div class="mhead"><h1>Models</h1>
       <div class="pills" id="mTabs"><button data-mt="civitai">Civitai</button><button data-mt="hf">Hugging Face</button><button data-mt="installed">Installed</button></div></div>
+    <div class="dlbox" id="mLinkBox" hidden><label class="lbl" for="mLink" style="margin-top:4px">Download from a link</label>
+      <div class="form-row" style="flex-wrap:wrap"><input id="mLink" type="url" placeholder="Paste a Civitai or Hugging Face model link, or a direct link to a .safetensors file" style="flex:3;min-width:240px" autocomplete="off" spellcheck="false">
+        <select id="mLinkFolder" aria-label="Folder" style="flex:1;min-width:150px"><option value="">Folder: automatic</option></select>
+        <input id="mLinkName" placeholder="file name (other sites, optional)" style="flex:1;min-width:150px" autocomplete="off" spellcheck="false">
+        <button class="btn primary" id="mLinkGo" style="width:auto;margin:0">Download</button></div>
+      <p class="hint" id="mLinkMsg" style="margin:4px 0 0">Civitai and Hugging Face links bring the model's pictures, description and trigger words, and pick the folder. For other sites, choose the folder.</p></div>
     <div id="mDownloads"></div>
     <div id="mBody"></div>
   </section>
@@ -1569,6 +1575,8 @@ const kfmt = (n) => n == null ? "" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >
 async function mShow() {
   document.querySelectorAll("#mTabs [data-mt]").forEach(b => b.classList.toggle("on", b.dataset.mt === MS.tab));
   if (!MS.folders) MS.folders = (await jsonCall("/api/models/folders", "GET").catch(() => ({folders: []}))).folders;
+  $("#mLinkBox").hidden = !isAdmin();
+  if ($("#mLinkFolder").options.length < 2) $("#mLinkFolder").insertAdjacentHTML("beforeend", MS.folders.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join(""));
   pollDownloads();
   if (MS.tab === "civitai") renderCivitai(); else if (MS.tab === "hf") renderHf(); else renderInstalled();
 }
@@ -1780,6 +1788,23 @@ $("#mDlg").onclick = e => { if (e.target === $("#mDlg")) $("#mDlg").classList.re
 document.addEventListener("keydown", e => { if (e.key === "Escape") $("#mDlg").classList.remove("show"); });
 
 // downloads in progress (shown on the Models page)
+$("#mLinkGo").onclick = async () => {
+  const url = $("#mLink").value.trim(), msg = $("#mLinkMsg");
+  if (!url) { msg.innerHTML = `<span class="badc">Paste a link first.</span>`; return; }
+  $("#mLinkGo").disabled = true; msg.textContent = "Checking the link…";
+  try {
+    const t = await jsonCall("/api/models/download", "POST", {source: "link", url, folder: $("#mLinkFolder").value, name: $("#mLinkName").value.trim()});
+    msg.innerHTML = `<span class="okc">✓ Downloading ${escapeHtml(t.label)} into ${escapeHtml(t.folder)}.</span>`;
+    $("#mLink").value = ""; $("#mLinkName").value = ""; pollDownloads();
+  } catch (e) { msg.innerHTML = `<span class="badc">✗ ${escapeHtml(e.message)}</span>`; }
+  $("#mLinkGo").disabled = false;
+};
+document.addEventListener("click", async e => {
+  const id = e.target.dataset?.dlcancel; if (!id) return;
+  e.target.disabled = true;
+  try { await jsonCall(`/api/models/tasks/${id}/cancel`, "POST", {}); } catch (err) { e.target.disabled = false; }
+});
+$("#mLink").addEventListener("keydown", e => { if (e.key === "Enter") $("#mLinkGo").click(); });
 async function pollDownloads() {
   if (MS.polling) return; MS.polling = true;
   let running = false;
@@ -1790,8 +1815,8 @@ async function pollDownloads() {
     $("#mDownloads").innerHTML = shown.length ? `<div class="dlbox"><label class="lbl" style="margin-top:4px">Downloads</label>${shown.map(t => { const s = t.steps[0];
       if (s.kind === "info") return `<div class="it"><b>${escapeHtml(t.label)}</b><br>${s.status === "done" ? `<span class="okc">✓ ${escapeHtml(s.detail || "done")}</span>`
         : `<span class="hint">${escapeHtml(s.detail || "")} · ${s.done} of ${s.total} models</span>`}${s.status !== "done" && s.total ? `<div class="prog2"><i style="width:${(100 * s.done / s.total).toFixed(1)}%"></i></div>` : ""}</div>`;
-      return `<div class="it"><b>${escapeHtml(t.label)}</b> <span class="hint">→ ${escapeHtml(s.folder)}</span><br>${s.status === "done" ? `<span class="okc">✓ installed with its pictures and information</span>`
-        : s.status === "error" ? `<span class="badc">✗ ${escapeHtml(s.error || "failed")}</span>` : `<span class="hint">${escapeHtml(s.detail || "")}${s.total ? ` · ${gbs(s.done)} of ${gbs(s.total)}` : s.done ? " · " + gbs(s.done) : ""}</span>
+      return `<div class="it"><b>${escapeHtml(t.label)}</b> <span class="hint">→ ${escapeHtml(s.folder)}</span><br>${s.note ? `<span class="hint">${escapeHtml(s.note)}</span><br>` : ""}${s.status === "done" ? `<span class="okc">✓ installed with its pictures and information</span>`
+        : s.status === "error" ? `<span class="badc">✗ ${escapeHtml(s.error || "failed")}</span>` : `<button class="btn" data-dlcancel="${t.id}" style="float:right;width:auto;margin:0;padding:2px 8px">Cancel</button><span class="hint">${escapeHtml(s.detail || "")}${s.total ? ` · ${gbs(s.done)} of ${gbs(s.total)}` : s.done ? " · " + gbs(s.done) : ""}</span>
         ${s.total ? `<div class="prog2"><i style="width:${(100 * s.done / s.total).toFixed(1)}%"></i></div>` : ""}`}</div>`; }).join("")}</div>` : "";
     if (!running && MS.wasRunning && MS.tab === "installed") renderInstalled();
     MS.wasRunning = running;
