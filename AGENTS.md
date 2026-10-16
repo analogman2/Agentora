@@ -71,7 +71,8 @@ Read this whole file before changing anything. `README.md` has the user-facing d
 
   | Model | What runs it | Used for |
   |---|---|---|
-  | `qwen3.6-songwriter` (35B-A3B) | CPU only | songwriter |
+  | `qwen3.6-agent-moe` on the Radeon (:11436) | shares Hermes's loaded copy (same weights and sampling) | songwriter (first choice), Studio ✨Improve |
+  | `qwen3.6-songwriter` (35B-A3B) | CPU only | songwriter fallback when the Radeon is down |
   | `qwen3.6-agent` (27B) | GPU | lyricist and Hermes AGI |
   | `qwen3.5-agent-fast` (9B) | GPU | fallback writer and Hermes Lemming |
   | `qwen3.6-agent-moe` (35B-A3B, 64k) | the RX 7900 XTX, always loaded (4090 if that Ollama is down) | Hermes AGI and Auto |

@@ -19,7 +19,7 @@ Agentora started as [yue2-xpu-radio](https://github.com/zebgop-ops/yue2-xpu-radi
 | Fast helper | (none) | Qwen 3.5 9B on the GPU: quick fallback songs, ✏️ rewrite ideas, ✨ Improve |
 | YuE2 | patched for XPU graphs | stock YuE2 on CUDA (`nvidia-local.patch` adapts `app.py`) |
 
-- **A second card for the assistant.** Hermes's model (Qwen 3.6 35B-A3B, 64k context) lives on the RX 7900 XTX full time and answers at about 90 words a second, even while a song records. The radio no longer steps aside for chat.
+- **A second card for the assistant.** Hermes's model (Qwen 3.6 35B-A3B, 64k context) lives on the RX 7900 XTX full time and answers at about 90 words a second, even while a song records. The radio no longer steps aside for chat. The songwriter and the Studio's ✨ Improve share that same loaded model, so a song idea takes a second or two instead of minutes on the CPU, and Improve doesn't take memory from the picture you're about to make.
 - **Sharing one card.** YuE2, the lyricist, ComfyUI (pictures, videos, cover art) and the chat assistant take turns. A **GPU priority** switch (Shared / Radio / Image & Video Studio / Assistant) decides who waits. The radio unloads only its own models and steps aside for whoever has priority.
 - **Models are shared, not duplicated.** The radio's lyricist and the assistant's "AGI" mode use the same loaded copy of Qwen 3.6 27B, and the 9B model serves both the assistant's "Lemming" mode and the radio's fallback writer.
 - **GPU memory safety.** A recording waits until the card has room, takes that run out of memory go back in the queue, and fewer takes are used when the spool runs low, so the broadcast never runs dry.

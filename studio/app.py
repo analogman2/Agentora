@@ -145,7 +145,8 @@ def llm_used(model):
 def radio_writer_models():
     """The radio's own songwriter models (settings keep LYRICS_LLMS current); these never count as the assistant."""
     import radio
-    names = {m for _, m, _ in LYRICS_LLMS if m} | {radio.LYRICIST[1]}       # the GPU lyricist is the radio's too
+    # only writers on the 4090's Ollama: the Radeon's (Hermes's 35B, shared by the songwriter) is never the radio's to unload
+    names = {m for u, m, _ in LYRICS_LLMS if m and ":11434" in u} | {radio.LYRICIST[1]}   # the GPU lyricist is the radio's too
     names = {m for m in names if m not in SHARED_WITH_ASSISTANT or time.time() - _llm_used.get(m, 0) < 420
              or (m == radio.LYRICIST[1] and radio.bank_writing.is_set())}
     return names | {m + ":latest" for m in names if ":" not in m}       # Ollama reports untagged names as :latest

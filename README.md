@@ -94,7 +94,8 @@ The code, by job:
   - the system Ollama is kept off the Radeon (`VK_DRIVER_FILES=…/nvidia_icd.json`, `ROCR_VISIBLE_DEVICES=-1` in its drop-in)
 - PyTorch 2.14 (CUDA 13), YuE2 (`m-a-p/YuE2-3B` + VAE), CLAP `laion/clap-htsat-unfused` (CPU), ffmpeg
 - Ollama 0.40 with three models (created from Modelfiles, below)
-  - `qwen3.6-songwriter`: Qwen 3.6 35B-A3B on the **CPU** (`num_gpu 0`), so writing never fights the GPU
+  - `qwen3.6-agent-moe`: Qwen 3.6 35B-A3B (64k) on the **RX 7900 XTX**: Hermes, the songwriter (first in `STUDIO_LYRICS_LLMS`) and the Studio's ✨Improve share one loaded copy
+  - `qwen3.6-songwriter`: the same 35B-A3B on the **CPU** (`num_gpu 0`), the songwriter's fallback
   - `qwen3.6-agent`: Qwen 3.6 27B on the GPU, used as the lyricist; it's the same loaded copy as the assistant's "AGI" model
   - `qwen3.5-agent-fast`: Qwen 3.5 9B on the GPU, for the fast fallback writer, ✏️ rewrite ideas and Improve
 - Optional: ComfyUI with Z-Image Turbo (cover art), [Hermes Agent](https://github.com/NousResearch/hermes-agent) (chat panel)

@@ -678,7 +678,10 @@ async def disk_usage(request):
 
 
 # ---------- ✨ Improve prompt (the fast GPU model through Ollama; the big CPU model if that's unavailable)
-PROMPT_MODELS = ["qwen3.5-agent-fast", "qwen3.6-songwriter"]   # Lemming (Qwen 3.5 9B, GPU), then the CPU songwriter
+OLLAMA_AMD = os.environ.get("OLLAMA_AMD_URL", "http://127.0.0.1:11436")
+# Hermes's 35B, always loaded on the Radeon (leaves the 4090 to the picture about to be made), then Lemming (Qwen 3.5 9B,
+# 4090), then the CPU songwriter
+PROMPT_MODELS = [(OLLAMA_AMD, "qwen3.6-agent-moe"), (OLLAMA, "qwen3.5-agent-fast"), (OLLAMA, "qwen3.6-songwriter")]
 PROMPT_GUIDE = {
     "image": "a picture model (Z-Image) that reads natural sentences: say who/what the subject is, what they're doing, the setting, "
              "composition and framing, lighting, colour palette, and the medium or style (photo with camera and lens, oil painting, "
@@ -805,9 +808,9 @@ async def improve_prompt(request):
     if not is_admin(request):
         system += " Keep it PG-13: no nudity, sexual content, graphic violence or gore; if the prompt asks for that, tone it down."
     last = None
-    for model in PROMPT_MODELS:
+    for base, model in PROMPT_MODELS:
         try:
-            async with http.post(OLLAMA + "/api/chat", json={"model": model, "stream": False, "think": False,
+            async with http.post(base + "/api/chat", json={"model": model, "stream": False, "think": False,
                                  "options": {"temperature": 0.4, "num_predict": 300},
                                  "messages": [{"role": "system", "content": system}, {"role": "user", "content": text}]},
                                  timeout=aiohttp.ClientTimeout(total=180)) as r:
