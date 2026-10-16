@@ -433,8 +433,13 @@ async def wf_save_values(request):
         raise web.HTTPBadRequest(text="Too much to save")
     clean = {k: {"value": v.get("value"), **({"random": bool(v["random"])} if "random" in v else {})}
              for k, v in vals.items() if re.fullmatch(r"[\w.:-]{1,80}", str(k)) and isinstance(v, dict)}
-    r["saved_values"] = {**(r.get("saved_values") or {}), **clean}
+    before = r.get("saved_values") or {}
+    r["saved_values"] = {**before, **clean}
     save_recipe(r)
+    hit = plans.get(r["id"])
+    if hit and any(f["type"] == "model" and f["id"] in clean and clean[f["id"]]["value"] != (before.get(f["id"]) or {}).get("value", f["value"])
+                   for f in hit[1].get("fields", [])):
+        plans.pop(r["id"], None)                          # a different model: readiness and defaults change
     return web.json_response({"ok": True})
 
 
@@ -1315,15 +1320,17 @@ def blocked_models(plan, user=None):
     return [m["name"] for m in plan.get("models", []) if m.get("installed") and not R.name_allowed(m.get("use") or m["name"], user)]
 
 
-def recipe_card(r, plan=None, admin=True):
+def recipe_card(r, plan=None, admin=True, user=None):
     out = {k: r.get(k) for k in ("id", "name", "kind", "thumb", "created", "source")}
     out["saved"] = r.get("saved_values") or {}
     if plan:
         out["plan"] = {k: plan.get(k) for k in ("kind", "missing_nodes", "models", "packs", "unknown_nodes", "core_nodes", "fields", "notes", "ready",
                                                 "download_bytes", "free_bytes")}
         if not admin:                                     # PG-13 accounts: no prompts carried over from the source picture
-            out["plan"]["fields"] = [{**f, "value": ""} if f["type"] == "text" else f for f in plan.get("fields", [])]
-            out["plan"]["blocked"] = blocked_models(plan, request["user"])
+            out["plan"]["fields"] = [{**f, "value": ""} if f["type"] == "text" else
+                                     {**f, "options": [o for o in f["options"] if o == f["value"] or R.name_allowed(o, user)]} if f["type"] == "model" else f
+                                     for f in plan.get("fields", [])]
+            out["plan"]["blocked"] = blocked_models(plan, user)
     return out
 
 
@@ -1418,7 +1425,7 @@ async def wf_list(request):
 
 async def wf_get(request):
     r = my_recipe(request)
-    return web.json_response(recipe_card(r, await fresh_plan(r, force=request.query.get("refresh") == "1"), adult_ok(request)))
+    return web.json_response(recipe_card(r, await fresh_plan(r, force=request.query.get("refresh") == "1"), adult_ok(request), request["user"]))
 
 
 async def wf_delete(request):
@@ -1528,6 +1535,13 @@ async def wf_run(request):
     me = request["user"]["name"]
     try:
         a = await W.analyze(r, COMFY)
+        given = body.get("values") or {}
+        picked = {f["id"]: {"value": given[f["id"]]["value"]} for f in a["fields"] if f["type"] == "model" and isinstance(given.get(f["id"]), dict)
+                  and given[f["id"]].get("value") in f["options"] and given[f["id"]]["value"] != f["value"]}
+        if picked:                                        # another model: it decides readiness and the rating check, so look again
+            r["saved_values"] = {**(r.get("saved_values") or {}), **picked}
+            save_recipe(r); plans.pop(r["id"], None)
+            a = await W.analyze(r, COMFY)
     except W.WorkflowError as e:
         raise web.HTTPBadRequest(text=str(e))
     if not adult_ok(request):
@@ -1563,7 +1577,7 @@ async def wf_run(request):
     count = max(1, min(int(body.get("count") or 1), 8))
     kinds = {f["id"]: f["type"] for f in a["fields"]}     # what they typed is remembered for next time
     keep = {k: {"value": v.get("value"), **({"random": bool(v["random"])} if "random" in v else {})}
-            for k, v in values.items() if kinds.get(k) in ("text", "int", "float", "seed") and isinstance(v, dict)}
+            for k, v in values.items() if kinds.get(k) in ("text", "int", "float", "seed", "model") and isinstance(v, dict)}
     if keep:
         r["saved_values"] = {**(r.get("saved_values") or {}), **keep}
         save_recipe(r)
@@ -1583,7 +1597,7 @@ async def wf_run(request):
         job = {"id": uuid.uuid4().hex[:12], "owner": me, "kind": a["kind"], "prompt": str(val("text") or r["name"]),
                "params": {"seed": seed, "width": int(w or 1024), "height": int(h or 1024), "aspect": "", "workflow": r["name"], "recipe": r["id"],
                           # the values actually used (seeds resolved), so "Load settings" can put them back
-                          "values": {f["id"]: wf[f["node"]]["inputs"].get(f["key"]) for f in a["fields"] if f["type"] in ("text", "int", "float", "seed")},
+                          "values": {f["id"]: W.get_path(wf[f["node"]]["inputs"], f.get("path") or [f["key"]]) for f in a["fields"] if f["type"] in ("text", "int", "float", "seed", "model")},
                           "images": images, **({"loras": loras} if loras else {})},
                "prompt_id": res["prompt_id"], "status": "queued", "created": time.time(), "outputs": []}
         if a["kind"] == "video":

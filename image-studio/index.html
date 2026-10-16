@@ -725,6 +725,16 @@ const cwf = { cards: {}, loading: {}, failed: {} };                  // workflow
 const cwfActive = () => ui.kind !== "workflow" && ui.engine[ui.kind] !== "builtin" && wf.list.some(x => x.id === ui.engine[ui.kind] && x.kind === ui.kind);
 const posField = (card) => card && card.plan && (card.plan.fields.find(f => f.type === "text" && f.label === "Prompt") || card.plan.fields.find(f => f.type === "text"));
 const savedVal = (card, f) => card.saved && card.saved[f.id] && card.saved[f.id].value != null ? card.saved[f.id].value : f.value;
+function modelSelects(card, prefix, attr) {           // which installed model each loader uses (the workflow's own file is the default)
+  const ms = card.plan.fields.filter(f => f.type === "model");
+  if (!ms.length) return "";
+  return `<label class="lbl">Models</label><div class="fgrid">${ms.map(f => {
+    const id = prefix + f.id.replace(/\W/g, "_"), cur = savedVal(card, f);
+    const opts = f.options.includes(cur) ? f.options : [cur, ...f.options];
+    return `<div style="grid-column:1/-1"><label for="${id}">${escapeHtml(f.label)}</label><select id="${id}" ${attr}="${escapeHtml(f.id)}">${opts.map(o =>
+      `<option value="${escapeHtml(o)}" ${o === cur ? "selected" : ""}>${escapeHtml(o)}${o === f.original ? " (the workflow's own)" : ""}</option>`).join("")}</select></div>`;
+  }).join("")}</div>`;
+}
 
 function renderEngine() {
   if (!wf.loaded && ME && !cwf.listing) { cwf.listing = true; loadWorkflows().finally(() => { cwf.listing = false; }); }
@@ -763,11 +773,15 @@ async function loadCwf(id, fresh) {
 }
 function renderCwfInputs(card) {
   const box = $("#cwfBox"), pics = card.plan.fields.filter(f => f.type === "image");
-  box.innerHTML = pics.map(f => {
+  box.innerHTML = modelSelects(card, "cwfm_", "data-cwfmodel") + pics.map(f => {
     const cur = ui.wfImages[f.id];
     return `<label class="lbl">${escapeHtml(f.label)}</label><div class="source"><img src="${cur ? escapeHtml(cur.url) : ""}" ${cur ? "" : "hidden"} alt="">
       <div class="hint" style="flex:1">${cur ? "This picture is used." : "Choose the picture this workflow starts from."}</div><button class="btn" data-cwfpic="${escapeHtml(f.id)}">Choose picture</button></div>`;
   }).join("");
+  box.querySelectorAll("[data-cwfmodel]").forEach(sel => sel.onchange = async () => {
+    await saveWorkflowValues(card.id, {[sel.dataset.cwfmodel]: {value: sel.value}});
+    delete cwf.cards[card.id]; loadCwf(card.id, true);      // readiness can change with the model
+  });
   box.querySelectorAll("[data-cwfpic]").forEach(b => b.onclick = () => pickPicture(src => { ui.wfImages[b.dataset.cwfpic] = src; render(); }, () => {
     const inp = document.createElement("input"); inp.type = "file"; inp.accept = "image/*";
     inp.onchange = async () => {
@@ -808,7 +822,7 @@ async function createWithWorkflow(prompt, loras) {
   const values = {};
   for (const f of card.plan.fields) {                    // everything as last saved for this workflow, then this prompt
     const sv = card.saved && card.saved[f.id];
-    if (sv && ["text", "int", "float", "seed"].includes(f.type)) values[f.id] = {...sv};
+    if (sv && ["text", "int", "float", "seed", "model"].includes(f.type)) values[f.id] = {...sv};
   }
   const pf = posField(card); if (pf) values[pf.id] = {value: prompt};
   const seed = $("#seed").value.trim(), sf = card.plan.fields.find(f => f.type === "seed");
@@ -1396,6 +1410,7 @@ function renderWorkflow() {
     if (f.type === "image" || f.type === "video") return `<div><label class="lbl">${escapeHtml(f.label)}</label><div class="source"><img data-imgprev="${escapeHtml(f.id)}" hidden alt=""><div class="hint" style="flex:1">${f.type === "video" ? "Videos as input aren't supported yet" : "Choose the picture this workflow starts from."}</div>${f.type === "image" ? `<button class="btn" data-upimg="${escapeHtml(f.id)}">Choose</button>` : ""}</div></div>`;
     return null;
   }).filter(Boolean).join("");
+  const modelHtml = modelSelects(w, "wff_", "data-f");
   const nums = p.fields.filter(f => ["int", "float", "seed"].includes(f.type));
   const numHtml = nums.length ? `<label class="lbl">Settings</label><div class="fgrid">${nums.map(f => {
     const id = "wff_" + f.id.replace(/\W/g, "_");
@@ -1412,7 +1427,7 @@ function renderWorkflow() {
       <p class="hint" style="margin:8px 0">${p.download_bytes ? `About ${gb(p.download_bytes)} to download · ${gb(p.free_bytes)} free on disk. ` : ""}${p.packs.length ? "Node packs are code from their authors (listed in the ComfyUI-Manager registry); installing restarts ComfyUI for a moment." : ""}</p>
       ${admin ? (installable ? `<button class="btn primary" id="wfInstall" style="margin-top:4px">Install everything</button>` : "") : `<p class="hint">An admin needs to install these before this workflow can run.</p>`}
       <div id="wfTask"></div>`}
-    <div style="margin-top:6px">${fieldsHtml}${numHtml}</div>
+    <div style="margin-top:6px">${modelHtml}${fieldsHtml}${numHtml}</div>
     <label class="lbl">How many runs</label><div class="chips" id="wfCount"></div>
     ${p.blocked && p.blocked.length ? `<p class="err" style="display:block">This workflow uses models that aren't available on this account: ${p.blocked.map(escapeHtml).join(", ")}.</p>` : ""}
     <button class="btn primary" id="wfGo" ${p.ready && !(p.blocked && p.blocked.length) ? "" : "disabled"}>Create</button>
@@ -1436,7 +1451,10 @@ function renderWorkflow() {
   $("#wfDetail").querySelectorAll("[data-pack]").forEach(i => i.oninput = () => { (wf.extraPacks = wf.extraPacks || {})[i.dataset.pack] = i.value.trim(); });
   $("#wfDetail").querySelectorAll("[data-use]").forEach(a => a.onclick = (e) => { e.preventDefault(); wf.links[a.dataset.use] = a.dataset.url; const i = $("#wfDetail").querySelector(`[data-link="${CSS.escape(a.dataset.use)}"]`); if (i) i.value = a.dataset.url; });
   $("#wfDetail").querySelectorAll("[data-rand]").forEach(c => c.onchange = () => { $("#wfDetail").querySelector(`input[type=number][data-f="${CSS.escape(c.dataset.rand)}"]`).disabled = c.checked; queueWfSave(); });
-  $("#wfDetail").querySelectorAll("[data-f]").forEach(e => e.addEventListener("input", queueWfSave));
+  $("#wfDetail").querySelectorAll("input[data-f],textarea[data-f]").forEach(e => e.addEventListener("input", queueWfSave));
+  $("#wfDetail").querySelectorAll("select[data-f]").forEach(e => e.onchange = async () => {   // another model: check readiness again
+    clearTimeout(wfSaveT); await saveWorkflowValues(w.id, wfValues()); delete cwf.cards[w.id]; openWorkflow(w.id);
+  });
   $("#wfDetail").querySelectorAll("[data-upimg]").forEach(b => b.onclick = () => pickPicture(src => {
     wf.images[b.dataset.upimg] = {job: src.job, index: src.index};
     const im = $("#wfDetail").querySelector(`[data-imgprev="${CSS.escape(b.dataset.upimg)}"]`); im.src = src.url; im.hidden = false;

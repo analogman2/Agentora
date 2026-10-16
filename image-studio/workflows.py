@@ -389,7 +389,8 @@ async def analyze(recipe, comfy):
     classes = sorted({n.get("class_type") for n in prompt.values() if isinstance(n, dict) and n.get("class_type")})
     missing_nodes = [c for c in classes if c not in info]
     hints = hints_from_workflow(recipe.get("workflow"))
-    models, seen = [], set()
+    models, seen, choices = [], set(), []
+    saved = recipe.get("saved_values") or {}
     for nid, node in prompt.items():
         cls = node.get("class_type")
         for path, value in _walk_strings(node.get("inputs", {})):
@@ -415,6 +416,9 @@ async def analyze(recipe, comfy):
             substitute = similar if similar and Path(norm).name not in (recipe.get("exact_models") or []) else None
             if substitute:                                # same model in another precision is already here: use it
                 installed = substitute
+            chosen = (saved.get(model_field_id(nid, path)) or {}).get("value")
+            if opts and chosen in opts:                   # the person picked another installed model for this loader
+                installed, substitute, similar, on_disk = chosen, None, None, None
             if (Path(norm).name, folder) in seen:          # the same file in another node (sub-graphs repeat loaders)
                 for m in models:
                     if (m["name"], m["folder"]) == (Path(norm).name, folder):
@@ -433,7 +437,9 @@ async def analyze(recipe, comfy):
             models.append({"name": Path(norm).name, "value": value, "node": nid, "path": list(path), "class": cls, "folder": folder,
                            "installed": bool(installed) if opts is not None else bool(on_disk), "use": installed,
                            "elsewhere": elsewhere, "lora": folder == "loras", "substitute": substitute, "similar": similar,
-                           **({"wrong_file": wrong} if wrong else {})})
+                           **({"wrong_file": wrong} if wrong else {}), **({"chosen": True} if installed and installed == chosen else {})})
+            if opts:
+                choices.append((models[-1], node, opts))
     for nid, node in prompt.items():                            # textual inversions: "embedding:name"
         for _, text in _walk_strings(node.get("inputs", {})):
             for e in re.findall(r"embedding:([\w\-. ]+)", text):
@@ -446,8 +452,40 @@ async def analyze(recipe, comfy):
                                "class": "embedding", "folder": "embeddings", "installed": have, "use": None, "elsewhere": None, "lora": False})
     kind = "video" if any(c in VIDEO_SAVERS for c in classes) else "image"
     return {"prompt": prompt, "classes": classes, "missing_nodes": missing_nodes, "models": models, "kind": kind,
-            "fields": editable_fields(prompt, info), "notes": notes,
+            "fields": model_fields(choices) + editable_fields(prompt, info), "notes": notes,
             "ready": not missing_nodes and all(m["installed"] for m in models)}
+
+
+MODEL_LABELS = {"checkpoints": "Checkpoint", "diffusion_models": "Diffusion model", "unet": "Diffusion model", "text_encoders": "Text encoder",
+                "clip": "Text encoder", "clip_vision": "CLIP vision", "vae": "VAE", "loras": "LoRA", "upscale_models": "Upscaler",
+                "controlnet": "ControlNet"}
+
+
+def model_field_id(nid, path):
+    return f"{nid}." + ".".join(str(k) for k in path)
+
+
+def model_fields(choices):
+    """A dropdown for each model loader: any installed file that loader can read (the workflow's own file first)."""
+    out = []
+    for m, node, opts in choices:
+        title = (node.get("_meta") or {}).get("title") or m["class"]
+        out.append({"id": model_field_id(m["node"], m["path"]), "node": m["node"], "key": m["path"][0], "path": m["path"],
+                    "also": m.get("also", []), "type": "model", "value": m["use"] or m["value"], "original": m["value"],
+                    "options": list(opts), "label": f"{MODEL_LABELS.get(m['folder'], 'Model')} · {title}", "group": "models"})
+    return out
+
+
+def get_path(inputs, path):
+    for k in path:
+        inputs = inputs.get(k) if isinstance(inputs, dict) else None
+    return inputs
+
+
+def _set_path(inputs, path, v):
+    for k in path[:-1]:
+        inputs = inputs[k]
+    inputs[path[-1]] = v
 
 
 def _src(node, key):
@@ -1198,6 +1236,12 @@ def build_prompt(analysis, values, images, owner_prefix="genstudio/wf"):
             v = float(v)
         elif f["type"] in ("image", "video"):
             v = images.get(f["id"]) or f["value"]
+        elif f["type"] == "model":                        # only installed files the loader offers
+            v = v if v in f["options"] else f["value"]
+            for where in [{"node": f["node"], "path": f["path"]}] + f.get("also", []):
+                if where["path"]:
+                    _set_path(p[where["node"]]["inputs"], where["path"], v)
+            continue
         p[f["node"]]["inputs"][f["key"]] = v
     for nid, n in p.items():
         n.get("inputs", {}).pop("_widgets", None)
