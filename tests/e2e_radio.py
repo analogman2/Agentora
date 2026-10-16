@@ -131,7 +131,20 @@ def broker_yield():   # a person waiting (a Studio lease) makes the radio step a
     must(y2["yield"] == y0["yield"], f"after release {y2}, before {y0}")
     return f"radio waits while the Studio holds the card ({y1['reason']}), and goes on after"
 check("leases make the radio step aside", broker_yield)
-check("Ollama proxy answers (Hermes's way in)", lambda: (lambda d: (must(any(m["id"] == "agentora-auto" for m in d["data"]), "no auto model"), f"{len(d['data'])} models incl. agentora-auto")[1])(req("http://127.0.0.1:11435", "/v1/models")))
+def broker_cards():   # Hermes's 35B lives on the Radeon (when its Ollama is up) and an unload through the proxy leaves it there
+    d = req(B, "/status")
+    amd = next((x for x in d["devices"] if x.get("vendor") == "amd"), None)
+    if not amd or not amd["up"]:
+        return "skipped: no Radeon Ollama"
+    must(d["placement"].get("qwen3.6-agent-moe") == "amd", f"35B placed on {d['placement'].get('qwen3.6-agent-moe')}")
+    before = "qwen3.6-agent-moe" in d["loaded"].get("amd", [])
+    r = req("http://127.0.0.1:11435", "/api/generate", {"model": "qwen3.6-agent-moe", "keep_alive": 0})
+    must(r.get("done_reason") == "unload", f"unload answered {r}")
+    loaded = req(B, "/status")["loaded"].get("amd", [])
+    must("qwen3.6-agent-moe" in loaded or not before, f"35B was unloaded from the Radeon: {loaded}")
+    return f"35B on the Radeon ({amd['free_mb'] // 1024} GB free there), kept loaded after an unload request"
+check("Radeon runs Hermes's model", broker_cards)
+check("Ollama proxy answers (Hermes's way in)",lambda: (lambda d: (must(any(m["id"] == "agentora-auto" for m in d["data"]), "no auto model"), f"{len(d['data'])} models incl. agentora-auto")[1])(req("http://127.0.0.1:11435", "/v1/models")))
 
 print("speech service (voice on the GPU under a lease, listening on the CPU)")
 SP = "http://127.0.0.1:7895"

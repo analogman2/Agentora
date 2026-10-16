@@ -26,7 +26,7 @@ Read this whole file before changing anything. `README.md` has the user-facing d
    - **`genstudio`**: no Studio job running or queued (`image-studio/jobs.json`).
    - Page-only changes (HTML, `studio/web/*.js`, `image-studio/shared/*`) need no restart.
    - Batch Python changes and restart once.
-5. **The GPU is shared through the broker.** New GPU work takes a lease (`POST 127.0.0.1:7890/lease`) instead of grabbing the card. Hermes reaches Ollama only through the broker's proxy (`:11435`); never point it back at `:11434`.
+5. **The GPU is shared through the broker.** New GPU work takes a lease (`POST 127.0.0.1:7890/lease`) instead of grabbing the card. Leases are for the 4090; the Radeon belongs to the models in `HOMES` (`gpu_broker.py`), which the broker keeps loaded there. `GET :7890/status` shows both cards, leases with queue positions, and `placement` (which card runs each model). Hermes reaches Ollama only through the broker's proxy (`:11435`); never point it back at `:11434`.
 6. **Hermes config:** `model.context_length` in `~/.hermes/config.yaml` must stay ≥ 64000, or every chat fails.
 7. **Privacy in logs:** the activity log never records passwords, prompts or lyrics.
 8. **Verify before saying it works.** Run the tests below after every change, and report failures as they are.
