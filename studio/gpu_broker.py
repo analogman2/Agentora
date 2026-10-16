@@ -24,6 +24,9 @@ API (127.0.0.1:7890, JSON):
   POST /holding {client, device, mem_mb, holding}       (a background client says it has its model on a card)
   GET  /status
 Multi-GPU: devices come from nvidia-smi and leases are per device (the one with the most room unless asked).
+The Radeon (RX 7900 XTX) has its own Ollama (127.0.0.1:11436, ROCm) and belongs to Hermes's model alone: the proxy sends
+AMD_MODELS there without a lease and keeps it loaded, so chat never waits for the 4090 and the radio never steps aside
+for chat. If that Ollama is down, those models fall back to the 4090 and the rules above.
 Stdlib only. Usage: gpu_broker.py [--port 7890] [--ollama-port 11435]
 """
 import argparse, http.client, json, logging, os, re, subprocess, threading, time, urllib.request, uuid
@@ -36,6 +39,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--port", type=int, default=7890)
 ap.add_argument("--ollama-port", type=int, default=11435)
 ap.add_argument("--ollama", default="http://127.0.0.1:11434")
+ap.add_argument("--ollama-amd", default="http://127.0.0.1:11436")
 ap.add_argument("--comfy", default="http://127.0.0.1:8188")
 A = ap.parse_args()
 log = logging.getLogger("gpu-broker")
@@ -52,6 +56,8 @@ SPLIT_OK = {"qwen3.6-agent-moe": 12000}
 AUTO_WAIT_S = 3.0                                 # how long "auto" waits for room for the strong model
 STRONG_WAIT_S = 45.0                              # a model asked for by name waits this long for room, then loads anyway
 DEFAULT_MB = {"qwen3.6-agent": 18000, "qwen3.5-agent-fast": 9000, **SPLIT_OK}
+AMD_MODELS = {"qwen3.6-agent-moe"}                # live on the 7900 (21 GB at 64k with the 8-bit KV cache: one fits)
+AMD_SYSFS = Path("/sys/bus/pci/devices")
 
 lock = threading.RLock()
 leases = {}                                       # id -> {client, kind, mem_mb, device, granted, since, expires, note}
@@ -100,8 +106,8 @@ def rank(client, kind):
     return 1 if kind == "interactive" else 2
 
 
-def ollama_json(path, body=None, timeout=10):
-    r = urllib.request.Request(A.ollama + path, json.dumps(body).encode() if body is not None else None,
+def ollama_json(path, body=None, timeout=10, base=None):
+    r = urllib.request.Request((base or A.ollama) + path, json.dumps(body).encode() if body is not None else None,
                                {"Content-Type": "application/json"}, method="POST" if body is not None else "GET")
     with urllib.request.urlopen(r, timeout=timeout) as resp:
         return json.loads(resp.read() or b"{}")
@@ -112,6 +118,43 @@ def ollama_loaded():
         return {m["name"].removesuffix(":latest"): m for m in ollama_json("/api/ps").get("models", [])}
     except Exception:
         return {}
+
+
+_amd = {"t": 0, "up": False}
+
+
+def amd_up():
+    """Is the 7900's Ollama answering? (cached for 5 s)"""
+    if time.time() - _amd["t"] > 5:
+        try:
+            ollama_json("/api/version", base=A.ollama_amd, timeout=2); up = True
+        except Exception:
+            up = False
+        if up != _amd["up"]:
+            log.info("Radeon Ollama (%s) is %s", A.ollama_amd, "up: Hermes's model runs there" if up else "down: its models fall back to the 4090")
+        _amd.update(t=time.time(), up=up)
+    return _amd["up"]
+
+
+def on_amd(model):
+    return model in AMD_MODELS and amd_up()
+
+
+def amd_card():
+    """The Radeon's memory from sysfs (no extra tools needed), plus what its Ollama has loaded."""
+    for d in AMD_SYSFS.glob("*"):
+        try:
+            if (d / "vendor").read_text().strip() == "0x1002" and (d / "mem_info_vram_total").exists():
+                total, used = (int((d / f).read_text()) >> 20 for f in ("mem_info_vram_total", "mem_info_vram_used"))
+                try:
+                    models = [m["name"].removesuffix(":latest") for m in ollama_json("/api/ps", base=A.ollama_amd, timeout=2).get("models", [])]
+                except Exception:
+                    models = None
+                return {"name": "AMD Radeon RX 7900 XTX", "pci": d.name, "total_mb": total, "used_mb": used,
+                        "free_mb": total - used, "ollama": A.ollama_amd, "up": models is not None, "models": models or []}
+        except (OSError, ValueError):
+            continue
+    return None
 
 
 def save_sizes():
@@ -302,7 +345,7 @@ def reaper():
 def status():
     with lock:
         ls = [dict(l, age_s=round(time.time() - l["since"]), expires_in_s=round(l["expires"] - time.time())) for l in leases.values()]
-    return {"priority": priority(), "devices": devices(), "leases": ls, "holders": holders, "sizes": sizes,
+    return {"priority": priority(), "devices": devices(), "amd": amd_card(), "leases": ls, "holders": holders, "sizes": sizes,
             "models": {c: h["model"] for c, h in holds.items() if h.get("model")},
             "yield": {c: should_yield(c)[1] for c in ("radio", "radio-art", "radio-llm")}}
 
@@ -447,11 +490,15 @@ def model_lease(client, model, wait_s):
 
 def choose_model(model, client="assistant"):
     """'agentora-auto': the strong model if the card can be had for it within a few seconds, else the one that fits."""
+    if on_amd(model):
+        return model, None                           # the 7900 is its own: no lease, nobody steps aside
     if model not in AUTO:
         if cpu_only(model):
             return model, None                       # runs on the CPU: no lease needed
         return model, model_lease(client, model, STRONG_WAIT_S)
     strong, light = AUTO[model]
+    if on_amd(strong):
+        return strong, None
     h = holds.get(client) or {}
     cur = h.get("lease")
     if cur and cur["id"] in leases and h.get("model") in (strong, light) and cur.get("roomy"):
@@ -507,6 +554,13 @@ def keep_assistant_model():
         return
     h = holds.setdefault("assistant", {"lease": None, "model": None})
     model = h.get("model") or AUTO["agentora-auto"][0]
+    if on_amd(model):                               # it has the 7900: hold nothing on the 4090, just keep it loaded there
+        if pin["lease"]:
+            drop(pin["lease"]); pin["lease"] = None
+            if h.get("lease") and h["lease"]["id"] not in leases:
+                h["lease"] = None
+        keep_on_amd(model)
+        return
     cur = h.get("lease")
     if cur and cur["id"] in leases and h.get("model") == model:
         renew(cur["id"], 3600)
@@ -568,6 +622,17 @@ def keep_assistant_model():
         log.info("assistant priority: %s", note); pin["note"] = note
 
 
+def keep_on_amd(model):
+    """The 7900's Ollama keeps models forever (OLLAMA_KEEP_ALIVE=-1); this loads Hermes's model there after a boot."""
+    try:
+        if model in [m["name"].removesuffix(":latest") for m in ollama_json("/api/ps", base=A.ollama_amd, timeout=5).get("models", [])]:
+            return
+        log.info("loading %s on the Radeon", model)
+        ollama_json("/api/generate", {"model": model, "keep_alive": -1}, timeout=300, base=A.ollama_amd)
+    except Exception as e:
+        log.warning("couldn't load %s on the Radeon: %s", model, e)
+
+
 def pinner():
     while True:
         try:
@@ -586,7 +651,7 @@ class OllamaProxy(BaseHTTPRequestHandler):
     def forward(self, method):
         n = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(n) if n else None
-        model = None
+        model, base = None, A.ollama
         client = re.sub(r"[^\w.-]", "", self.headers.get("X-Agentora-Client") or "")[:40] or "assistant"
         if method == "POST" and self.path.split("?")[0] in GPU_PATHS and body:
             try:
@@ -597,6 +662,8 @@ class OllamaProxy(BaseHTTPRequestHandler):
                     if h and h.get("model") == model and h.get("lease"):
                         drop(h["lease"]["id"]); h.update(lease=None, model=None)
                     other = held_by_other(model, client)
+                    if on_amd(model):                    # Hermes's model stays on its own card
+                        return self.answer({"model": model, "done": True, "done_reason": "unload", "response": ""})
                     if other:                            # someone else is using it: done for this client, model stays
                         log.info("%s asked to unload %s, which %s is using: kept loaded", client, model, other)
                         return self.answer({"model": model, "done": True, "done_reason": "unload", "response": ""})
@@ -611,9 +678,11 @@ class OllamaProxy(BaseHTTPRequestHandler):
                     if changed:
                         j["model"] = real; body = json.dumps(j).encode()
                     model = real
+                    if lease is None and on_amd(real):
+                        base, model = A.ollama_amd, None       # no lease to renew, nothing to learn about the 4090
             except (ValueError, TypeError):
                 pass
-        u = A.ollama.split("://", 1)[1]
+        u = base.split("://", 1)[1]
         conn = http.client.HTTPConnection(u, timeout=900)
         hdrs = {k: v for k, v in self.headers.items() if k.lower() not in ("host", "content-length", "connection", "x-agentora-client")}
         if body is not None:
@@ -683,6 +752,7 @@ if __name__ == "__main__":
     threading.Thread(target=reaper, daemon=True, name="reaper").start()
     threading.Thread(target=pinner, daemon=True, name="assistant-priority").start()
     threading.Thread(target=Server(("127.0.0.1", A.ollama_port), OllamaProxy).serve_forever, daemon=True, name="ollama-proxy").start()
-    log.info("leases on 127.0.0.1:%d, Ollama proxy on 127.0.0.1:%d -> %s; devices: %s", A.port, A.ollama_port, A.ollama,
+    log.info("leases on 127.0.0.1:%d, Ollama proxy on 127.0.0.1:%d -> %s (%s -> %s); devices: %s", A.port, A.ollama_port, A.ollama,
+             ", ".join(sorted(AMD_MODELS)), A.ollama_amd,
              ", ".join(f"{d['index']}: {d['name']} {d['total_mb'] // 1024} GB" for d in devices()) or "none found")
     Server(("127.0.0.1", A.port), Api).serve_forever()

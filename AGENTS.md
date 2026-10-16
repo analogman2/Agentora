@@ -1,6 +1,6 @@
 # Agentora: guide for agents (Claude Code, Hermes, anyone editing this repo)
 
-Agentora is jt's local AI media suite on one RTX 4090:
+Agentora is jt's local AI media suite on an RTX 4090, plus an RX 7900 XTX that runs Hermes's model:
 - an endless AI radio and a Music Studio (YuE2);
 - an Image & Video Studio and Home page (ComfyUI);
 - a local assistant (Hermes).
@@ -42,6 +42,7 @@ Read this whole file before changing anything. `README.md` has the user-facing d
 | `genstudio` | 7870 | `image-studio/server.py` | Image & Video Studio (`/`), Home (`/home`), accounts, shared look `/agentora/agentora.{css,js}` |
 | `hermes-gate` | 7880 | `image-studio/hermes_gate.py` | Studio-admin sign-in in front of the Hermes dashboard |
 | `tailnet-relay` | all of the above | `tools/tailnet-relay.py` (symlinked from `~/.local/bin`) | serves the apps on the Tailscale and LAN addresses (jt's phone), notes real client IPs |
+| `agentora-ollama-amd` | 11436 | `systemd/agentora-ollama-amd.service` (`~/.local/ollama-rocm`) | second Ollama, RX 7900 XTX only (ROCm); the broker's proxy sends Hermes's 35B here without a lease |
 | `comfyui` | 8188 | `~/ComfyUI` | image/video backend |
 | Hermes | 8642 (API), dashboard behind the gate | `~/.hermes` | the assistant (Lemming 9B / Auto / AGI = Qwen 3.6 35B-A3B `qwen3.6-agent-moe`) |
 
@@ -73,7 +74,8 @@ Read this whole file before changing anything. `README.md` has the user-facing d
   | `qwen3.6-songwriter` (35B-A3B) | CPU only | songwriter |
   | `qwen3.6-agent` (27B) | GPU | lyricist and Hermes AGI |
   | `qwen3.5-agent-fast` (9B) | GPU | fallback writer and Hermes Lemming |
-  | `agentora-auto` | broker picks the 27B or the 9B | Hermes Auto |
+  | `qwen3.6-agent-moe` (35B-A3B, 64k) | the RX 7900 XTX, always loaded (4090 if that Ollama is down) | Hermes AGI and Auto |
+  | `agentora-auto` | the 35B while the Radeon is up, else the broker picks it or the 9B | Hermes Auto |
 - **Data (not in git):**
   - `library/`: every song.
   - `radio/`: stations, state, history.

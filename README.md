@@ -83,11 +83,15 @@ The code, by job:
 | `tests/e2e_radio.py`, `tests/e2e_ui.py` | end-to-end tests (below) |
 | `image-studio/` | the Image & Video Studio and Home page (`server.py`, port 7870), ComfyUI workflows and models (`workflows.py`, `models.py`), users and sign-in (`auth.py`), the Hermes dashboard gate (`hermes_gate.py`, port 7880), and the shared look and app switcher (`shared/agentora.css`, `shared/agentora.js`). Its own notes: `image-studio/AGENTS.md` |
 | `tools/tailnet-relay.py` | serves the apps (7860, 7861, 7870, 7880) on the Tailscale and home-network addresses, with HTTPS from the Tailscale certificate |
-| `systemd/` | user units for every service: `yue2-studio`, `agentora-stream`, `agentora-gpu`, `agentora-speech`, `genstudio`, `hermes-gate`, `tailnet-relay` |
+| `systemd/` | user units for every service: `yue2-studio`, `agentora-stream`, `agentora-gpu`, `agentora-speech`, `genstudio`, `hermes-gate`, `tailnet-relay`, `agentora-ollama-amd` |
 
 ## Hardware and software
 
 - NVIDIA GeForce RTX 4090 (24 GB), AMD Ryzen 9 3900X, 60 GB RAM, Ubuntu 26.04 (kernel 7.0)
+- AMD Radeon RX 7900 XTX (24 GB) in a Minisforum DEG1 OcuLink dock, on the CPU's M.2 socket (PCIe 3.0 x4): Hermes's own card
+  - its own Ollama, `agentora-ollama-amd` on 127.0.0.1:11436: a private copy of Ollama with only the ROCm add-on, in `~/.local/ollama-rocm`
+  - Vulkan ran the Qwen 3.5/3.6 models ~10× slower than ROCm (7 vs 90 tokens/s for the 35B)
+  - the system Ollama is kept off the Radeon (`VK_DRIVER_FILES=…/nvidia_icd.json`, `ROCR_VISIBLE_DEVICES=-1` in its drop-in)
 - PyTorch 2.14 (CUDA 13), YuE2 (`m-a-p/YuE2-3B` + VAE), CLAP `laion/clap-htsat-unfused` (CPU), ffmpeg
 - Ollama 0.40 with three models (created from Modelfiles, below)
   - `qwen3.6-songwriter`: Qwen 3.6 35B-A3B on the **CPU** (`num_gpu 0`), so writing never fights the GPU
