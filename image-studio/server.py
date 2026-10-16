@@ -404,12 +404,12 @@ async def list_loras(request):
     """Installed LoRAs with what the Models page knows about them (base model, trigger words)."""
     items = await asyncio.get_running_loop().run_in_executor(None, M.installed)
     by = {m["file"]: m for m in items if m["folder"] == "loras"}
-    admin = is_admin(request)
+    admin, adult = is_admin(request), adult_ok(request)
     return web.json_response({"loras": [{"name": n, "title": ((by.get(n) or {}).get("meta") or {}).get("model"),
                                          "base": ((by.get(n) or {}).get("meta") or {}).get("base"),
                                          "words": (((by.get(n) or {}).get("meta") or {}).get("trained_words") or [])[:8],
                                          **({"rating": R.rating_of("loras", n)} if admin else {})}
-                                        for n in sorted(lora_files(), key=str.lower) if admin or R.rating_of("loras", n) == "pg13"]})
+                                        for n in sorted(lora_files(), key=str.lower) if adult or R.rating_of("loras", n) == "pg13"]})
 
 
 async def wf_exact(request):
@@ -447,7 +447,7 @@ async def generate(request):
     if not prompt:
         raise web.HTTPBadRequest(text="Write a prompt first")
     count = max(1, min(int(body.get("count") or 1), 8 if kind == "image" else 4))
-    loras = check_loras(body.get("loras"), is_admin(request))
+    loras = check_loras(body.get("loras"), adult_ok(request))
     await prepare_gpu(kind)
     fixed_seed = body.get("seed")
     created = []
@@ -805,7 +805,7 @@ async def improve_prompt(request):
     system = ("You improve prompts for " + PROMPT_GUIDE[kind] + " EDIT the person's prompt; do not replace it. Keep every subject, "
               "detail, name, style and wording choice they gave, in their language. Only add what's missing and make it vivid and "
               "specific. Reply with the improved prompt only: no preamble, no quotes, no lists.")
-    if not is_admin(request):
+    if not adult_ok(request):
         system += " Keep it PG-13: no nudity, sexual content, graphic violence or gore; if the prompt asks for that, tone it down."
     last = None
     for base, model in PROMPT_MODELS:
@@ -866,6 +866,13 @@ async def rate_models_forever():
 
 def is_admin(request):
     return (request.get("user") or {}).get("role") == "admin"
+
+
+def adult_ok(request):
+    """May this account see adults-only content? Admins always; others when an admin has allowed it (Manage users).
+    Everyone else gets PG-13 models only."""
+    u = request.get("user") or {}
+    return u.get("role") == "admin" or bool(u.get("adult"))
 
 
 async def on_cleanup(app):
@@ -1231,6 +1238,10 @@ async def update_user(request):
         auth.end_user_sessions(name, keep_token=request.cookies.get(auth.COOKIE) if name == request["user"]["name"] else None)
     if body.get("role"):
         auth.set_role(name, body["role"])
+    if "adult" in body:
+        auth.set_adult(name, body["adult"])
+        logging.getLogger("studio").info("%s %s adults-only content for %s", request["user"]["name"],
+                                         "allowed" if body["adult"] else "turned off", name)
     return web.json_response({"ok": True})
 
 
@@ -1361,7 +1372,7 @@ async def wf_import(request):
     first_text = next((v for n in (meta.get("prompt") or {}).values() if isinstance(n, dict)
                        for k, v in n.get("inputs", {}).items() if k in ("text", "prompt") and isinstance(v, str) and v.strip()), "")
     r = {"id": uuid.uuid4().hex[:12], "owner": request["user"]["name"], "created": time.time(), "source": source,
-         "name": ((first_text.strip().split("\n")[0][:60] if is_admin(request) else "") or Path(name).stem[:60]), "thumb": thumbnail(data),
+         "name": ((first_text.strip().split("\n")[0][:60] if adult_ok(request) else "") or Path(name).stem[:60]), "thumb": thumbnail(data),
          "prompt": meta.get("prompt"), "workflow": meta.get("workflow"), "civitai": meta.get("civitai") or [], "kind": "image"}
     try:
         quick = await W.analyze(r, COMFY)                 # instant: reads the workflow, checks what's installed
@@ -1384,7 +1395,7 @@ async def wf_list(request):
             card, hit = recipe_card(r), plans.get(r["id"])
             if hit:
                 card["ready"] = hit[1]["ready"]
-                if not is_admin(request):
+                if not adult_ok(request):
                     card["blocked"] = bool(blocked_models(hit[1]))
             out.append(card)
     return web.json_response({"workflows": out})
@@ -1392,7 +1403,7 @@ async def wf_list(request):
 
 async def wf_get(request):
     r = my_recipe(request)
-    return web.json_response(recipe_card(r, await fresh_plan(r, force=request.query.get("refresh") == "1"), is_admin(request)))
+    return web.json_response(recipe_card(r, await fresh_plan(r, force=request.query.get("refresh") == "1"), adult_ok(request)))
 
 
 async def wf_delete(request):
@@ -1504,7 +1515,7 @@ async def wf_run(request):
         a = await W.analyze(r, COMFY)
     except W.WorkflowError as e:
         raise web.HTTPBadRequest(text=str(e))
-    if not is_admin(request):
+    if not adult_ok(request):
         blocked = blocked_models(a)
         if blocked:
             raise web.HTTPForbidden(text="This workflow uses models that aren't available on this account: " + ", ".join(blocked[:5]))
@@ -1522,9 +1533,9 @@ async def wf_run(request):
     for f in a["fields"]:
         if f["type"] in ("image", "video") and f["id"] not in images:
             raise web.HTTPBadRequest(text=f"Choose a picture for “{f['label']}” first")
-    loras = check_loras(body.get("loras"), is_admin(request))
+    loras = check_loras(body.get("loras"), adult_ok(request))
     values = dict(body.get("values") or {})
-    if not is_admin(request):                             # prompt boxes left empty stay empty (not the source picture's text)
+    if not adult_ok(request):                             # prompt boxes left empty stay empty (not the source picture's text)
         for f in a["fields"]:
             if f["type"] == "text" and f["id"] not in values:
                 values[f["id"]] = {"value": ""}
@@ -1587,7 +1598,7 @@ async def models_folders(request):
 @wf_error
 async def models_civitai_search(request):
     q = request.query
-    admin = is_admin(request)
+    admin = adult_ok(request)                             # adults-only accounts may browse NSFW models too
     d = await M.civitai_search(q.get("query", "")[:100], q.get("types", ""), q.get("sort", "Most Downloaded"),
                                q.get("base", ""), admin and q.get("nsfw") == "1", q.get("cursor", ""))
     if not admin:                                         # PG-13 accounts: only models Civitai rates PG / PG-13
@@ -1597,7 +1608,7 @@ async def models_civitai_search(request):
 
 @wf_error
 async def models_civitai_model(request):
-    admin = is_admin(request)
+    admin = adult_ok(request)
     d = await M.civitai_model(request.match_info["id"], admin and request.query.get("nsfw") == "1")
     if not admin and (not d.get("level") or d["level"] & ~R.PG13_BITS or d.get("nsfw")):
         raise web.HTTPForbidden(text="That model isn't available on this account")
@@ -1639,7 +1650,7 @@ async def models_installed(request):
         if m["rating"] != "pg13" and m["content"]:
             e = R.ratings.get(f"{m['folder']}/{m['file']}") or {}
             m["rated_by"], m["level"] = e.get("by"), e.get("level")
-    if not is_admin(request):
+    if not adult_ok(request):
         items = [m for m in items if m["rating"] == "pg13"]
     return web.json_response({"models": items, "free": shutil.disk_usage(W.MODELS).free,
                               "rating": {"running": R.state["running"], "last": R.state["last"]}})
@@ -1681,7 +1692,7 @@ async def model_media(request):
     path = (root / rel).resolve()
     if not path.is_relative_to(root) or not path.is_file() or not (".previews" in path.parts or ".preview." in path.name):
         raise web.HTTPNotFound()
-    if not is_admin(request):                             # previews of models that aren't PG-13 stay admin-only
+    if not adult_ok(request):                             # previews of models that aren't PG-13: adults-only accounts
         if ".previews" in path.parts:                     # <dir>/.previews/<stem>/N.ext
             stem, home = path.parent.name, path.parent.parent.parent
         else:                                             # <dir>/<stem>.preview.ext

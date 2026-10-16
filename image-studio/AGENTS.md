@@ -17,7 +17,7 @@ A web front end over ComfyUI for pictures and videos, with user accounts. Served
 - `shared/agentora.css`, `shared/agentora.js`: the look shared by every app (switcher, now-playing bar); served at /agentora/ by this
   server and by the radio (which reads them from here). Pages set `<html data-agentora-app=...>` and `<div data-agentora-apps>`.
 - `home.html`: the /home page (status of every app; public summary from /api/home).
-- `ratings.py`: PG-13 ratings for content models (non-admins only see PG-13 LoRAs/workflows/models).
+- `ratings.py`: PG-13 ratings for content models. Accounts without adults-only content (`adult_ok()` in server.py: admins, or users an admin allowed in Manage users) only see PG-13 LoRAs/workflows/models.
 - `index.html`: the whole front end (one file: CSS tokens on :root with a dark-mode block, then markup, then one script).
   `$` is `document.querySelector` here. Use `escapeHtml` for anything user- or web-supplied.
 - Data (never commit, never print): `settings.json` (holds API keys), `users.json`, `sessions.json`, `agent.token`,

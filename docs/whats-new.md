@@ -104,7 +104,7 @@ Agentora started as [yue2-xpu-radio](https://github.com/zebgop-ops/yue2-xpu-radi
 These live in `image-studio/` (the Image & Video Studio, port 7870) and share the same look and app switcher.
 
 - **Home**: what's on the radio, what the studios are making, GPU and disk use, the GPU priority, and a chat with the local assistant.
-- **Image Studio**: pictures with Z-Image Turbo, ✨ **Improve** to turn a short idea into a detailed prompt, LoRAs, aspect ratios, up to 4 at a time, plus downloaded ComfyUI workflows and models (installed with one click, PG-13 only for non-admin users).
+- **Image Studio**: pictures with Z-Image Turbo, ✨ **Improve** to turn a short idea into a detailed prompt, LoRAs, aspect ratios, up to 4 at a time, plus downloaded ComfyUI workflows and models (installed with one click). Other accounts get PG-13 models only, unless an admin ticks **adults-only content** for them in Manage users; admins always can.
 - **Video Studio**: Wan 2.2 videos from text, or starting from one of your pictures.
 - **App switcher** in every app's top bar (🏠 📻 🖼 🎵, Alt+0–3). Each app keeps its own browser tab, so switching never stops the radio. A small now-playing bar with 👍 and ⏭ follows you into the other apps.
 

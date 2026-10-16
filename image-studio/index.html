@@ -1899,10 +1899,11 @@ function signIns(u) {
 }
 async function renderUsers(msg) {
   const d = await jsonCall("/api/users", "GET").catch(err => ({users: [], error: err.message}));
-  openAcc("Manage users", `<p class="hlp" style="margin-top:0">Each person sees only their own pictures and videos. Admins can manage accounts and change studio settings.</p>
+  openAcc("Manage users", `<p class="hlp" style="margin-top:0">Each person sees only their own pictures and videos. Admins can manage accounts and change studio settings, and always see adults-only content; everyone else gets PG-13 models unless you tick "adults-only content".</p>
     <table class="utable"><tbody>${d.users.map(u => `<tr data-u="${escapeHtml(u.name)}"><td><b>${escapeHtml(u.name)}</b>${u.name === ME.name ? " (you)" : ""}<div class="hlp" style="margin:0">${u.items} item${u.items === 1 ? "" : "s"}</div>
         <div class="hlp" style="margin:0" title="${u.last_seen ? escapeHtml(new Date(u.last_seen * 1000).toLocaleString()) : ""}">${lastSeen(u, d.now)}</div>${signIns(u)}</td>
       <td><select data-role aria-label="Role for ${escapeHtml(u.name)}"><option value="user" ${u.role === "user" ? "selected" : ""}>User</option><option value="admin" ${u.role === "admin" ? "selected" : ""}>Admin</option></select></td>
+      <td><label class="hlp" style="margin:0;white-space:nowrap" title="Adults-only models, previews and Civitai's NSFW listings. Admins always have it; everyone else gets PG-13 until you allow it."><input type="checkbox" data-adult ${u.adult ? "checked" : ""} ${u.role === "admin" ? "disabled" : ""}> adults-only content</label></td>
       <td style="text-align:right;white-space:nowrap"><button class="btn" data-reset>Reset password</button>${u.name === ME.name ? "" : `<button class="btn danger" data-del>Delete</button>`}</td></tr>`).join("")}</tbody></table>
     <h3 style="margin:18px 0 0;font-size:13px">Add a user</h3>
     <div class="form-row"><input id="nuName" placeholder="username" autocapitalize="none" spellcheck="false" aria-label="New username"><input id="nuPass" type="password" placeholder="password (8+ characters)" autocomplete="new-password" aria-label="Password for the new user">
@@ -1915,6 +1916,7 @@ async function renderUsers(msg) {
   };
   $("#accBody").querySelectorAll("tr[data-u]").forEach(tr => {
     const name = tr.dataset.u;
+    tr.querySelector("[data-adult]").onchange = async (e) => { try { await jsonCall(`/api/users/${encodeURIComponent(name)}`, "PUT", {adult: e.target.checked}); renderUsers(e.target.checked ? `${name} can now see adults-only content ✓` : `${name} is back to PG-13 ✓`); } catch (err) { say(err.message, true); renderUsers(); } };
     tr.querySelector("[data-role]").onchange = async (e) => { try { await jsonCall(`/api/users/${encodeURIComponent(name)}`, "PUT", {role: e.target.value}); renderUsers(`${name} is now ${e.target.value === "admin" ? "an admin" : "a user"} ✓`); } catch (err) { say(err.message, true); renderUsers(); } };
     tr.querySelector("[data-reset]").onclick = async () => {
       const pw = prompt(`New password for ${name} (at least 8 characters):`); if (!pw) return;

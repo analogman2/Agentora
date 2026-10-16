@@ -1,6 +1,7 @@
 """Accounts for the Image & Video Studio: users, password hashing (scrypt) and sign-in sessions.
 
-users.json    {name: {"salt", "hash", "role": "admin"|"user", "created"}}
+users.json    {name: {"salt", "hash", "role": "admin"|"user", "created", "adult": bool}}   (adult: may see adults-only
+              content; admins always may)
 sessions.json {sha256(token): {"user", "created", "seen"}}  - only token hashes are stored on disk
 """
 import hashlib, hmac, json, re, secrets, threading, time
@@ -114,7 +115,7 @@ def user_for(token):
         with lock:
             s["seen"] = time.time()
             _save(SESSIONS_FILE, sessions)
-    return {"name": s["user"], "role": users[s["user"]]["role"]}
+    return user_for_name(s["user"])
 
 
 def end_session(token):
@@ -184,11 +185,20 @@ def listing():
     for n, u in sorted(users.items()):
         mine = [s for s in sessions.values() if s["user"] == n]
         seen = max([s["seen"] for s in mine] + [last_seen.get(n, 0)] + [0]) or None
-        out.append({"name": n, "role": u["role"], "created": u["created"], "last_seen": seen, "sessions": len(mine),
+        out.append({"name": n, "role": u["role"], "adult": u["role"] == "admin" or bool(u.get("adult")), "created": u["created"],
+                    "last_seen": seen, "sessions": len(mine),
                     "sign_ins": sorted(({"since": s["created"], "seen": max(s["seen"], 0), "ip": s.get("ip"), "device": s.get("device"),
                                          "first_ip": s.get("first_ip")} for s in mine), key=lambda x: -x["seen"])})
     return out
 
 
 def user_for_name(name):
-    return {"name": name, "role": users[name]["role"]}
+    u = users[name]
+    return {"name": name, "role": u["role"], "adult": u["role"] == "admin" or bool(u.get("adult"))}
+
+
+def set_adult(name, on):
+    """Let this account see adults-only content (models, previews, Civitai's NSFW listings); admins always can."""
+    with lock:
+        users[name]["adult"] = bool(on)
+        _save(USERS_FILE, users)
