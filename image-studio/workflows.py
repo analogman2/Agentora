@@ -35,7 +35,7 @@ LOADER_FOLDERS = {
     "StyleModelLoader": "style_models", "GLIGENLoader": "gligen", "HypernetworkLoader": "hypernetworks",
     "PhotoMakerLoader": "photomaker", "ModelPatchLoader": "model_patches", "AudioEncoderLoader": "audio_encoders",
 }
-KEYWORD_FOLDERS = [("lora", "loras"), ("vae", "vae"), ("clip_vision", "clip_vision"), ("clip", "text_encoders"),
+KEYWORD_FOLDERS = [("lora", "loras"), ("tiny_vae", "vae_approx"), ("vae_approx", "vae_approx"), ("taesd", "vae_approx"), ("vae", "vae"), ("clip_vision", "clip_vision"), ("clip", "text_encoders"),
                    ("text_encoder", "text_encoders"), ("t5", "text_encoders"), ("unet", "diffusion_models"),
                    ("diffusion", "diffusion_models"), ("controlnet", "controlnet"), ("control_net", "controlnet"),
                    ("upscale", "upscale_models"), ("ckpt", "checkpoints"), ("checkpoint", "checkpoints")]
@@ -283,6 +283,15 @@ def _guess_folder(cls, key):
     return next((f for kw, f in KEYWORD_FOLDERS if kw in s), "checkpoints")
 
 
+def _tooltip_folder(info, cls, key):
+    """The folder a node input says it reads from ("... from models/vae_approx ..."), if that folder exists."""
+    d = info.get(cls, {}).get("input", {})
+    spec = {**d.get("required", {}), **d.get("optional", {})}.get(key)
+    tip = spec[1].get("tooltip", "") if spec and len(spec) > 1 and isinstance(spec[1], dict) else ""
+    m = re.search(r"models/([\w-]+)", tip)
+    return m.group(1) if m and (MODELS / m.group(1)).is_dir() else None
+
+
 def _options(info, cls, key):
     d = info.get(cls, {}).get("input", {})
     spec = {**d.get("required", {}), **d.get("optional", {})}.get(key)
@@ -410,7 +419,7 @@ async def analyze(recipe, comfy):
                     installed = next(o for o in opts if _norm(o) == norm)
                 else:
                     installed = next((o for o in opts if Path(_norm(o)).name == Path(norm).name), None)
-            folder = (hints.get(Path(norm).name) or {}).get("folder") or _guess_folder(cls, key)
+            folder = (hints.get(Path(norm).name) or {}).get("folder") or _tooltip_folder(info, cls, key) or _guess_folder(cls, key)
             on_disk = None if installed else find_installed(norm, folder)
             similar = similar_option(norm, opts) if opts and not installed and not on_disk and cls not in NO_SUBSTITUTE else None
             substitute = similar if similar and Path(norm).name not in (recipe.get("exact_models") or []) else None
