@@ -310,7 +310,7 @@ def find_installed(name, folder=None):
     """Is a model file already on disk (any model folder)? Returns its path relative to its folder."""
     base = Path(_norm(name)).name
     roots = [MODELS / folder] if folder and (MODELS / folder).exists() else []
-    roots += [p for p in MODELS.iterdir() if p.is_dir() and p not in roots]
+    roots += [p for p in MODELS.iterdir() if p.is_dir() and p not in roots and not p.name.startswith(".")]   # not .wrong-files
     for root in roots:
         for f in root.rglob(base):
             if f.is_file() and not f.name.endswith(".part"):
@@ -328,6 +328,41 @@ def model_core(name):
     quantized = any(re.fullmatch(r"i?q\d+", t) for t in toks)
     core = [t for t in toks if not _PRECISION.match(t) and not (quantized and t in ("k", "m", "s", "l", "xs", "xl", "0", "1"))]
     return tuple(sorted(core))
+
+
+_kind_cache = {}
+
+
+def file_kind(path):
+    """"lora" when a .safetensors file holds LoRA / LyCORIS weights (lora_*, lokr, hada, .alpha keys), else "model".
+    Read from the header only; cached by size and time."""
+    p = Path(path)
+    try:
+        st = p.stat()
+    except OSError:
+        return None
+    key = (str(p), st.st_size, st.st_mtime)
+    if key in _kind_cache:
+        return _kind_cache[key]
+    kind = "model"
+    if p.suffix.lower() == ".safetensors":
+        try:
+            with p.open("rb") as f:
+                n = int.from_bytes(f.read(8), "little")
+                keys = [k for k in json.loads(f.read(min(n, 64 << 20))) if k != "__metadata__"] if n < (64 << 20) else []
+            lora = sum(1 for k in keys if re.search(r"(^|[._])(lora_(up|down|a|b)|lokr_w\d|hada_w\d|lycoris_)|\.alpha$", k))
+            if keys and lora > len(keys) * 0.5:
+                kind = "lora"
+        except (OSError, ValueError):
+            pass
+    _kind_cache[key] = kind
+    return kind
+
+
+NOT_LORA_FOLDERS = {"text_encoders", "clip", "diffusion_models", "unet", "checkpoints", "vae"}
+# loaders whose files must match the workflow exactly: the same text encoder in another packaging (an HF layout vs
+# ComfyUI's) can load as the wrong kind of encoder (Krea 2 then fails with "expects ... features but got 2560")
+NO_SUBSTITUTE = ("CLIPLoader", "DualCLIPLoader", "TripleCLIPLoader", "QuadrupleCLIPLoader", "CLIPLoaderGGUF", "DualCLIPLoaderGGUF")
 
 
 def similar_option(name, opts):
@@ -376,18 +411,29 @@ async def analyze(recipe, comfy):
                     installed = next((o for o in opts if Path(_norm(o)).name == Path(norm).name), None)
             folder = (hints.get(Path(norm).name) or {}).get("folder") or _guess_folder(cls, key)
             on_disk = None if installed else find_installed(norm, folder)
-            similar = similar_option(norm, opts) if opts and not installed and not on_disk else None
+            similar = similar_option(norm, opts) if opts and not installed and not on_disk and cls not in NO_SUBSTITUTE else None
             substitute = similar if similar and Path(norm).name not in (recipe.get("exact_models") or []) else None
             if substitute:                                # same model in another precision is already here: use it
                 installed = substitute
-            if (Path(norm).name, folder) in seen:
+            if (Path(norm).name, folder) in seen:          # the same file in another node (sub-graphs repeat loaders)
+                for m in models:
+                    if (m["name"], m["folder"]) == (Path(norm).name, folder):
+                        m.setdefault("also", []).append({"node": nid, "path": list(path)})
                 continue
             seen.add((Path(norm).name, folder))
+            wrong = None
+            if installed and folder in NOT_LORA_FOLDERS:
+                found = find_installed(installed, folder)
+                if found and file_kind(MODELS / found[0] / found[1]) == "lora":
+                    wrong = f"{Path(_norm(installed)).name} is a LoRA, not a {folder.rstrip('s').replace('_', ' ')}: it was downloaded from the wrong link. Delete it and install the right file."
+                    notes.append(wrong)
+                    installed = None
             # on disk but not where this loader looks -> it gets linked into the right folder when installing
             elsewhere = on_disk if on_disk and opts is not None else None
             models.append({"name": Path(norm).name, "value": value, "node": nid, "path": list(path), "class": cls, "folder": folder,
                            "installed": bool(installed) if opts is not None else bool(on_disk), "use": installed,
-                           "elsewhere": elsewhere, "lora": folder == "loras", "substitute": substitute, "similar": similar})
+                           "elsewhere": elsewhere, "lora": folder == "loras", "substitute": substitute, "similar": similar,
+                           **({"wrong_file": wrong} if wrong else {})})
     for nid, node in prompt.items():                            # textual inversions: "embedding:name"
         for _, text in _walk_strings(node.get("inputs", {})):
             for e in re.findall(r"embedding:([\w\-. ]+)", text):
@@ -968,7 +1014,7 @@ def install_pack(step, pack):
     repo = pack["repo"]
     if not re.match(r"^https://github\.com/[\w.-]+/[\w.-]+/?$", repo):
         raise WorkflowError("Only GitHub node packs from the ComfyUI-Manager registry can be installed automatically")
-    if pack.get("install_type") not in (None, "git-clone"):
+    if pack.get("install_type") not in (None, "git-clone", "cnr"):     # cnr: the registry's code is its GitHub repository
         raise WorkflowError(f"This pack installs by {pack['install_type']}, which isn't supported automatically")
     target = CUSTOM_NODES / repo.rstrip("/").rsplit("/", 1)[-1]
     step["detail"] = "downloading code"
@@ -991,7 +1037,7 @@ async def manager_install(step, pack, comfy):
     if item.get("state") == "enabled":
         step["detail"] = "already installed"
         return True
-    item.update(ui_id=item["id"], skip_post_install=False, version=item.get("version") or "unknown",
+    item.update(ui_id=item["id"], skip_post_install=False, version=item.get("version") or "unknown", channel="default", mode="cache",
                 selected_version="latest" if item.get("cnr_latest") else ("nightly" if item.get("version") == "nightly" else "unknown"))
     step["detail"] = "queued in ComfyUI-Manager"
     async with http.post(f"{comfy}/manager/queue/install", json=item, timeout=aiohttp.ClientTimeout(total=60)) as r:
@@ -1131,12 +1177,16 @@ def build_prompt(analysis, values, images, owner_prefix="genstudio/wf"):
     """A copy of the workflow with the person's changes, fresh seeds, installed model names and saving outputs."""
     import random
     p = copy.deepcopy(analysis["prompt"])
-    for m in analysis["models"]:                      # use the installed spelling (folder prefix, slashes)
-        if m.get("use") and m["path"]:
-            tgt = p[m["node"]]["inputs"]
-            for k in m["path"][:-1]:
+    for m in analysis["models"]:                      # use the installed spelling (folder prefix, slashes) in every node
+        if not m.get("use"):
+            continue
+        for where in [{"node": m["node"], "path": m["path"]}] + m.get("also", []):
+            if not where["path"]:
+                continue
+            tgt = p[where["node"]]["inputs"]
+            for k in where["path"][:-1]:
                 tgt = tgt[k]
-            tgt[m["path"][-1]] = m["use"]
+            tgt[where["path"][-1]] = m["use"]
     for f in analysis["fields"]:
         given = values.get(f["id"]) or {}                 # {"value": ..., "random": bool} from the page
         v = given.get("value", f["value"])
@@ -1151,6 +1201,9 @@ def build_prompt(analysis, values, images, owner_prefix="genstudio/wf"):
         p[f["node"]]["inputs"][f["key"]] = v
     for nid, n in p.items():
         n.get("inputs", {}).pop("_widgets", None)
+        for key in ("seed", "noise_seed"):               # -1 = "random" where these workflows come from
+            if isinstance(n.get("inputs", {}).get(key), int) and n["inputs"][key] < 0:
+                n["inputs"][key] = random.randrange(2**48)
         if n.get("class_type") == "PreviewImage":           # keep results: previews become saves
             n["class_type"] = "SaveImage"; n["inputs"]["filename_prefix"] = owner_prefix
         elif n.get("class_type") in ("SaveImage", "SaveVideo", "SaveAnimatedWEBP", "SaveAnimatedPNG", "SaveWEBM"):

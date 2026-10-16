@@ -1093,6 +1093,18 @@ def own_origin(origin, request):
 
 
 @web.middleware
+async def comfy_down(request, handler):
+    """ComfyUI restarts after node packs are installed (about 15 s): say so instead of failing with a server error."""
+    try:
+        return await handler(request)
+    except (aiohttp.ClientConnectorError, aiohttp.ServerDisconnectedError) as e:
+        if ":8188" not in str(e) and "8188" not in str(getattr(e, "host", "")) + str(getattr(e, "port", "")):
+            raise
+        logging.getLogger("studio").info("ComfyUI isn't answering (restarting?): %s %s", request.method, request.path)
+        raise web.HTTPServiceUnavailable(text="ComfyUI is restarting (it does after installing node packs). Try again in a moment.")
+
+
+@web.middleware
 async def guard(request, handler):
     """Every request: who is it (session cookie), are they signed in, and is a change coming from this site."""
     request["user"] = auth.user_for(request.cookies.get(auth.COOKIE)) or agent_user(request)
@@ -1295,9 +1307,12 @@ def my_recipe(request):
     return r
 
 
-def blocked_models(plan):
+def blocked_models(plan, user=None):
     """Installed content models in a workflow that aren't rated PG-13 (non-admins can't run it)."""
-    return [m["name"] for m in plan.get("models", []) if m.get("installed") and not R.name_allowed(m.get("use") or m["name"])]
+    # Admin users always allow everything
+    if user and isinstance(user, dict) and user.get("role") == 0:
+        return []
+    return [m["name"] for m in plan.get("models", []) if m.get("installed") and not R.name_allowed(m.get("use") or m["name"], user)]
 
 
 def recipe_card(r, plan=None, admin=True):
@@ -1308,7 +1323,7 @@ def recipe_card(r, plan=None, admin=True):
                                                 "download_bytes", "free_bytes")}
         if not admin:                                     # PG-13 accounts: no prompts carried over from the source picture
             out["plan"]["fields"] = [{**f, "value": ""} if f["type"] == "text" else f for f in plan.get("fields", [])]
-            out["plan"]["blocked"] = blocked_models(plan)
+            out["plan"]["blocked"] = blocked_models(plan, request["user"])
     return out
 
 
@@ -1396,7 +1411,7 @@ async def wf_list(request):
             if hit:
                 card["ready"] = hit[1]["ready"]
                 if not adult_ok(request):
-                    card["blocked"] = bool(blocked_models(hit[1]))
+                    card["blocked"] = bool(blocked_models(hit[1], request["user"]))
             out.append(card)
     return web.json_response({"workflows": out})
 
@@ -1516,7 +1531,7 @@ async def wf_run(request):
     except W.WorkflowError as e:
         raise web.HTTPBadRequest(text=str(e))
     if not adult_ok(request):
-        blocked = blocked_models(a)
+        blocked = blocked_models(a, request["user"])
         if blocked:
             raise web.HTTPForbidden(text="This workflow uses models that aren't available on this account: " + ", ".join(blocked[:5]))
     if not a["ready"]:
@@ -1710,7 +1725,7 @@ def main():
     load_jobs()
     load_recipes()
     load_settings()
-    app = web.Application(client_max_size=48 * 2**20, middlewares=[guard])
+    app = web.Application(client_max_size=48 * 2**20, middlewares=[guard, comfy_down])
     app.router.add_get("/", index)
     app.router.add_get("/api/state", state)
     app.router.add_post("/api/generate", generate)
