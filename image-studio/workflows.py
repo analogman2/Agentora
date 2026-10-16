@@ -459,6 +459,8 @@ async def analyze(recipe, comfy):
                 have = any((MODELS / "embeddings").glob(name + "*")) or any((MODELS / "embeddings").glob(Path(name).stem + ".*"))
                 models.append({"name": name if Path(name).suffix else name + ".safetensors", "value": name, "node": nid, "path": [],
                                "class": "embedding", "folder": "embeddings", "installed": have, "use": None, "elsewhere": None, "lora": False})
+    if any("SageAttention" in c for c in classes) and not have_sage():
+        notes.append("SageAttention (a speed-up library) isn't installed, so its nodes are skipped: this runs with standard attention, a little slower.")
     kind = "video" if any(c in VIDEO_SAVERS for c in classes) else "image"
     return {"prompt": prompt, "classes": classes, "missing_nodes": missing_nodes, "models": models, "kind": kind,
             "fields": model_fields(choices) + editable_fields(prompt, info), "notes": notes,
@@ -483,6 +485,43 @@ def model_fields(choices):
                     "also": m.get("also", []), "type": "model", "value": m["use"] or m["value"], "original": m["value"],
                     "options": list(opts), "label": f"{MODEL_LABELS.get(m['folder'], 'Model')} · {title}", "group": "models"})
     return out
+
+
+_sage = {}
+
+
+def have_sage():
+    """Is the SageAttention library installed in ComfyUI's Python? (checked once)"""
+    if "ok" not in _sage:
+        py = COMFY_DIR / ".venv" / "bin" / "python"
+        try:
+            _sage["ok"] = subprocess.run([str(py), "-c", "import sageattention"], capture_output=True, timeout=60).returncode == 0
+        except Exception:
+            _sage["ok"] = False
+    return _sage["ok"]
+
+
+def _sage_node(n):
+    return "SageAttention" in n.get("class_type", "")
+
+
+def drop_sage(p):
+    """Without SageAttention: switch the KJ patch off and take the other sage patches out of the graph (their
+    MODEL input goes straight to whatever used their output). The workflow then runs with standard attention."""
+    for nid, n in list(p.items()):
+        if not _sage_node(n):
+            continue
+        if n["class_type"] == "PathchSageAttentionKJ":
+            n["inputs"]["sage_attention"] = "disabled"
+            continue
+        src = n["inputs"].get("model")
+        if not (isinstance(src, list) and len(src) == 2):
+            continue
+        for other in p.values():
+            for k, v in other.get("inputs", {}).items():
+                if isinstance(v, list) and len(v) == 2 and v[0] == nid:
+                    other["inputs"][k] = list(src)
+        del p[nid]
 
 
 def get_path(inputs, path):
@@ -1252,6 +1291,8 @@ def build_prompt(analysis, values, images, owner_prefix="genstudio/wf"):
                     _set_path(p[where["node"]]["inputs"], where["path"], v)
             continue
         p[f["node"]]["inputs"][f["key"]] = v
+    if any(_sage_node(n) for n in p.values()) and not have_sage():
+        drop_sage(p)
     for nid, n in p.items():
         n.get("inputs", {}).pop("_widgets", None)
         for key in ("seed", "noise_seed"):               # -1 = "random" where these workflows come from
