@@ -1,0 +1,5 @@
+# accounts and sign-ins: never commit
+users.json
+sessions.json
+__pycache__/
+logs/

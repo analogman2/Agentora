@@ -5,7 +5,7 @@ Agentora started as [yue2-xpu-radio](https://github.com/zebgop-ops/yue2-xpu-radi
 - **Runs on one NVIDIA card** (RTX 4090) with local Ollama models instead of two Intel cards and vLLM.
 - **A new radio design**: a clean player with cover art, a library laid out like folders, and a player that behaves like Spotify's (⏮ ⏭, play next, works over Bluetooth).
 - **Better songs**: lyrics that tell one clear story, a lyric editor, taste learned from your thumbs, and ✏️ rewriting any song with AI help.
-- **More than a radio**: a Music Studio with Easy and Advanced modes, a companion Image & Video Studio, a Home page, and a local AI assistant, all one click apart.
+- **More than a radio**: a Music Studio with Easy and Advanced modes, a Home page, and a local AI assistant, all one click apart.
 
 ---
 
@@ -101,12 +101,14 @@ Agentora started as [yue2-xpu-radio](https://github.com/zebgop-ops/yue2-xpu-radi
 
 ## The companion apps
 
-These live in `image-studio/` (the Image & Video Studio, port 7870) and share the same look and app switcher.
+Home lives in `home/` (port 7871) and shares the same look and app switcher.
+
+- **The Image & Video Studio is its own app now** (2026-10-16): it moved to its own repo (`~/genstudio`, still port 7870) with its own accounts, copied from Agentora's. Home took over the accounts, sign-in, user management (👤 on the Home page), the Hermes chat and the admin gates. The two still share the graphics card through the GPU broker.
 
 - **Home**: what's on the radio, what the studios are making, GPU and disk use, the GPU priority, and a chat with the local assistant.
 - **Image Studio**: pictures with Z-Image Turbo, ✨ **Improve** to turn a short idea into a detailed prompt, LoRAs, aspect ratios, up to 4 at a time, plus downloaded ComfyUI workflows and models (installed with one click). Other accounts get PG-13 models only, unless an admin ticks **adults-only content** for them in Manage users; admins always can.
 - **Video Studio**: Wan 2.2 videos from text, or starting from one of your pictures.
-- **App switcher** in every app's top bar (🏠 📻 🖼 🎵, Alt+0–3). Each app keeps its own browser tab, so switching never stops the radio. A small now-playing bar with 👍 and ⏭ follows you into the other apps.
+- **App switcher** in every app's top bar (🏠 📻 🎵, Alt+0–2). Each app keeps its own browser tab, so switching never stops the radio. A small now-playing bar with 👍 and ⏭ follows you into the other apps.
 
 ## The assistant (Hermes)
 

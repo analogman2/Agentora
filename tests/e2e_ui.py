@@ -5,7 +5,7 @@ Fails on any JavaScript error or failed script load, and walks the main flows: N
 search, sort, select), a station, a song page, playing a song from the Library in the player bar, the ☰ side panel,
 ⚙ settings, the Music Studio's Easy / Advanced switch and ☰ panel, and the Home page's ☰ panel. Nothing is changed:
 the library song it plays only plays in this headless browser.
-Usage: tests/e2e_ui.py [--radio URL] [--studio URL] [--chrome PATH] [--shots DIR]
+Usage: tests/e2e_ui.py [--radio URL] [--home URL] [--chrome PATH] [--shots DIR]
 """
 import argparse, sys, time
 from pathlib import Path
@@ -13,7 +13,7 @@ from playwright.sync_api import sync_playwright
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--radio", default="http://127.0.0.1:7860")
-ap.add_argument("--studio", default="http://127.0.0.1:7870")
+ap.add_argument("--home", default="http://127.0.0.1:7871")
 ap.add_argument("--chrome", default=str(Path.home() / ".hermes/tools/chromium-1208/chrome-linux64/chrome"))
 ap.add_argument("--shots", default="", help="save a screenshot of each step here")
 A = ap.parse_args()
@@ -118,7 +118,7 @@ with sync_playwright() as p:
 
     print("Home")
     def home():
-        pg.goto(A.studio + "/home"); time.sleep(3)
+        pg.goto(A.home + "/home"); time.sleep(3)
         js("document.querySelector('.agentora-panelbtn').click()"); time.sleep(2); shot("home-panel")
         panel = js("document.querySelector('.agentora-side').innerText")
         must("Radio" in panel or "RADIO" in panel, "panel content"); return "☰ panel"

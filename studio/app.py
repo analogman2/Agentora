@@ -1200,8 +1200,8 @@ class Handler(BaseHTTPRequestHandler):
             if self.not_modified(tag, "no-cache"):
                 return
             return self.send(200, f.read_bytes(), "text/html; charset=utf-8", {"ETag": tag, "Cache-Control": "no-cache"})
-        if path in ("/agentora/agentora.css", "/agentora/agentora.js"):             # the look shared with the other apps (kept with the Studio)
-            f = Path(os.environ.get("AGENTORA_SHARED") or os.environ.get("B70_SHARED", str(Path.home() / "genstudio" / "shared"))) / path.rsplit("/", 1)[1]
+        if path in ("/agentora/agentora.css", "/agentora/agentora.js"):             # the look shared with the other apps (kept with Home)
+            f = Path(os.environ.get("AGENTORA_SHARED") or str(HERE.parent / "home" / "shared")) / path.rsplit("/", 1)[1]
             if not f.is_file():
                 return self.send(404, {"error": "shared file missing"})
             return self.send(200, f.read_bytes(), "text/css; charset=utf-8" if f.suffix == ".css" else "text/javascript; charset=utf-8",

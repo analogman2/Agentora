@@ -3,7 +3,7 @@
 
 Run it while nobody is listening: it plays the stream, skips, goes back and queues a song, which moves the
 broadcast for everyone. Everything it changes (a setting, a playlist entry, a thumb) is put back.
-Usage: tests/e2e_radio.py [--radio http://127.0.0.1:7860] [--studio http://127.0.0.1:7870] [--quick]
+Usage: tests/e2e_radio.py [--radio http://127.0.0.1:7860] [--home http://127.0.0.1:7871] [--quick]
 --quick skips the broadcast tests (stream, skip, back, play next); --full adds the AI helpers and makes one song
 start to finish (lyrics, GPU recording, critic) - several minutes.
 """
@@ -11,13 +11,13 @@ import argparse, json, re, subprocess, sys, threading, time, urllib.error, urlli
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--radio", default="http://127.0.0.1:7860")
-ap.add_argument("--studio", default="http://127.0.0.1:7870")
+ap.add_argument("--home", default="http://127.0.0.1:7871")
 ap.add_argument("--quick", action="store_true")
 ap.add_argument("--allow-listeners", action="store_true")
 ap.add_argument("--full", action="store_true", help="also the AI helpers and one song made start to finish (several minutes)")
 ap.add_argument("--restart", action="store_true", help="restart the radio while listening: the stream must not stop")
 A = ap.parse_args()
-R, S = A.radio, A.studio
+R, S = A.radio, A.home          # S: Agentora Home (accounts, /home, now playing)
 results = []
 
 
@@ -167,7 +167,7 @@ def speech_roundtrip():
     return f"spoke in {spoke:.1f} s, heard back {overlap:.0%} of the words, voice under a GPU lease"
 check("speak, then listen (round trip)", speech_roundtrip)
 
-print("Image & Video Studio views of the radio")
+print("Home's views of the radio")
 check("home summary", lambda: (lambda h: (must(h.get("radio") is not None, "no radio in /api/home"), f"radio on={h['radio']['on']}, {h['radio']['listeners']} listening")[1])(req(S, "/api/home")))
 check("now-playing bar", lambda: str(req(S, "/api/nowplaying").get("on")))
 

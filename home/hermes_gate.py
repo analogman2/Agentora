@@ -2,7 +2,7 @@
 pages with GATE_UPSTREAM / GATE_PORT / GATE_NAME / GATE_ID (e.g. Jim's control panel: systemd/jim-gate.service).
 
 The dashboard binds to loopback with no login of its own, and it can read and write Hermes's keys and run the agent.
-This gate lets only signed-in Studio *admins* through, reusing the Studio's sign-in (its gs_session cookie is shared
+This gate lets only signed-in Agentora *admins* through, reusing Agentora Home's sign-in (:7871; its gs_session cookie is shared
 across ports on the same host), and forwards everything else, WebSockets included, to the dashboard.
 """
 import asyncio, json, os, time
@@ -11,7 +11,7 @@ import aiohttp
 from aiohttp import web
 
 DASH = os.environ.get("GATE_UPSTREAM") or os.environ.get("HERMES_DASHBOARD", "http://127.0.0.1:9119")
-STUDIO = os.environ.get("GEN_STUDIO", "http://127.0.0.1:7870")
+STUDIO = os.environ.get("AGENTORA_HOME", os.environ.get("GEN_STUDIO", "http://127.0.0.1:7871"))   # Agentora Home: the accounts
 PORT = int(os.environ.get("GATE_PORT", "7880"))
 NAME = os.environ.get("GATE_NAME", "Hermes Dashboard")
 ICON = os.environ.get("GATE_ICON", "☤")
@@ -32,8 +32,8 @@ h1{font-size:20px;margin:0}p{margin:0;color:var(--muted);font-size:14px}
 input{font:inherit;padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--text)}
 button{font:inherit;font-weight:600;padding:10px;border:0;border-radius:10px;background:var(--accent);color:var(--ink);cursor:pointer}
 #e{color:var(--err);font-size:14px;min-height:1em}</style></head><body>
-<form id="f"><h1>__ICON__ __NAME__</h1><p>Sign in with a Studio <b>admin</b> account.</p>
-<input id="u" autocomplete="username" placeholder="Studio username" aria-label="Studio username" required>
+<form id="f"><h1>__ICON__ __NAME__</h1><p>Sign in with a Agentora <b>admin</b> account.</p>
+<input id="u" autocomplete="username" placeholder="Agentora username" aria-label="Agentora username" required>
 <input id="p" type="password" autocomplete="current-password" placeholder="Password" aria-label="Password" required>
 <button>Sign in</button><div id="e" role="alert"></div></form>
 <script>
@@ -87,7 +87,7 @@ async def login(request):
         user = json.loads(text)["user"]
         if user["role"] != "admin":
             logsetup.activity(GATE, "refused: not an admin", user["name"], **w)
-            return web.json_response({"error": "That account isn't a Studio admin"}, status=403)
+            return web.json_response({"error": "That account isn't an Agentora admin"}, status=403)
         resp = web.json_response({"ok": True})
         for c in r.headers.getall("Set-Cookie", []):
             resp.headers.add("Set-Cookie", c)
@@ -113,7 +113,7 @@ async def proxy(request):
         if request.method == "GET" and "text/html" in request.headers.get("Accept", ""):
             return web.Response(text=LOGIN_PAGE.replace("__NAME__", NAME).replace("__ICON__", ICON), content_type="text/html",
                                 headers={"Cache-Control": "no-store"})
-        raise web.HTTPUnauthorized(text="Sign in with a Studio admin account")
+        raise web.HTTPUnauthorized(text="Sign in with an Agentora admin account")
     if not same_site(request):
         raise web.HTTPForbidden(text="Cross-site request refused")
     logsetup.activity(GATE, f"use {NAME}", user["name"], **who(request), every=600)
@@ -170,5 +170,5 @@ app.router.add_route("*", "/{path:.*}", proxy)
 if __name__ == "__main__":
     import logging, logsetup
     from pathlib import Path
-    logsetup.setup(GATE, Path(__file__).resolve().parent / "logs")
+    logsetup.setup(GATE, Path(__file__).resolve().parent.parent / "logs")      # Agentora's logs/
     web.run_app(app, host="127.0.0.1", port=PORT, access_log=None, print=lambda *_: logging.getLogger(GATE).info(f"{NAME} gate on :{PORT} -> {DASH}"))

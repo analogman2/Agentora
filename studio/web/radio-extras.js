@@ -123,7 +123,7 @@ setInterval(() => { cache.playlist = null; if (view.tab === "collection" && view
   new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach(scan))).observe(document.body, {childList: true, subtree: true});
 })();
 
-// ---------- Assistant: chat with the local Hermes agent (Studio admin sign-in required; the radio server relays it)
+// ---------- Assistant: chat with the local Hermes agent (Agentora admin sign-in required; the radio server relays it)
 const A = {prev: null, busy: false, log: []};
 try { const saved = JSON.parse(sessionStorage.getItem("asst") || "null"); if (saved) Object.assign(A, {prev: saved.prev, log: saved.log || []}); } catch (e) {}
 const asstSave = () => { try { sessionStorage.setItem("asst", JSON.stringify({prev: A.prev, log: A.log.slice(-60)})); } catch (e) {} };
@@ -156,7 +156,7 @@ $("asstLogin").onsubmit = async (e) => {
   try {
     const r = await api("/api/assistant/login", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({username: $("asstUser").value, password: $("asstPass").value})});
     $("asstPass").value = "";
-    if (!r.allowed) { $("asstErr").textContent = "That account isn't a Studio admin."; return; }
+    if (!r.allowed) { $("asstErr").textContent = "That account isn't an Agentora admin."; return; }
     await asstCheck(); $("asstIn").focus();
   } catch (err) { $("asstErr").textContent = err.message; }
 };

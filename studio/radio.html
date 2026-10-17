@@ -463,10 +463,9 @@ textarea { resize: vertical; max-height: 85vh; }
     <section class="card"><h3>Assistant</h3>
       <div class="small muted" style="margin-bottom:8px">Hermes, the local AI agent: ask it to change stations, rate songs, make pictures and videos, or check on this machine.</div>
       <div class="links"><button class="btn" id="asstOpen">💬 Open assistant</button>
-      <a class="btn" id="hermesDash" href="#" target="_blank" rel="noopener" title="Hermes settings, sessions, skills, tools and full chat (Studio admins)">☤ Hermes dashboard</a></div></section>
+      <a class="btn" id="hermesDash" href="#" target="_blank" rel="noopener" title="Hermes settings, sessions, skills, tools and full chat (admins)">☤ Hermes dashboard</a></div></section>
     <section class="card"><h3>Studios</h3><div class="links">
       <a class="btn" href="/" data-app="music">🎵 Music Studio</a>
-      <a class="btn" id="imgStudio" href="#" data-app="studio">🖼 Image &amp; Video Studio</a>
       <a class="btn" href="/radio/classic">📼 Classic cassette deck</a></div></section>
     <section class="card"><h3>Settings</h3><div class="links">
       <button class="btn" id="setBtn" title="Every radio setting">⚙ Open settings</button></div></section>
@@ -485,7 +484,7 @@ textarea { resize: vertical; max-height: 85vh; }
       <button class="btn primary" id="asstSend" type="submit">Send</button>
     </div></form>
   <form class="af login" id="asstLogin" hidden>
-    <p class="small" style="margin:0 0 8px">The assistant can run commands on this computer, so it needs a <b>Studio admin</b> sign-in.</p>
+    <p class="small" style="margin:0 0 8px">The assistant can run commands on this computer, so it needs an <b>Agentora admin</b> sign-in.</p>
     <input id="asstUser" autocomplete="username" placeholder="Studio username" aria-label="Studio username">
     <input id="asstPass" type="password" autocomplete="current-password" placeholder="Password" aria-label="Password">
     <button class="btn primary" type="submit">Sign in</button><div class="small" id="asstErr" style="color:var(--red,#d33)"></div></form>

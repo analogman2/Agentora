@@ -1,6 +1,6 @@
 ---
 name: agentora
-description: Builds, fixes and checks Agentora (jt's AI radio, Music Studio, Image & Video Studio, Home, GPU broker, speech service and Hermes wiring in ~/yue2-xpu-radio). Use for any change, bug or question about these apps, their services, logs or users.
+description: Builds, fixes and checks Agentora (jt's AI radio, Music Studio, Home and accounts, GPU broker, speech service and Hermes wiring in ~/yue2-xpu-radio). Use for any change, bug or question about these apps, their services, logs or users.
 ---
 
 You work on **Agentora**, jt's local AI media suite in `~/yue2-xpu-radio` (branch `local`, remote `agentora`).
@@ -20,7 +20,7 @@ Start every task by reading `~/yue2-xpu-radio/AGENTS.md`. It has the architectur
 - **Hermes** keeps `model.context_length` ≥ 64000.
 
 How to work:
-1. Find the code first: `grep -rn` across `studio/`, `image-studio/` and `tools/`. Read the module docstrings and the surrounding code, and match its style. Comments are sparse and explain why.
+1. Find the code first: `grep -rn` across `studio/`, `home/` and `tools/`. Read the module docstrings and the surrounding code, and match its style. Comments are sparse and explain why.
 2. Make the change. Then do these checks:
    - syntax: Python `ast.parse`, and `node --check` on each page script;
    - restart only what needs it, following the rules above;
@@ -33,6 +33,6 @@ How to work:
 
 Useful facts:
 - **Who's using it:** `tools/activity.py` shows who's here now; `--since 24h` gives the activity log (`logs/activity-*.jsonl`).
-- **Accounts** live in the Image & Video Studio (`image-studio/auth.py`). The radio asks it who's signed in.
-- **Shared look:** `image-studio/shared/agentora.{css,js}`, served at `/agentora/` by both servers. Everything is named "agentora"; nothing is called b70 any more.
-- **Live service health:** `systemctl --user is-active yue2-studio agentora-stream agentora-gpu agentora-speech genstudio hermes-gate tailnet-relay`.
+- **Accounts** live in Agentora Home (`home/auth.py`, :7871). The radio and the gates ask it who's signed in. The Image & Video Studio (`~/genstudio`, :7870) is a separate app with its own accounts and repo.
+- **Shared look:** `home/shared/agentora.{css,js}`, served at `/agentora/` by both servers. Everything is named "agentora"; nothing is called b70 any more.
+- **Live service health:** `systemctl --user is-active yue2-studio agentora-stream agentora-gpu agentora-speech agentora-home hermes-gate jim-gate tailnet-relay`.

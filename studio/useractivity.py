@@ -5,7 +5,7 @@ import json, re, threading, time, urllib.request
 
 import logsetup
 
-STUDIO = "http://127.0.0.1:7870"
+STUDIO = "http://127.0.0.1:7871"     # Agentora Home holds the accounts
 _cache, _lock = {}, threading.Lock()
 
 

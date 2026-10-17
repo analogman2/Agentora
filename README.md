@@ -18,12 +18,14 @@ Agentora is a fork of [zebgop-ops/yue2-xpu-radio](https://github.com/zebgop-ops/
 | <img src="docs/screens/music-studio.png" width="300"> | <img src="docs/screens/music-rewrite.png" width="300"> | <img src="docs/screens/radio-phone.png" width="150"> |
 | Style, lyrics, Create. **Advanced** shows every control | Opened from a song: everything prefilled, AI ideas apply in one click | Plays over Bluetooth in the car, ⏮ ⏭ from the lock screen |
 
-| Image Studio | Video Studio | Home |
-|---|---|---|
-| <img src="docs/screens/image-studio.png" width="300"> | <img src="docs/screens/video-studio.png" width="300"> | <img src="docs/screens/home.png" width="300"> |
-| Pictures with Z-Image Turbo, ✨ Improve for prompts, LoRAs, ComfyUI workflows | Videos with Wan 2.2, from text or starting from one of your pictures | What's on, GPU and disk, and a chat with the local Hermes assistant |
+| Home |
+|---|
+| <img src="docs/screens/home.png" width="300"> |
+| What's on, GPU and disk, accounts, and a chat with the local Hermes assistant |
 
-The **radio and Music Studio** are in this repository (`studio/`). The **Image & Video Studio and Home page** are in `image-studio/` (a small aiohttp front end over ComfyUI on port 7870, plus the sign-in gate for the Hermes dashboard on 7880). They share one look and an app switcher (`/agentora/agentora.css`, `/agentora/agentora.js`), so moving between apps keeps the radio playing in its own tab.
+The **radio and Music Studio** are in this repository (`studio/`), and so is **Home** (`home/`: the Home page, the accounts and sign-in every app uses, the Hermes chat, and the sign-in gates for the Hermes dashboard on 7880 and Jim's panel on 7885, on port 7871). They share one look and an app switcher (`/agentora/agentora.css`, `/agentora/agentora.js`), so moving between apps keeps the radio playing in its own tab.
+
+The **Image & Video Studio** used to be part of Agentora; since 2026-10-16 it is its own app (`~/genstudio`, port 7870, with its own accounts). Agentora shares the graphics card with it through the GPU broker.
 
 ## What it does
 
@@ -81,9 +83,9 @@ The code, by job:
 | `studio/index.html` | the Music Studio |
 | `studio/logsetup.py` | logging for every component |
 | `tests/e2e_radio.py`, `tests/e2e_ui.py` | end-to-end tests (below) |
-| `image-studio/` | the Image & Video Studio and Home page (`server.py`, port 7870), ComfyUI workflows and models (`workflows.py`, `models.py`), users and sign-in (`auth.py`), the Hermes dashboard gate (`hermes_gate.py`, port 7880), and the shared look and app switcher (`shared/agentora.css`, `shared/agentora.js`). Its own notes: `image-studio/AGENTS.md` |
-| `tools/tailnet-relay.py` | serves the apps (7860, 7861, 7870, 7880) on the Tailscale and home-network addresses, with HTTPS from the Tailscale certificate |
-| `systemd/` | user units for every service: `yue2-studio`, `agentora-stream`, `agentora-gpu`, `agentora-speech`, `genstudio`, `hermes-gate`, `tailnet-relay`, `agentora-ollama-amd` |
+| `home/` | Home and accounts (`server.py`, port 7871; `auth.py`), the Home page (`home.html`), the Hermes dashboard and Jim gates (`hermes_gate.py`, 7880 and 7885), and the shared look and app switcher (`shared/agentora.css`, `shared/agentora.js`) |
+| `tools/tailnet-relay.py` | serves the apps (7860, 7861, 7871, 7880, 7885, and the Image & Video Studio's 7870) on the Tailscale and home-network addresses, with HTTPS from the Tailscale certificate |
+| `systemd/` | user units for every service: `yue2-studio`, `agentora-stream`, `agentora-gpu`, `agentora-speech`, `agentora-home`, `hermes-gate`, `jim-gate`, `tailnet-relay`, `agentora-ollama-amd` |
 
 ## Hardware and software
 
@@ -125,9 +127,8 @@ systemctl --user daemon-reload && systemctl --user enable --now agentora-stream 
 # 4. run the radio (or install systemd/yue2-studio.service)
 ~/yue2-xpu-radio/start-local.sh
 
-# 5. the Image & Video Studio and Home page (needs ComfyUI in ~/ComfyUI on port 8188); the units expect it at ~/genstudio
-ln -s ~/yue2-xpu-radio/image-studio ~/genstudio
-cp ~/yue2-xpu-radio/systemd/{genstudio,hermes-gate}.service ~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user enable --now genstudio hermes-gate
+# 5. Home, accounts and the Hermes dashboard gate (the first visit to http://127.0.0.1:7871/home creates the admin account)
+cp ~/yue2-xpu-radio/systemd/{agentora-home,hermes-gate}.service ~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user enable --now agentora-home hermes-gate
 
 # 6. reach it all from your phone over Tailscale (and the home network with --lan)
 ln -s ~/yue2-xpu-radio/tools/tailnet-relay.py ~/.local/bin/tailnet-relay.py
@@ -223,18 +224,18 @@ Every component logs the same way: a level and the component's name on every lin
 | Stream relay | `journalctl --user -u agentora-stream` | `logs/stream.log` |
 | GPU broker (leases, the Ollama proxy) | `journalctl --user -u agentora-gpu` | `logs/gpu-broker.log` |
 | Speech service | `journalctl --user -u agentora-speech` | `logs/speech.log` |
-| Image & Video Studio, Hermes gate (companion app) | `-u genstudio`, `-u hermes-gate` | `image-studio/logs/studio.log`, `hermes-gate.log` |
+| Home and accounts, the Hermes and Jim gates | `-u agentora-home`, `-u hermes-gate`, `-u jim-gate` | `logs/home.log`, `logs/hermes-gate.log`, `logs/jim-gate.log` |
 | Tailscale/LAN relay | `-u tailnet-relay` | `~/.local/state/tailnet-relay/relay.log` |
 
 Plain lines are INFO, lines about failures are WARNING, and tracebacks (including uncaught errors in any thread or request) are ERROR. A client closing a connection isn't logged as an error. Set `LOG_LEVEL=DEBUG` in a service to log every request.
 
 ### Who's using it (activity log)
 
-Every app also writes what people do to one shared log, `logs/activity-YYYY-MM.jsonl` (a JSON object per line, a new file each month). That covers the radio and Music Studio, the stream, the Image & Video Studio, Home and the Hermes dashboard gate. Each line has the time, the app, the signed-in user (the radio asks the Studio, which holds the accounts), the device, its address and the event:
+Every app also writes what people do to one shared log, `logs/activity-YYYY-MM.jsonl` (a JSON object per line, a new file each month). That covers the radio and Music Studio, the stream, Home and the Hermes dashboard and Jim gates. Each line has the time, the app, the signed-in user (the radio asks the Studio, which holds the accounts), the device, its address and the event:
 
 - **Accounts:** sign in, failed sign-in (with the name tried, never the password), sign out, password changes and user management.
 - **Visits:** opening a page, and a "still here" heartbeat at most every 10 minutes per user, device and app.
-- **What people do:** creating pictures, videos and songs, chatting with Hermes, 👍 👎 ⏭ ⏮, play next, playlist changes, tuning in, editing stations, settings, and GPU priority. Prompts and lyrics are never logged.
+- **What people do:** creating songs, chatting with Hermes, 👍 👎 ⏭ ⏮, play next, playlist changes, tuning in, editing stations, settings, and GPU priority. Prompts and lyrics are never logged.
 - **Listening:** when a device starts listening, and how long it listened.
 
 Connections through the Tailscale relay would all look like 127.0.0.1, so the relay notes each one's real address in `$XDG_RUNTIME_DIR/agentora-peers/`, and devices are named from Tailscale ("Pixel 10 Pro", or "shared device of …" for devices shared in from another tailnet).
@@ -244,7 +245,7 @@ tools/activity.py                 # who's here now (last 10 min), and who's list
 tools/activity.py --since 24h     # a timeline per person and device (--all adds the heartbeats)
 ```
 
-**Manage users** in the Image & Video Studio shows each account's **last seen** time with its device, app and IP address, and lists its active sign-ins: the device and IP each one was made from and last used from (kept in `sessions.json`).
+**Manage users** (👤 on the Home page, admins) shows each account's **last seen** time with its device, app and IP address, and lists its active sign-ins: the device and IP each one was made from and last used from (kept in `sessions.json`).
 
 ## Tests
 

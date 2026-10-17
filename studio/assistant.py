@@ -7,7 +7,7 @@ on the server.
 import json, re, urllib.error, urllib.request
 from pathlib import Path
 
-STUDIO = "http://127.0.0.1:7870"
+STUDIO = "http://127.0.0.1:7871"     # Agentora Home holds the accounts
 HERMES = "http://127.0.0.1:8642"
 COOKIE = "gs_session"
 INSTRUCTIONS = ("You are being used from the AI radio's Assistant panel in a web browser. Keep replies short and "
@@ -75,7 +75,7 @@ def handle(h, method, path):
     if method == "POST" and path == "/api/assistant/chat":
         u = who(h)
         if not u or u.get("role") != "admin":
-            return h.send(403, {"error": "Sign in with a Studio admin account to use the assistant"}) or True
+            return h.send(403, {"error": "Sign in with an Agentora admin account to use the assistant"}) or True
         b = h.body()
         text = str(b.get("message") or "").strip()[:8000]
         if not text:

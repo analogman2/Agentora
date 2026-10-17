@@ -1,11 +1,11 @@
 [Unit]
-Description=Studio-admin sign-in gate in front of the Hermes dashboard (127.0.0.1:7880)
-After=hermes-dashboard.service genstudio.service
+Description=Agentora-admin sign-in gate in front of the Hermes dashboard (127.0.0.1:7880)
+After=hermes-dashboard.service agentora-home.service
 Wants=hermes-dashboard.service
 
 [Service]
-WorkingDirectory=%h/genstudio
-ExecStart=%h/ComfyUI/.venv/bin/python %h/genstudio/hermes_gate.py
+WorkingDirectory=%h/yue2-xpu-radio/home
+ExecStart=%h/ComfyUI/.venv/bin/python %h/yue2-xpu-radio/home/hermes_gate.py
 Environment=PYTHONUNBUFFERED=1
 Restart=on-failure
 RestartSec=5

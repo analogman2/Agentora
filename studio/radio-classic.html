@@ -460,7 +460,7 @@ input[type=text], textarea, select { width: 100%; font: inherit; color: var(--te
       <div class="small muted" id="vramText">memory —</div><div class="small muted">Memory counts everything on the card: radio, image studio and chat models.</div></section>
     <section class="card"><h3>Studios</h3><div class="links">
       <a class="btn" href="/">🎵 Music Studio</a>
-      <a class="btn" id="imgStudio" href="#">🖼 Image &amp; Video Studio</a></div></section>
+      </div></section>
     <section class="card"><h3>Settings</h3><div class="links">
       <button class="btn" id="setBtn" title="Every radio setting">⚙ Open settings</button></div></section>
   </div>
@@ -935,7 +935,6 @@ $("sideFade").onclick = () => setSide(false);
 $("pinBtn").onclick = () => setSide(true, !side.pinned);
 document.addEventListener("keydown", e => { if (e.key === "Escape" && side.open && !(side.pinned && wide()) && !$("dlg").open) setSide(false); });
 window.matchMedia("(min-width: 1100px)").addEventListener("change", renderSide);
-$("imgStudio").href = `${location.protocol}//${location.hostname}:7870/`;
 $("copyStream").onclick = async () => {
   const url = new URL("/radio/stream.mp3", location.href).href;
   try { await navigator.clipboard.writeText(url); $("copyStream").textContent = "Copied ✓"; }

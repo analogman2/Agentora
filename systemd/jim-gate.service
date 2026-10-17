@@ -1,10 +1,10 @@
 [Unit]
-Description=Studio-admin sign-in gate in front of Jim-o-Lantern's control panel (127.0.0.1:8790) on 127.0.0.1:7885
-After=jim-panel.service genstudio.service
+Description=Agentora-admin sign-in gate in front of Jim-o-Lantern's control panel (127.0.0.1:8790) on 127.0.0.1:7885
+After=jim-panel.service agentora-home.service
 
 [Service]
-WorkingDirectory=%h/genstudio
-ExecStart=%h/ComfyUI/.venv/bin/python %h/genstudio/hermes_gate.py
+WorkingDirectory=%h/yue2-xpu-radio/home
+ExecStart=%h/ComfyUI/.venv/bin/python %h/yue2-xpu-radio/home/hermes_gate.py
 Environment=PYTHONUNBUFFERED=1
 Environment=GATE_UPSTREAM=http://127.0.0.1:8790
 Environment=GATE_PORT=7885

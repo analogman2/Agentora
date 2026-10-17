@@ -1,0 +1,13 @@
+[Unit]
+Description=Agentora Home: Home page, accounts and sign-in for every Agentora app, Hermes chat (127.0.0.1:7871)
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/yue2-xpu-radio/home
+ExecStart=%h/ComfyUI/.venv/bin/python %h/yue2-xpu-radio/home/server.py
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

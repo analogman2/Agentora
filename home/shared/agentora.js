@@ -1,9 +1,8 @@
-// Agentora shared script: the app switcher and the radio's now-playing bar, for every app. Served at /agentora/agentora.js by both servers.
-// A page says which app it is with <html data-agentora-app="home|radio|studio|music"> and puts <div data-agentora-apps></div> where
+// Agentora shared script: the app switcher and the radio's now-playing bar, for every app. Served at /agentora/agentora.js by the
+// radio (:7860) and Home (:7871). A page says which app it is with <html data-agentora-app="home|radio|music"> and puts <div data-agentora-apps></div> where
 // the switcher goes. Each app keeps one browser tab; switching jumps to that tab without reloading it (the radio keeps playing).
 (() => {
-  const APPS = [["home", "🏠", "Home", ":7870/home"], ["radio", "📻", "Radio", ":7860/radio"],
-                ["studio", "🖼", "Image & Video", ":7870/"], ["music", "🎵", "Music", ":7860/"]];
+  const APPS = [["home", "🏠", "Home", ":7871/home"], ["radio", "📻", "Radio", ":7860/radio"], ["music", "🎵", "Music", ":7860/"]];
   const THIS = document.documentElement.dataset.agentoraApp || "";
   const url = (key, path = "") => `${location.protocol}//${location.hostname}${APPS.find(a => a[0] === key)[3]}${path}`;
   if (!window.name || /^(b70|agentora)-/.test(window.name)) window.name = "agentora-" + THIS;
@@ -56,7 +55,7 @@
     e.preventDefault(); open(a.dataset.app);
   });
   document.addEventListener("keydown", e => {
-    if (e.altKey && !e.ctrlKey && !e.metaKey && /^[0-3]$/.test(e.key)) { e.preventDefault(); open(APPS[+e.key][0]); }
+    if (e.altKey && !e.ctrlKey && !e.metaKey && /^[0-2]$/.test(e.key)) { e.preventDefault(); open(APPS[+e.key][0]); }
   });
 
   // ---- now playing: the radio's current song, on every page except the radio's own (it has its player)
@@ -112,18 +111,18 @@
   document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
 })();
 
-// ---- 👤 Account, from any app: the Studio (:7870) holds the accounts, so every page asks it who's signed in and signs
-// out there (one account across the Studio, Home and the Hermes dashboard). A page opts in with <div data-agentora-account>.
+// ---- 👤 Account, from any app: Home (:7871) holds the accounts, so every page asks it who's signed in and signs
+// out there (one account across the radio, Music Studio, Home and the Hermes dashboard). A page opts in with <div data-agentora-account>.
 window.agentoraAccount = (() => {
-  const studio = `${location.protocol}//${location.hostname}:7870`, here = location.port === "7870";
-  const url = (p) => here ? p : studio + p;
+  const home = `${location.protocol}//${location.hostname}:7871`, here = location.port === "7871";
+  const url = (p) => here ? p : home + p;
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
   let last = "";
   const who = () => fetch(url("/api/session"), {credentials: "include", cache: "no-store"}).then(r => r.ok ? r.json() : null).then(d => d && d.user).catch(() => undefined);
-  const html = (u) => u === undefined ? `<p class="agentora-muted">Couldn't reach the Image &amp; Video Studio, which holds the accounts.</p>`
+  const html = (u) => u === undefined ? `<p class="agentora-muted">Couldn't reach Agentora Home, which holds the accounts.</p>`
     : u ? `<p>👤 <b>${esc(u.name)}</b>${u.role === "admin" ? ' <span class="agentora-muted">· admin</span>' : ""}</p>
         <div class="agentora-links"><button type="button" class="agentora-btn" data-agentora-signout>Sign out</button></div>`
-    : `<p class="agentora-muted">Not signed in.</p><div class="agentora-links"><a class="agentora-btn" href="${studio}/">Sign in</a></div>`;
+    : `<p class="agentora-muted">Not signed in.</p><div class="agentora-links"><a class="agentora-btn" href="${home}/home">Sign in</a></div>`;
   async function fill(el) { if (last) el.innerHTML = last; last = html(await who()); el.innerHTML = last; }
   const fillAll = () => document.querySelectorAll("[data-agentora-account]").forEach(fill);
   document.addEventListener("click", async (e) => {
@@ -139,7 +138,7 @@ window.agentoraAccount = (() => {
 
 // ---- ☰ control panel for apps without their own (Home, Music Studio): radio, GPU and priority, disk, apps.
 // A page opts in with <button data-agentora-panel></button> where the ☰ goes. Works on both servers: the radio's (:7860)
-// and the Studio's (:7870) expose the same facts under slightly different paths.
+// and Home's (:7871) expose the same facts under slightly different paths.
 (() => {
   const btn = document.querySelector("[data-agentora-panel]");
   if (!btn) return;
@@ -203,8 +202,8 @@ window.agentoraAccount = (() => {
             ${f.waiting ? `<p class="agentora-muted">${esc(f.waiting)}</p>` : ""}<p class="agentora-muted" data-prio-msg></p>`) : ""}
       ${f && f.disk ? card("Disk", `${bar(f.disk.used, f.disk.total, f.disk.free / f.disk.total < 0.1)}<p class="agentora-muted">${gb(f.disk.free)} GB free of ${Math.round(f.disk.total / 2 ** 30)} GB</p>`) : ""}
       ${card("Apps", `<div class="agentora-links">
-          <a class="agentora-btn" href="${app(7870, "/home")}" data-app="home">🏠 Home</a><a class="agentora-btn" href="${app(7860, "/radio")}" data-app="radio">📻 Radio</a>
-          <a class="agentora-btn" href="${app(7870, "/")}" data-app="studio">🖼 Image &amp; Video</a><a class="agentora-btn" href="${app(7860, "/")}" data-app="music">🎵 Music</a>
+          <a class="agentora-btn" href="${app(7871, "/home")}" data-app="home">🏠 Home</a><a class="agentora-btn" href="${app(7860, "/radio")}" data-app="radio">📻 Radio</a>
+          <a class="agentora-btn" href="${app(7860, "/")}" data-app="music">🎵 Music</a>
           <a class="agentora-btn" href="${app(7880, "/")}" target="_blank" rel="noopener">☤ Hermes dashboard</a></div>`)}`;
     side.querySelector(".agentora-x").onclick = () => open(false);
     side.querySelectorAll("[data-agentora-account]").forEach(window.agentoraAccount.fill);
