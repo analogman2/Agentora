@@ -1328,7 +1328,7 @@ def recipe_card(r, plan=None, admin=True, user=None):
                                                 "download_bytes", "free_bytes")}
         if not admin:                                     # PG-13 accounts: no prompts carried over from the source picture
             out["plan"]["fields"] = [{**f, "value": ""} if f["type"] == "text" else
-                                     {**f, "options": [o for o in f["options"] if o == f["value"] or R.name_allowed(o, user)]} if f["type"] == "model" else f
+                                     {**f, "options": [o for o in f["options"] if o in (f["value"], W.SKIP) or R.name_allowed(o, user)]} if f["type"] == "model" else f
                                      for f in plan.get("fields", [])]
             out["plan"]["blocked"] = blocked_models(plan, user)
     return out
@@ -1597,7 +1597,7 @@ async def wf_run(request):
         job = {"id": uuid.uuid4().hex[:12], "owner": me, "kind": a["kind"], "prompt": str(val("text") or r["name"]),
                "params": {"seed": seed, "width": int(w or 1024), "height": int(h or 1024), "aspect": "", "workflow": r["name"], "recipe": r["id"],
                           # the values actually used (seeds resolved), so "Load settings" can put them back
-                          "values": {f["id"]: W.get_path(wf[f["node"]]["inputs"], f.get("path") or [f["key"]]) for f in a["fields"] if f["type"] in ("text", "int", "float", "seed", "model")},
+                          "values": {f["id"]: (W.SKIP if f["type"] == "model" and f["node"] not in wf else W.get_path(wf.get(f["node"], {}).get("inputs", {}), f.get("path") or [f["key"]])) for f in a["fields"] if f["type"] in ("text", "int", "float", "seed", "model")},
                           "images": images, **({"loras": loras} if loras else {})},
                "prompt_id": res["prompt_id"], "status": "queued", "created": time.time(), "outputs": []}
         if a["kind"] == "video":

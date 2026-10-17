@@ -7,7 +7,7 @@ Sources:   links embedded in the workflow, ComfyUI-Manager's model list, Civitai
            Hugging Face search, Civitai search. Node packs only from ComfyUI-Manager's registry.
 Installing (admins): downloads with progress, git clone + requirements for node packs, ComfyUI restart.
 """
-import asyncio, copy, io, ipaddress, json, os, re, shutil, socket, subprocess, sys, tempfile, time, uuid
+import asyncio, copy, urllib.parse, io, ipaddress, json, os, re, shutil, socket, subprocess, sys, tempfile, time, uuid
 from pathlib import Path
 from urllib.parse import urlparse, quote
 
@@ -34,6 +34,7 @@ LOADER_FOLDERS = {
     "DiffControlNetLoader": "controlnet", "CLIPVisionLoader": "clip_vision", "UpscaleModelLoader": "upscale_models",
     "StyleModelLoader": "style_models", "GLIGENLoader": "gligen", "HypernetworkLoader": "hypernetworks",
     "PhotoMakerLoader": "photomaker", "ModelPatchLoader": "model_patches", "AudioEncoderLoader": "audio_encoders",
+    "UltralyticsDetectorProvider": "ultralytics/bbox", "SAMLoader": "sams", "ONNXDetectorProvider": "onnx",
 }
 KEYWORD_FOLDERS = [("lora", "loras"), ("tiny_vae", "vae_approx"), ("vae_approx", "vae_approx"), ("taesd", "vae_approx"), ("vae", "vae"), ("clip_vision", "clip_vision"), ("clip", "text_encoders"),
                    ("text_encoder", "text_encoders"), ("t5", "text_encoders"), ("unet", "diffusion_models"),
@@ -419,14 +420,24 @@ async def analyze(recipe, comfy):
                     installed = next(o for o in opts if _norm(o) == norm)
                 else:
                     installed = next((o for o in opts if Path(_norm(o)).name == Path(norm).name), None)
+            urn = re.search(r"urn:air:[^/\\]+$", value)     # Civitai's own runs: /mnt/resources/.../urn:air:...
+            air = await air_file(urn.group(0)) if urn else None
+            if air and air.get("file"):                   # a Civitai AIR id instead of a file name
+                norm = air["file"]
+                if opts is not None and installed is None:
+                    installed = next((o for o in opts if Path(_norm(o)).name == norm), None)
             folder = (hints.get(Path(norm).name) or {}).get("folder") or _tooltip_folder(info, cls, key) or _guess_folder(cls, key)
+            if cls == "UltralyticsDetectorProvider" and norm.startswith("segm/"):
+                folder = "ultralytics/segm"
             on_disk = None if installed else find_installed(norm, folder)
             similar = similar_option(norm, opts) if opts and not installed and not on_disk and cls not in NO_SUBSTITUTE else None
             substitute = similar if similar and Path(norm).name not in (recipe.get("exact_models") or []) else None
             if substitute:                                # same model in another precision is already here: use it
                 installed = substitute
             chosen = (saved.get(model_field_id(nid, path)) or {}).get("value")
-            if opts and chosen in opts:                   # the person picked another installed model for this loader
+            if chosen == SKIP and len(path) == 1 and isinstance(node.get("inputs", {}).get("model"), list):
+                installed, substitute, similar, on_disk = None, None, None, None
+            elif opts and chosen in opts:                   # the person picked another installed model for this loader
                 installed, substitute, similar, on_disk = chosen, None, None, None
             if (Path(norm).name, folder) in seen:          # the same file in another node (sub-graphs repeat loaders)
                 for m in models:
@@ -443,8 +454,9 @@ async def analyze(recipe, comfy):
                     installed = None
             # on disk but not where this loader looks -> it gets linked into the right folder when installing
             elsewhere = on_disk if on_disk and opts is not None else None
-            models.append({"name": Path(norm).name, "value": value, "node": nid, "path": list(path), "class": cls, "folder": folder,
-                           "installed": bool(installed) if opts is not None else bool(on_disk), "use": installed,
+            models.append({**({"air": air} if air else {}), "name": Path(norm).name, "value": value, "node": nid, "path": list(path), "class": cls, "folder": folder,
+                           "installed": (bool(installed) if opts is not None else bool(on_disk)) or chosen == SKIP, "use": installed,
+                           **({"skipped": True} if chosen == SKIP else {}),
                            "elsewhere": elsewhere, "lora": folder == "loras", "substitute": substitute, "similar": similar,
                            **({"wrong_file": wrong} if wrong else {}), **({"chosen": True} if installed and installed == chosen else {})})
             if opts:
@@ -472,6 +484,9 @@ MODEL_LABELS = {"checkpoints": "Checkpoint", "diffusion_models": "Diffusion mode
                 "controlnet": "ControlNet"}
 
 
+SKIP = "(skip this LoRA)"
+
+
 def model_field_id(nid, path):
     return f"{nid}." + ".".join(str(k) for k in path)
 
@@ -481,9 +496,10 @@ def model_fields(choices):
     out = []
     for m, node, opts in choices:
         title = (node.get("_meta") or {}).get("title") or m["class"]
+        skippable = m["folder"] == "loras" and len(m["path"]) == 1 and isinstance(node.get("inputs", {}).get("model"), list)
         out.append({"id": model_field_id(m["node"], m["path"]), "node": m["node"], "key": m["path"][0], "path": m["path"],
-                    "also": m.get("also", []), "type": "model", "value": m["use"] or m["value"], "original": m["value"],
-                    "options": list(opts), "label": f"{MODEL_LABELS.get(m['folder'], 'Model')} · {title}", "group": "models"})
+                    "also": m.get("also", []), "type": "model", "value": SKIP if m.get("skipped") else m["use"] or m["value"], "original": m["value"],
+                    "options": ([SKIP] if skippable else []) + list(opts), "label": f"{MODEL_LABELS.get(m['folder'], 'Model')} · {title}", "group": "models"})
     return out
 
 
@@ -522,6 +538,19 @@ def drop_sage(p):
                 if isinstance(v, list) and len(v) == 2 and v[0] == nid:
                     other["inputs"][k] = list(src)
         del p[nid]
+
+
+def skip_lora(p, nid):
+    """Take a LoRA loader out of the graph: what used its MODEL (and CLIP) output gets its inputs instead."""
+    n = p.pop(nid, None)
+    if not n:
+        return
+    ins = n.get("inputs", {})
+    through = {0: ins.get("model"), 1: ins.get("clip")}
+    for other in p.values():
+        for k, v in other.get("inputs", {}).items():
+            if isinstance(v, list) and len(v) == 2 and v[0] == nid and isinstance(through.get(v[1]), list):
+                other["inputs"][k] = list(through[v[1]])
 
 
 def get_path(inputs, path):
@@ -754,10 +783,49 @@ async def _check_download(src, name):
         raise WorkflowError(f"Couldn't reach {host} for {name}: {e}")
 
 
+_air = {}
+
+
+async def air_file(urn):
+    """What a Civitai AIR id (urn:air:<ecosystem>:<type>:<source>:<id>[@version]) points at: the file name, and a
+    download link. Hugging Face ids carry the path; Civitai ones are looked up (once)."""
+    if urn in _air:
+        return _air[urn]
+    parts = urn.split(":")
+    out = None
+    if len(parts) >= 6:
+        source, ident = parts[4], ":".join(parts[5:])
+        if source == "huggingface":
+            ref = urllib.parse.unquote(ident)              # owner/repo@revision/path/to/file
+            m = re.fullmatch(r"([\w.-]+/[\w.-]+)@([^/]+)/(.+)", ref)
+            if m:
+                out = {"file": Path(m.group(3)).name, "url": f"https://huggingface.co/{m.group(1)}/resolve/{m.group(2)}/{quote(m.group(3))}",
+                       "source": f"Hugging Face · {m.group(1)}", "page": f"https://huggingface.co/{m.group(1)}"}
+        elif source == "civitai" and re.fullmatch(r"\d+@\d+", ident := re.sub(r"\.\w+$", "", ident)):
+            mid, vid = ident.split("@")
+            try:
+                v = await _json_get(f"https://civitai.com/api/v1/model-versions/{vid}")
+            except Exception:
+                v = None
+            files = (v or {}).get("files") or []
+            f = next((f for f in files if f.get("primary")), files[0] if files else None)
+            if f:
+                out = {"file": f["name"], "url": f.get("downloadUrl"), "size": int((f.get("sizeKB") or 0) * 1024) or None,
+                       "source": f"Civitai · {(v.get('model') or {}).get('name') or mid}", "page": f"https://civitai.com/models/{mid}?modelVersionId={vid}"}
+            elif v is None:
+                return None                               # couldn't ask: try again next time
+    _air[urn] = out
+    return out
+
+
 async def resolve_model(m, recipe):
     """Find a download for one missing model. Exact filename matches only, and only copies we can actually download:
     restricted ones are skipped and listed in m["refused"]."""
     name, refused = m["name"], m.setdefault("refused", [])
+    if (m.get("air") or {}).get("url"):
+        src = {"url": m["air"]["url"], "source": m["air"]["source"], "folder": m["folder"], "size": m["air"].get("size"), "page": m["air"].get("page")}
+        if await _usable(src, refused):
+            return src
     h = hints_from_workflow(recipe.get("workflow")).get(name)
     if h:
         src = {"url": h["url"], "source": "link in the workflow", "folder": h.get("folder") or m["folder"]}
@@ -916,6 +984,13 @@ def _manager_item(db, repo=None, pid=None):
     return db[1].get((repo or "").rstrip("/").removesuffix(".git"))
 
 
+KNOWN_PACKS = {                                   # node types the ComfyUI-Manager lists miss
+    "Lora Loader (LoraManager)": "https://github.com/willmiao/ComfyUI-Lora-Manager",
+    "TriggerWord Toggle (LoraManager)": "https://github.com/willmiao/ComfyUI-Lora-Manager",
+    "Lora Stacker (LoraManager)": "https://github.com/willmiao/ComfyUI-Lora-Manager",
+}
+
+
 def _from_manager(item, provides, found_by):
     return {"repo": (item.get("repository") or item.get("reference") or (item.get("files") or [""])[0]).rstrip("/"),
             "title": item.get("title") or item["id"], "author": item.get("author"), "description": (item.get("description") or "")[:300],
@@ -939,6 +1014,8 @@ async def resolve_nodes(missing, workflow=None, core_version=None, comfy=None):
         if rec.get("cnr_id") == "comfy-core":
             core.append(cls); left.discard(cls); continue
         item = _manager_item(db, pid=rec.get("cnr_id"))
+        if item and item.get("state") in ("enabled", "disabled"):
+            continue                                      # installed already and the node is still missing: the record is wrong
         if item:
             pk = by_repo.setdefault(item["id"], _from_manager(item, [], "recorded in the workflow · ComfyUI-Manager"))
             pk["provides"].append(cls); left.discard(cls); continue
@@ -951,6 +1028,14 @@ async def resolve_nodes(missing, workflow=None, core_version=None, comfy=None):
             item = _manager_item(db, repo=hit["repo"])
             pk = by_repo.setdefault(hit["repo"], _from_manager(item, [], "recorded in the workflow · ComfyUI-Manager") if item else
                                     {**hit, "install_type": "git-clone", "provides": [], "listed": True, "found_by": "recorded in the workflow"})
+            pk["provides"].append(cls); left.discard(cls)
+    for cls in sorted(left):
+        repo = KNOWN_PACKS.get(cls)
+        if repo:
+            item = _manager_item(db, repo=repo)
+            pk = by_repo.setdefault(repo, _from_manager(item, [], "known pack · ComfyUI-Manager") if item else
+                                    {"repo": repo, "title": repo.rsplit("/", 1)[-1], "author": repo.split("/")[-2], "description": "",
+                                     "install_type": "git-clone", "provides": [], "listed": True, "found_by": "known pack"})
             pk["provides"].append(cls); left.discard(cls)
     packs += list(by_repo.values())
     if db:
@@ -1274,6 +1359,8 @@ def build_prompt(analysis, values, images, owner_prefix="genstudio/wf"):
                 tgt = tgt[k]
             tgt[where["path"][-1]] = m["use"]
     for f in analysis["fields"]:
+        if f["node"] not in p:                            # a skipped LoRA's other settings
+            continue
         given = values.get(f["id"]) or {}                 # {"value": ..., "random": bool} from the page
         v = given.get("value", f["value"])
         if f["type"] == "seed":
@@ -1286,6 +1373,10 @@ def build_prompt(analysis, values, images, owner_prefix="genstudio/wf"):
             v = images.get(f["id"]) or f["value"]
         elif f["type"] == "model":                        # only installed files the loader offers
             v = v if v in f["options"] else f["value"]
+            if v == SKIP:
+                for where in [f] + f.get("also", []):
+                    skip_lora(p, where["node"])
+                continue
             for where in [{"node": f["node"], "path": f["path"]}] + f.get("also", []):
                 if where["path"]:
                     _set_path(p[where["node"]]["inputs"], where["path"], v)

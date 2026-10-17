@@ -1401,7 +1401,7 @@ function renderWorkflow() {
         ? `<input type="text" data-pack="${escapeHtml(n)}" value="${escapeHtml((wf.extraPacks || {})[n] || "")}" placeholder="GitHub link (https://github.com/owner/repo) or Comfy Registry id">
            <span class="sugg">Search GitHub for “${escapeHtml(n)}” (<a href="https://github.com/search?q=${encodeURIComponent('"' + n + '"')}&type=code" target="_blank" rel="noopener">code search</a>) or the <a href="https://registry.comfy.org/?search=${encodeURIComponent(n)}" target="_blank" rel="noopener">Comfy Registry</a>, then paste the pack's link here. If one pack provides several missing nodes, paste the same link for each.</span>`
         : " · an admin can add the pack that provides it"}</div></li>`).join("");
-  const installable = p.models.some(m => !m.installed && m.source) || p.packs.length || p.unknown_nodes.length;
+  const installable = p.models.some(m => !m.installed) || p.packs.length || p.unknown_nodes.length;   // models without a source: paste a link, then install
   const needs = p.models.filter(m => !m.installed).length + p.missing_nodes.length;
   const fieldsHtml = p.fields.map(f => {
     const id = "wff_" + f.id.replace(/\W/g, "_");
@@ -1424,6 +1424,7 @@ function renderWorkflow() {
     ${!p.ready && p.models.some(m => !m.installed && !m.source) && /civitai\.(com|green|red)\//.test(w.source || "") === false && /civitai/.test(w.source || "")
       ? `<p class="hint" style="margin:4px 0">Tip: this came from a Civitai file link. Importing the picture's page link instead (civitai.com/images/…) lets the studio see exactly which models and LoRAs it used.</p>` : ""}
     ${p.ready ? "" : `<label class="lbl">What it needs</label><ul class="req">${models}${packs}</ul>
+      ${p.models.some(m => !m.installed && p.fields.some(f => f.type === "model" && f.node === m.node)) ? `<p class="hint" style="margin:6px 0">Or use models you already have: pick them under <b>Models</b> below (a LoRA can also be skipped).</p>` : ""}
       <p class="hint" style="margin:8px 0">${p.download_bytes ? `About ${gb(p.download_bytes)} to download · ${gb(p.free_bytes)} free on disk. ` : ""}${p.packs.length ? "Node packs are code from their authors (listed in the ComfyUI-Manager registry); installing restarts ComfyUI for a moment." : ""}</p>
       ${admin ? (installable ? `<button class="btn primary" id="wfInstall" style="margin-top:4px">Install everything</button>` : "") : `<p class="hint">An admin needs to install these before this workflow can run.</p>`}
       <div id="wfTask"></div>`}
