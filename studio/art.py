@@ -130,8 +130,8 @@ def _wanted(songs_ok):
     if MODE != "stations and songs" or not songs_ok:
         return None
     with app.lock:
-        songs = [j for j in app.jobs.values() if j.get("source") == "radio" and j["status"] == "done"
-                 and j.get("radio_status") in ("approved", "played")]
+        songs = [j for j in app.jobs.values() if (j.get("source") == "radio" or j.get("adopted")) and j["status"] == "done"
+                 and j.get("radio_status") in ("approved", "played")]      # adopted: Music Studio songs a 🎵 Spotify station airs
     songs.sort(key=lambda j: (j.get("radio_status") != "approved", -(j.get("approved_at") or j.get("finished") or 0)))
     for j in songs[:SONG_BACKLOG]:
         if not song_path(j["id"]).exists() and not skip("song:" + j["id"]):

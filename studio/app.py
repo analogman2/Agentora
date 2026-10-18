@@ -1156,10 +1156,13 @@ def spotify_run(limit):
             return {"ok": False, "error": "Already running"}
         spotify.update(running=True, started=time.time())
 
+    import radio
+    seconds = str(max(20, min(360, int(radio.MAX_SECONDS))))   # the radio's cap: songs end on their own (the agent's 150 s default cut them off)
+
     def go():
         out = ""
         try:
-            p = subprocess.run([sys.executable, str(SPOTIFY_SCRIPT), "run", "--limit", str(limit), "--verbose"],
+            p = subprocess.run([sys.executable, str(SPOTIFY_SCRIPT), "run", "--limit", str(limit), "--seconds", seconds, "--verbose"],
                                capture_output=True, text=True, timeout=20 * 60)
             out = (p.stdout.strip() or p.stderr.strip()[-600:] or f"Finished (exit {p.returncode}).")
             if p.returncode:
