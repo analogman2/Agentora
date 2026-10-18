@@ -28,7 +28,7 @@ Agentora started as [yue2-xpu-radio](https://github.com/zebgop-ops/yue2-xpu-radi
 
 ### A cleaner player
 
-- **Now Playing** shows the song's cover art, title, style and lyrics, with **Add to my playlist**, **Song details**, **Download** and **New cover**. A "Recently played" list sits underneath.
+- **Now Playing** shows the song's cover art, title, style and lyrics, with **Add to my playlist**, **Song details**, **Download** and **New cover**. The lyrics sit open under the song (tap **Lyrics** to fold them away; the page remembers) and change with each new song. A "Recently played" list sits underneath.
 - **A player bar on every page**: 👎 ⏮ ▶ ⏭ 👍 ⊕, a progress bar and volume. Tapping the song opens its page.
 - **A side panel (☰)** for the controls that used to crowd the deck: who's listening and how well it's connected, GPU and disk usage, GPU priority, links to the other apps, and Settings.
 - **The cassette deck** from the original is still at `/radio/classic`.
@@ -38,6 +38,7 @@ Agentora started as [yue2-xpu-radio](https://github.com/zebgop-ops/yue2-xpu-radi
 - **Library**: ♥ My playlist, 🕘 Listen history, then every station, as a list (or as covers), each with a ▶ button.
 - **A station** lists all of its songs, including the ones recorded and waiting to air. You can sort them newest first, favourites first or most played. The description, what it has learned from you, Edit and Delete sit in an "About this station" section underneath.
 - **A song** shows its cover, style, lyrics, the story idea it was written from, its quality score, and when it last played.
+- **Easy-to-read lyrics** on the song page and Now Playing: each [Verse], [Chorus] and [Bridge] gets its own labelled block, choruses are marked with a colored bar, and instrumentals (or older songs with no saved lyrics) say so plainly.
 - **A path bar on every page** (`Library › Indie Road Trip › Final Load at the Dock`), with every step clickable, plus an ↑ button for going up one level.
 - **Previous / Next** at the bottom of a song page moves through the folder you came from: the station, your playlist or your history.
 - **Whole rows are clickable**: clicking anywhere on a song row opens it.

@@ -124,8 +124,6 @@ img { display: block; }
 .np .meta { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 20px; }
 .chip { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: var(--soft); color: var(--muted); }
 .np .acts { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-.np details { margin-top: 22px; max-width: 560px; }
-.np details summary { cursor: pointer; color: var(--muted); }
 .songpage { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 40px; align-items: start; }
 .songpage .cover img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; box-shadow: var(--shadow); display: block; }
 .songpage .st { color: var(--accent); text-decoration: none; font-weight: 600; font-size: 14px; }
@@ -134,12 +132,24 @@ img { display: block; }
 .songpage .acts { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
 .songpage .facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 14px; margin: 0; }
 .songpage .facts dt { color: var(--muted); } .songpage .facts dd { margin: 0; }
-pre.ly.songly { max-height: none; overflow: visible; font-size: 15px; }
+/* lyrics (song page and Now Playing): each [Verse] / [Chorus] is a labelled block, choruses get an accent bar */
+.lybox { margin-top: 22px; max-width: 640px; }
+.lybox > .label, .lybox > summary { margin: 0 0 10px; }
+.nply { margin: 34px auto 0; }
+.nply > summary { cursor: pointer; list-style-position: outside; }
+.lyrics { font: 16px/1.65 system-ui, sans-serif; overflow-wrap: anywhere; }
+.lysec { margin: 0 0 18px; padding-left: 12px; border-left: 3px solid transparent; }
+.lysec.chorus { border-left-color: var(--accent); }
+.lytag { font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); margin-bottom: 2px; }
+.lysec:not(.chorus) .lytag { color: var(--muted); }
+.lyl { display: block; }
+.lynote { display: block; font-style: italic; color: var(--muted); font-size: 14px; }
+.lynone { color: var(--muted); font-size: 14px; margin: 0; }
+@media (max-width: 760px) { .lyrics { font-size: 17px; } .nply { margin-top: 26px; } }
 .taste { margin-top: 16px; text-align: left; }
 .taste pre { white-space: pre-wrap; font: 13px/1.5 system-ui, sans-serif; background: var(--soft); border-radius: 8px; padding: 10px 12px; margin: 6px 0; }
 .taste .btn { font-size: 12px; padding: 3px 10px; }
 @media (max-width: 760px) { .songpage { grid-template-columns: 1fr; gap: 18px; } .songpage .cover { max-width: 320px; } }
-pre.ly { white-space: pre-wrap; font: 14px/1.7 system-ui, sans-serif; margin: 10px 0 0; max-height: 360px; overflow: auto; }
 .status { margin-top: 18px; color: var(--muted); font-size: 14px; min-height: 1.5em; }
 @media (max-width: 760px) { .np { grid-template-columns: 1fr; gap: 22px; min-height: 0; } .np .cover { max-width: 360px; margin: 0 auto; } }
 

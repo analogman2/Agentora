@@ -17,6 +17,26 @@ audio.crossOrigin = "anonymous";                   // the stream comes from the 
 audio.volume = store.get("vol", 0.85); $("vol").value = audio.volume;
 $("vol").oninput = () => { audio.volume = +$("vol").value; store.set("vol", audio.volume); };
 
+// ---------------- lyrics: [Verse] / [Chorus] tags become labelled blocks; other [...] lines are stage notes
+const LY_SECTION = /^(verse|chorus|pre-?chorus|post-?chorus|bridge|intro|outro|hook|refrain|interlude|break|instrumental|solo|coda|drop|breakdown)\b/i;
+function lyricsHTML(t) {
+  const blocks = [];
+  let cur = null, sung = 0;
+  for (const raw of String((t && t.lyrics) || "").replace(/\r/g, "").split("\n")) {
+    const line = raw.trim(), tag = line.match(/^\[([^\]]{1,120})\]$/);
+    if (tag && LY_SECTION.test(tag[1].trim())) { cur = {tag: tag[1].trim(), lines: []}; blocks.push(cur); continue; }
+    if (!cur) { cur = {tag: null, lines: []}; blocks.push(cur); }
+    if (tag) cur.lines.push(`<span class="lynote">${esc(tag[1])}</span>`);
+    else if (line) { cur.lines.push(`<span class="lyl">${esc(line)}</span>`); sung++; }
+  }
+  if (!sung) return `<p class="lynone">${t && t.mode === "instrumental" ? "🎼 Instrumental: this song has no lyrics."
+    : "No lyrics were saved for this song."}</p>`;
+  return `<div class="lyrics">${blocks.filter(b => b.lines.length || b.tag).map(b => {
+    const chorus = b.tag && /^(chorus|hook|refrain)/i.test(b.tag);
+    return `<div class="lysec${chorus ? " chorus" : ""}">${b.tag ? `<div class="lytag">${esc(b.tag)}</div>` : ""}${b.lines.join("")}</div>`;
+  }).join("")}</div>`;
+}
+
 // ---------------- generated cover art (deterministic from a seed: same song, same cover)
 function prng(seed) {
   let h = 2166136261; for (const c of String(seed)) h = Math.imul(h ^ c.charCodeAt(0), 16777619);

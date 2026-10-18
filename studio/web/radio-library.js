@@ -26,14 +26,16 @@ function route() {
   const on = view.tab === "now" ? "now" : view.tab === "search" ? "" : "lib";
   document.querySelectorAll(".tabs a").forEach(x => x.classList.toggle("on", x.dataset.tab === on));
   if (view.tab !== "search") $("q").value = "";
-  window.scrollTo(0, 0); renderView();
+  window.scrollTo(0, 0); renderView(true);
 }
 window.addEventListener("hashchange", route);
 let renderSeq = 0;
-async function renderView() {
+async function renderView(navigated) {
   const seq = ++renderSeq, page = $("page");
   if (!R) { page.innerHTML = `<p class="empty">Tuning in…</p>`; return; }
-  if (document.querySelector(".row.previewing")) return;          // don't interrupt a preview
+  // a background refresh doesn't redraw a list while one of its songs plays; opening a page, or Now Playing following
+  // the song (its lyrics too), always does
+  if (!navigated && view.tab !== "now" && document.querySelector(".row.previewing")) return;
   let html = "";
   if (view.tab === "now") html = nowView();
   else if (view.tab === "lib") html = await libView();
@@ -108,7 +110,7 @@ async function songView(id) {
         <a class="pill" href="${esc(t.audio)}?download=1">⤓ Download</a>
       </div>
       <dl class="facts">${facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>
-      ${t.lyrics ? `<p class="label" style="margin-top:18px">Lyrics</p><pre class="ly songly">${esc(t.lyrics)}</pre>` : `<p class="small muted" style="margin-top:18px">Instrumental</p>`}
+      <section class="lybox" aria-label="Lyrics"><p class="label">Lyrics</p>${lyricsHTML(t)}</section>
     </div></section>
     ${prev || next ? `<nav class="sibs" aria-label="Other songs in ${esc(folderCrumb(folder)[0])}">
       ${prev ? `<a href="${songHref(prev, folder)}"><span class="small muted">‹ Previous</span><b>${esc(prev.title)}</b></a>` : "<span></span>"}
@@ -196,9 +198,10 @@ function nowView() {
         <a class="pill" href="${esc(t.audio)}?download=1">⤓ Download</a>
         <button class="pill" data-act="np-art" title="Draw a new cover for this song">🎨 New cover</button>` : ""}
         <button class="pill" data-act="random" title="Play a station picked at random">🎲 Random</button></div>
-      ${t && t.lyrics ? `<details><summary>Lyrics</summary><pre class="ly">${esc(t.lyrics)}</pre></details>` : ""}
       <div class="status" id="npStatus"></div>
     </div></section>
+    ${t ? `<details class="lybox nply" ${store.get("npLyrics", true) ? "open" : ""} ontoggle="store.set('npLyrics', this.open)">
+      <summary class="label">Lyrics · ${esc(t.title)}</summary>${lyricsHTML(t)}</details>` : ""}
     ${cache.listened && cache.listened.length ? `<section class="section"><p class="label"><a href="#lib/history" style="color:inherit">Recently played ›</a></p><ul class="rows">${cache.listened.slice(0, 5).map(x => songRow(x, {when: whenText(x.listened_at), folder: "history"})).join("")}</ul></section>` : ""}`;
 }
 

@@ -2,7 +2,7 @@
 """Browser end-to-end test of the radio page, the Music Studio and the Home page, in headless Chromium (Playwright).
 
 Fails on any JavaScript error or failed script load, and walks the main flows: Now Playing, the Library (All songs,
-search, sort, select), a station, a song page, playing a song from the Library in the player bar, the ☰ side panel,
+search, sort, select), a station, a song page, playing a song from the Library in the player bar, lyrics on the song page and Now Playing, the ☰ side panel,
 ⚙ settings, the Music Studio's Easy / Advanced switch and ☰ panel, and the Home page's ☰ panel. Nothing is changed:
 the library song it plays only plays in this headless browser.
 Usage: tests/e2e_ui.py [--radio URL] [--home URL] [--chrome PATH] [--shots DIR]
@@ -89,6 +89,19 @@ with sync_playwright() as p:
         js("lpStop()")
         return f"{bar} -> ⏭ {nxt}"
     check("play from the Library in the bar", library_play)
+    def lyrics():
+        ids = js("(async () => { const all = await loadAll(); const sung = all.find(t => (t.lyrics || '').includes('[')), inst = all.find(t => t.mode === 'instrumental'); return [sung && sung.id, inst && inst.id]; })()")
+        must(ids[0], "no song with lyrics in the library")
+        js(f"location.hash = '#lib/all/{ids[0]}'"); time.sleep(2); shot("radio-lyrics")
+        secs = js("document.querySelectorAll('.songpage .lyrics .lysec .lytag').length"); must(secs > 0, "song page: no [section] labels")
+        if ids[1]:                                       # Now Playing shows the lyrics and follows the song (here: to an instrumental)
+            js(f"(async () => {{ const all = await loadAll(); lp.queue = [all.find(t => t.id === '{ids[0]}'), all.find(t => t.id === '{ids[1]}')]; lpPlay(0); location.hash = '#now'; }})()"); time.sleep(2.5)
+            must(js("document.querySelectorAll('.nply .lyl').length") > 0, "Now Playing: no lyrics")
+            js("$('bSkip').click()"); time.sleep(2.5)
+            must(js("!!document.querySelector('.nply .lynone')"), "Now Playing didn't follow to the instrumental")
+            js("lpStop()")
+        return f"{secs} sections; Now Playing follows the song"
+    check("lyrics: song page and Now Playing", lyrics)
     def side_panel():
         js("$('sideBtn').click()"); time.sleep(1.5); shot("radio-panel")
         must(js("$('side').classList.contains('open')"), "panel didn't open")
