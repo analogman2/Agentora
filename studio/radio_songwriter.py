@@ -365,7 +365,7 @@ def bank_loop():
             if not rs.state["on"] or sid not in rs.stations:
                 continue
             s = rs.stations[sid]
-            if len(s.get("bank") or []) >= rs.BANK_SIZE or not lyricist_may_run():
+            if s["kind"] == "spotify" or len(s.get("bank") or []) >= rs.BANK_SIZE or not lyricist_may_run():
                 continue
             rs.bank_writing.set()
             try:

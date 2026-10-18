@@ -65,7 +65,7 @@ def _filler(sid):
     nothing aired in the last 45 min, nothing skipped or disliked)."""
     now = time.time()
     with app.lock:
-        mine = [j for j in app.jobs.values() if j.get("source") == "radio" and j.get("station") == sid and j["status"] == "done"
+        mine = [j for j in app.jobs.values() if rsp.on_station(j, sid) and j["status"] == "done"
                 and (app.DATA / j["id"] / "song.mp3").is_file()]
     sung = {j.get("batch") for j in mine if j.get("radio_status") in ("approved", "played")}   # songs whose best take airs
     runners = [j for j in mine if j.get("radio_status") == "rejected" and not j.get("played_at") and (j.get("critic") or {}).get("sane")
@@ -77,6 +77,12 @@ def _filler(sid):
     if reruns:
         reruns.sort(key=lambda j: (loved(j), (j.get("critic") or {}).get("score", 0)), reverse=True)
         return random.choice(reruns[:5]), "rerun"
+    if (rs.stations.get(sid) or {}).get("kind") == "spotify":       # few songs yet: the least recently aired, not the last one
+        last = (rs.bc["aired"][-1] if rs.bc["aired"] else {}).get("id")
+        played = sorted((j for j in mine if j.get("played_at") and j.get("radio_feedback") not in ("skip", "dislike") and j["id"] != last),
+                        key=lambda j: j["played_at"])
+        if played:
+            return played[0], "rerun"
     return None, None
 
 
@@ -141,8 +147,8 @@ def favorites():
 def history(sid, limit=40, upcoming=False):
     """Songs a station has aired, newest first; upcoming=True also lists the recorded songs waiting to air (first)."""
     with app.lock:
-        played = sorted((j for j in app.jobs.values() if j.get("source") == "radio" and j.get("played_at")
-                         and (sid == rs.RERUNS or j.get("station") == sid)),
+        played = sorted((j for j in app.jobs.values() if j.get("played_at")
+                         and ((sid == rs.RERUNS and j.get("source") == "radio") or rsp.on_station(j, sid))),
                         key=lambda j: -j["played_at"])[:limit]
     ready = sorted(rsp.station_tracks(sid, ("approved",)), key=lambda j: j.get("approved_at", 0)) if upcoming and sid != rs.RERUNS else []
     return [track_view(j) | {"up_next": True} for j in ready] + [track_view(j) | {"airings": j.get("airings", 1)} for j in played]

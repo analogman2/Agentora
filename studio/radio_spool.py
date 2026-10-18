@@ -17,12 +17,25 @@ def generating():
 
 # ----------------------------------------------------------------------------- spool
 
+def is_spotify(j):
+    """A song Hermes's Spotify agent made (its author is "Spotify <track id>")."""
+    return (j.get("author") or "").startswith("Spotify ")
+
+
+def on_station(j, sid):
+    """A station's own song: one it recorded, or a Music Studio song a 🎵 Spotify station adopted."""
+    return j.get("station") == sid and (j.get("source") == "radio" or bool(j.get("adopted")))
+
+
 def station_tracks(sid, statuses=("approved",)):
     with app.lock:
-        return [j for j in app.jobs.values() if j.get("source") == "radio" and j.get("station") == sid and j.get("radio_status") in statuses]
+        return [j for j in app.jobs.values() if on_station(j, sid) and j.get("radio_status") in statuses]
 
 
 def inflight(sid):
+    if (rs.stations.get(sid) or {}).get("kind") == "spotify":
+        with app.lock:
+            return sum(1 for j in app.jobs.values() if is_spotify(j) and j["status"] in ("queued", "running")) + bool(app.spotify["running"])
     with app.lock:
         n = sum(1 for j in app.jobs.values() if j.get("source") == "radio" and j.get("station") == sid and
                 (j["status"] in ("queued", "running") or j.get("radio_status") == "judging"))
@@ -36,6 +49,7 @@ def spool_loop():
             if time.time() - rs.state.get("heartbeat", 0) > 20:
                 rs.save_state()                               # heartbeat: lets a quick restart resume the broadcast
             settle_stragglers()
+            adopt_spotify()
             sid = rs.state["station"]
             if not rs.state["on"] or sid not in rs.stations:
                 continue
@@ -44,6 +58,9 @@ def spool_loop():
                 continue
             b = rs.backoff.get(sid)
             if b and time.time() < b["until"]:
+                continue
+            if s["kind"] == "spotify":
+                feed_spotify(s)
                 continue
             with app.lock:
                 last = sorted((j for j in app.jobs.values() if j.get("source") == "radio" and j.get("station") == sid
@@ -68,10 +85,60 @@ def spool_loop():
             app.log("radio spool error:", traceback.format_exc())
 
 
+# ----------------------------------------------------------------------------- 🎵 Spotify stations
+# They write nothing themselves: Hermes's spotify-liked-songs agent (app.spotify_run) queues Music Studio songs from
+# liked songs it hasn't used yet, and the station adopts each finished one as a new song to air.
+
+_spotify = {"next": 0.0, "asked": 0.0}
+
+
+def adopt_spotify():
+    sid = next((s["id"] for s in sorted(rs.stations.values(), key=lambda s: s["created"]) if s["kind"] == "spotify"), None)
+    if not sid:
+        return
+    with app.lock:
+        new = [j for j in app.jobs.values() if is_spotify(j) and j["status"] == "done" and j.get("source") != "radio"
+               and not j.get("adopted") and (app.DATA / j["id"] / "song.mp3").is_file()]
+        for j in sorted(new, key=lambda j: j.get("finished") or 0):
+            j.update(station=sid, adopted=True, radio_status="approved", approved_at=j.get("finished") or time.time())
+            app.save_job(j)
+    for j in new:
+        app.log(f"radio: Spotify station adopted {j['title']}")
+
+
+def feed_spotify(s):
+    """Keep target_ahead Spotify songs ready or on the way; back off for an hour when no liked song is left to use."""
+    sid, now = s["id"], time.time()
+    if app.spotify["running"]:
+        return
+    if _spotify["asked"] and (app.spotify["last_finished"] or 0) > _spotify["asked"]:
+        _spotify["asked"] = 0.0
+        if (app.spotify["last_output"] or "").startswith("Nothing new"):
+            rs.backoff[sid] = {"until": now + 3600, "delay": 3600, "reason": "no liked songs left to use on Spotify"}
+            app.log("radio: Spotify station: no new liked songs; asking again in an hour")
+            return
+    if now < _spotify["next"]:
+        return
+    ready, fly = len(station_tracks(sid)), inflight(sid)
+    if ready + fly >= rs.state["target_ahead"]:
+        return
+    r = app.spotify_run(min(3, rs.state["target_ahead"] - ready - fly))
+    _spotify["next"] = now + 5 * 60
+    if r["ok"]:
+        _spotify["asked"] = now
+    else:
+        rs.backoff[sid] = {"until": now + 600, "delay": 600, "reason": r["error"]}
+
+
 def request_song(sid, like=None):
     """🎵 Create a song now: write and record one song for this station straight away, whatever the radio is playing."""
     if sid not in rs.stations:
         raise app.BadRequest("No such station")
+    if rs.stations[sid]["kind"] == "spotify":
+        r = app.spotify_run(1)
+        if not r["ok"]:
+            raise app.BadRequest(r["error"])
+        return {"ok": True, "banked": False}
     with app.lock:
         busy = sum(1 for j in app.jobs.values() if j.get("station") == sid and j.get("requested") and j["status"] in ("queued", "running"))
     with rs.lock:

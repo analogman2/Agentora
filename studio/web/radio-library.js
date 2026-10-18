@@ -255,7 +255,7 @@ async function stationView(id) {
         ${s.description ? `<p>${esc(s.description)}</p>` : ""}
         ${s.theme ? `<p><b>Lyrics theme:</b> ${esc(s.theme)}</p>` : ""}
         ${id !== RERUNS ? `<p><b>🎲 Variety:</b> ${esc(varietyName(s.variety ?? 25))} (${s.variety ?? 25}/100)</p>` : ""}
-        ${id !== RERUNS ? `<p><b>Vocals:</b> ${esc(s.vocals)}${s.language ? " · " + esc(s.language) : ""} · <b>${s.kind === "folder" ? "Learns from your music" : "Defined by its description"}</b></p>` : ""}
+        ${id !== RERUNS ? `<p><b>Vocals:</b> ${esc(s.vocals)}${s.language ? " · " + esc(s.language) : ""} · <b>${s.kind === "folder" ? "Learns from your music" : s.kind === "spotify" ? "🎵 Songs from your Spotify likes (Hermes's Spotify agent writes them)" : "Defined by its description"}</b></p>` : ""}
         ${p ? `<p><b>Learned:</b> ${esc(p.top.genre.join(", "))} · ${esc(p.top.mood.join(", "))} · ${p.bpm_range ? p.bpm_range.join("–") + " BPM" : ""}</p>` : ""}
         ${s.problem ? `<p class="err">${esc(s.problem)}</p>` : ""}
       </div>

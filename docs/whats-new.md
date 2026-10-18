@@ -99,6 +99,7 @@ Agentora started as [yue2-xpu-radio](https://github.com/zebgop-ops/yue2-xpu-radi
   5. **Stop rewriting** puts back whatever was in the form before.
 - **📻 Play next** on every song sends it to the radio.
 - **🎵 From my Spotify likes** (2026-10-18), above the Library: pick 1–5 and Hermes's Spotify agent writes new, original songs inspired by liked songs it hasn't used yet. They join the queue within a minute or so and land in the Library when recorded; a second press makes nothing new. If Spotify isn't signed in yet, the button shows the command to do it.
+- **A 🎵 From My Spotify Likes radio station** (2026-10-18) plays only those songs, the earlier ones too. Tuned in, it asks the Spotify agent for more whenever it runs low, and replays its songs while new ones record. 🎵 Create a song now on its page makes one from the next unused liked song.
 
 ## The companion apps
 

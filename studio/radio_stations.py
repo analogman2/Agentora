@@ -34,9 +34,13 @@ FEMALE, MALE = ["a female singer", "a woman singing"], ["a male singer", "a man 
 def create_station(body):
     name = app.clean_text(body.get("name"), "Station name", 60, required=True)
     kind = body.get("kind", "text")
-    if kind not in ("text", "folder"):
-        raise app.BadRequest("kind must be text or folder")
+    if kind not in ("text", "folder", "spotify"):
+        raise app.BadRequest("kind must be text, folder or spotify")
+    if kind == "spotify" and any(s["kind"] == "spotify" for s in rs.stations.values()):
+        raise app.BadRequest("There's already a Spotify station")
     desc = app.clean_text(body.get("description"), "Description", 2000, required=(kind == "text"))
+    if kind == "spotify" and not desc:
+        desc = "New original songs inspired by my Spotify liked songs, written by Hermes's Spotify agent."
     vocals = body.get("vocals", "mix")
     if vocals not in ("vocals", "instrumental", "mix"):
         raise app.BadRequest("vocals must be vocals, instrumental or mix")
