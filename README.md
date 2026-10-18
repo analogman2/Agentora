@@ -35,6 +35,7 @@ The **Image & Video Studio** used to be part of Agentora; since 2026-10-16 it is
 - **One live broadcast.** Everyone hears the same 192 kbps MP3 stream (`/radio/stream.mp3`). A 15 s cushion rides out Wi-Fi and mobile hiccups, ⏭ and ⏮ cut over in about a second, ⏮ walks back through the station's history like any player, and **📻 Play next** queues any song in the library.
 - **A library laid out like folders:** Library › station › song, with a path bar, an ↑ button, and previous/next inside each folder.
 - **✏️ Rewrite.** Open any song in the Music Studio with its settings and lyrics filled in. Get 3–4 specific AI suggestions, or type what should change ("slower and sadder, about a brother"), apply with one click, then record.
+- **🎵 Songs from your Spotify likes.** A button above the Music Studio's Library runs Hermes's `spotify-liked-songs` agent: it reads your newest liked songs, writes a new original song for each one it hasn't used yet (1–5 per press), and queues them. A ledger and lock in `~/.hermes/spotify-songs/` stop repeats.
 - **Shares one GPU politely.** YuE2, the GPU lyricist, ComfyUI and the chat assistant take turns on the card, and a **GPU priority** switch (Radio / Studio / Assistant / Shared) decides who waits.
 - **Classic deck.** The original cassette-deck player is still at `/radio/classic`.
 
@@ -170,6 +171,8 @@ Most radio and audio settings (bitrate, loudness, EQ, quality steps, takes, writ
 | `GET /api/radio/stations/<id>/history?limit=500&upcoming=1` | every song of a station, the ones waiting to air first |
 | `POST /api/radio/stations/<id>/song` `{like}` | write and record a song now (optionally "more like" a song) |
 | `POST /api/rewrite/suggest` `{id, ask}` | ✏️ ideas for rewriting a song, or turn a request into edits |
+| `POST /api/spotify/run` `{limit}` | 🎵 run the Spotify-likes agent in the background (1–5 songs, default 3; one run at a time, 409 if busy or not signed in) |
+| `GET /api/spotify/status` | `{running, last_output, last_finished, configured}` (configured = `~/.hermes/spotify-songs/token.json` exists) |
 
 ## Sharing the GPU
 

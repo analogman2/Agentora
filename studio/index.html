@@ -90,6 +90,9 @@ legend { font-size: 13px; font-weight: 600; padding: 0 6px; color: var(--muted);
 .job audio { width: 100%; height: 36px; margin-top: 8px; }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .toolbar { display: flex; gap: 8px; margin-bottom: 10px; } .toolbar input { flex: 1; }
+.spotify { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.spotify pre { flex: 1 0 100%; margin: 0; white-space: pre-wrap; font: inherit; }
+.spotify code { user-select: all; }
 .empty { color: var(--muted); font-size: 14px; padding: 8px 0; }
 dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text); width: min(760px, 94vw); padding: 0; }
 dialog::backdrop { background: rgba(0,0,0,.45); }
@@ -265,6 +268,12 @@ dialog pre { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(
         <div class="toolbar">
           <input type="text" id="search" placeholder="Search title, style, name…" aria-label="Search library">
           <select id="filter" aria-label="Filter" style="flex:0 0 150px"><option value="all">All</option><option value="mine">Mine</option><option value="done">Finished</option><option value="failed">Failed / cancelled</option></select>
+        </div>
+        <div class="spotify" id="spotify">
+          <button class="btn small accent" type="button" id="spGo" title="Hermes's agent writes new original songs inspired by liked songs it hasn't used yet">🎵 From my Spotify likes</button>
+          <select id="spCount" aria-label="How many songs" style="flex:0 0 auto;width:auto;padding:3px 6px"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select>
+          <span class="small muted" id="spNote"></span>
+          <pre class="small muted" id="spOut" hidden></pre>
         </div>
         <div id="library"><div class="empty">No songs yet.</div></div>
       </div>
@@ -727,6 +736,35 @@ loadForm(store.get("form", null)); if (!store.get("form", null)) { setMode("song
 if (!$("author").value) $("author").value = store.get("author", "");
 $("author").addEventListener("change", () => store.set("author", $("author").value));
 tick(); setInterval(tick, 2000);
+// ---------------- 🎵 songs from Spotify likes (Hermes's spotify-liked-songs agent, run by the studio)
+let spTimer = null;
+async function spotifyStatus() {
+  let s;
+  try {
+    const r = await fetch("/api/spotify/status", {cache: "no-store"});
+    if (!r.ok) throw new Error(r.status);
+    s = await r.json();
+  } catch {
+    $("spGo").disabled = $("spCount").disabled = true;
+    $("spNote").textContent = "Not available yet: the Music Studio needs a restart to turn this on.";
+    return;
+  }
+  $("spGo").disabled = s.running || !s.configured; $("spCount").disabled = s.running || !s.configured;
+  $("spGo").textContent = s.running ? "🎵 Writing songs from your likes…" : "🎵 From my Spotify likes";
+  if (!s.configured) $("spNote").innerHTML = `Sign in to Spotify first: run <code>${esc(s.auth_command || "")}</code> in a terminal on this PC, open the link it prints and sign in, then reload this page.`;
+  else $("spNote").textContent = s.running ? "Lyrics take about 10–30 s per song; they then appear in the queue." : "";
+  if (s.last_output && !s.running) { $("spOut").hidden = false; $("spOut").textContent = s.last_output; }
+  clearTimeout(spTimer); if (s.running) spTimer = setTimeout(spotifyStatus, 3000);
+}
+$("spGo").onclick = async () => {
+  $("spGo").disabled = true; $("spOut").hidden = true;
+  try {
+    const r = await (await fetch("/api/spotify/run", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({limit: +$("spCount").value})})).json();
+    if (!r.ok) { $("spGo").disabled = false; $("spNote").textContent = r.error || "Couldn't start"; return; }
+  } catch (e) { $("spGo").disabled = false; $("spNote").textContent = e.message; return; }
+  setTimeout(spotifyStatus, 300);
+};
+spotifyStatus();
 rewriteFromHash();
 
 </script>

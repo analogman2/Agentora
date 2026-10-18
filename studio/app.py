@@ -1131,6 +1131,55 @@ def state():
                 "limits": {"max_queued": MAX_QUEUED}, "lyrics_writers": [label for _, _, label in LYRICS_LLMS]}
 
 
+# ---------------- 🎵 songs from jt's Spotify likes: runs Hermes's spotify-liked-songs agent (it has its own ledger and lock)
+SPOTIFY_HOME = Path(os.environ.get("SPOTIFY_SONGS_HOME") or Path.home() / ".hermes" / "spotify-songs")
+SPOTIFY_SCRIPT = Path.home() / ".hermes" / "skills" / "creative" / "spotify-liked-songs" / "scripts" / "spotify_songs.py"
+spotify = {"running": False, "last_output": "", "last_finished": None, "started": None}
+
+
+def spotify_status():
+    with lock:
+        return {**spotify, "configured": (SPOTIFY_HOME / "token.json").is_file() and SPOTIFY_SCRIPT.is_file(),
+                "auth_command": f"python3 {SPOTIFY_SCRIPT} auth"}
+
+
+def spotify_run(limit):
+    """Start one run in the background; it returns once its songs are queued (they then show up in the Library)."""
+    try:
+        limit = max(1, min(5, int(limit if limit is not None else 3)))
+    except (TypeError, ValueError):
+        raise BadRequest("limit must be 1-5")
+    if not spotify_status()["configured"]:
+        return {"ok": False, "error": "Sign in to Spotify first"}
+    with lock:
+        if spotify["running"]:
+            return {"ok": False, "error": "Already running"}
+        spotify.update(running=True, started=time.time())
+
+    def go():
+        out = ""
+        try:
+            p = subprocess.run([sys.executable, str(SPOTIFY_SCRIPT), "run", "--limit", str(limit), "--verbose"],
+                               capture_output=True, text=True, timeout=20 * 60)
+            out = (p.stdout.strip() or p.stderr.strip()[-600:] or f"Finished (exit {p.returncode}).")
+            if p.returncode:
+                logging.getLogger("spotify").warning("spotify run exited %s", p.returncode)
+        except subprocess.TimeoutExpired:
+            out = "The Spotify run took over 20 minutes and was stopped."
+            logging.getLogger("spotify").warning("spotify run timed out")
+        except Exception as e:
+            out = f"Couldn't run the Spotify agent: {e}"
+            logging.getLogger("spotify").exception("spotify run failed")
+        finally:
+            with lock:
+                spotify.update(running=False, last_output=out[:4000], last_finished=time.time())
+            logging.getLogger("spotify").info("spotify run finished (limit %d, %d lines of summary)", limit, out.count("\n") + 1)
+
+    logging.getLogger("spotify").info("spotify run started (limit %d)", limit)
+    threading.Thread(target=go, name="spotify-run", daemon=True).start()
+    return {"ok": True, "limit": limit}
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "agentora-music-studio"
 
@@ -1241,6 +1290,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, {"priority": gpu_priority(), "choices": PRIORITIES, "waiting": gpu["detail"] if gpu["owner"] == "waiting" else None})
         if path == "/api/state":
             return self.send(200, state())
+        if path == "/api/spotify/status":
+            return self.send(200, spotify_status())
         if path == "/api/health":
             st = state()
             return self.send(200, {"ok": True, "gpu_owner": st["gpu"]["owner"], "queued": len(st["queue"]),
@@ -1317,6 +1368,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/rewrite/suggest":
                 b = self.body()
                 return self.send(200, rewrite_suggestions(str(b.get("id") or ""), b.get("ask") or ""))
+            if path == "/api/spotify/run":
+                r = spotify_run(self.body().get("limit"))
+                return self.send(200 if r["ok"] else 409, r)
             m = re.fullmatch(r"/api/jobs/([\w-]+)/cancel", path)
             if m:
                 job = self.job_or_404(m.group(1))
