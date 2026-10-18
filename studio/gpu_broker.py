@@ -299,6 +299,12 @@ def kind_of(client, kind=None):
     return "interactive" if client in INTERACTIVE or client.startswith("designer-studio") else "background"
 
 
+def uses_comfy(client):
+    """Clients whose work runs in ComfyUI: ComfyUI swaps its own models when a job needs a different one, so making room
+    for them never unloads ComfyUI (that would throw away the models the next job is about to use)."""
+    return client in ("studio", "designer-studio-comfyui")
+
+
 def make_room(for_client):
     """Free what isn't needed right now: an idle ComfyUI's models, and 4090 Ollama models nobody ahead of or level with
     for_client holds. Background clients (the radio) see the waiting lease through /yield and step aside on their own."""
@@ -307,7 +313,7 @@ def make_room(for_client):
         studio_busy = any(l["client"] == "studio" and l["granted"] for l in leases.values())
         me = rank(for_client, kind_of(for_client))
         keep = {l.get("model") for l in leases.values() if l.get("model") and (not l["granted"] or rank(l["client"], l["kind"]) <= me)}
-    if not studio_busy and comfy_idle() and gpu_mb_of(b"ComfyUI") > 1500:
+    if not uses_comfy(for_client) and not studio_busy and comfy_idle() and gpu_mb_of(b"ComfyUI") > 1500:
         try:
             urllib.request.urlopen(urllib.request.Request(A.comfy + "/free", json.dumps({"unload_models": True, "free_memory": True}).encode(),
                                                           {"Content-Type": "application/json"}), timeout=10).read()
@@ -337,6 +343,8 @@ def acquire(client, kind, mem_mb, wait_s, ttl_s, device=None, model=None, extra_
     out - the caller then knows it may run partly on the CPU (`roomy` is False). extra_mb: memory the client already
     holds there (counts as room)."""
     lid = uuid.uuid4().hex[:10]
+    if uses_comfy(client):                           # memory ComfyUI already holds is room for its next job (it reuses / swaps it)
+        extra_mb += gpu_mb_of(b"ComfyUI")
     lease = {"id": lid, "client": client, "kind": kind, "mem_mb": mem_mb, "device": None, "granted": False,
              "since": time.time(), "expires": time.time() + ttl_s, "model": model, "roomy": False}
     with lock:
