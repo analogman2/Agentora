@@ -273,9 +273,13 @@ dialog pre { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(
         </div>
         <div class="spotify" id="spotify">
           <button class="btn small accent" type="button" id="spGo" title="Hermes's agent writes new original songs inspired by liked songs it hasn't used yet">🎵 From my Spotify likes</button>
+          <select id="spMode" aria-label="Inspired song or cover" style="flex:0 0 auto;width:auto;padding:3px 6px" title="Inspired: a new original song in its own words. Cover: the original lyrics word for word, credited to the original artist.">
+            <option value="inspired">✨ Inspired</option><option value="cover">🎤 Cover</option></select>
+          <select id="spTrack" aria-label="Which liked song" style="flex:1 1 200px;width:auto;padding:3px 6px"><option value="">The newest liked songs not used yet</option></select>
           <select id="spCount" aria-label="How many songs" style="flex:0 0 auto;width:auto;padding:3px 6px"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select>
           <span class="small muted" id="spNote"></span>
           <pre class="small muted" id="spOut" hidden></pre>
+          <span class="small muted" id="spCoverNote" hidden>🎤 Covers sing the original lyrics word for word and are credited to the original artist. They're for your own listening: playing them for the public needs a licence.</span>
         </div>
         <div id="library"><div class="empty">No songs yet.</div></div>
       </div>
@@ -770,7 +774,7 @@ if (!$("author").value) $("author").value = store.get("author", "");
 $("author").addEventListener("change", () => store.set("author", $("author").value));
 tick(); setInterval(tick, 2000);
 // ---------------- 🎵 songs from Spotify likes (Hermes's spotify-liked-songs agent, run by the studio)
-let spTimer = null;
+let spTimer = null, spWasRunning = false;
 async function spotifyStatus() {
   let s;
   try {
@@ -782,22 +786,48 @@ async function spotifyStatus() {
     $("spNote").textContent = "Not available yet: the Music Studio needs a restart to turn this on.";
     return;
   }
-  $("spGo").disabled = s.running || !s.configured; $("spCount").disabled = s.running || !s.configured;
+  $("spGo").disabled = s.running || !s.configured; $("spCount").disabled = s.running || !s.configured || !!$("spTrack").value;
   $("spGo").textContent = s.running ? "🎵 Writing songs from your likes…" : "🎵 From my Spotify likes";
   if (!s.configured) $("spNote").innerHTML = `Sign in to Spotify first: run <code>${esc(s.auth_command || "")}</code> in a terminal on this PC, open the link it prints and sign in, then reload this page.`;
   else $("spNote").textContent = s.running ? "Lyrics take about 10–30 s per song; they then appear in the queue." : "";
   if (s.last_output && !s.running) { $("spOut").hidden = false; $("spOut").textContent = s.last_output; }
+  if (spWasRunning && !s.running) spotifyTracks();          // a run just finished: refresh what each song has
+  spWasRunning = s.running;
   clearTimeout(spTimer); if (s.running) spTimer = setTimeout(spotifyStatus, 3000);
 }
+let spTracks = [];
+function spotifyPicker() {
+  const cover = $("spMode").value === "cover", keep = $("spTrack").value;
+  $("spCoverNote").hidden = !cover;
+  const made = s => s && !["failed", "cancelled", "no_lyrics"].includes(s);
+  $("spTrack").innerHTML = `<option value="">The newest liked songs without ${cover ? "a cover" : "an inspired song"}</option>` +
+    spTracks.map(t => `<option value="${esc(t.id)}"${made(t[$("spMode").value]) ? " disabled" : ""}>${esc(t.name)} – ${esc(t.artist)}${made(t.inspired) ? " · ✨" : ""}${made(t.cover) ? " · 🎤" : ""}</option>`).join("");
+  if (keep && [...$("spTrack").options].some(o => o.value === keep && !o.disabled)) $("spTrack").value = keep;
+  $("spCount").disabled = !!$("spTrack").value;
+}
+async function spotifyTracks() {
+  let ok = true;
+  try {
+    const r = await fetch("/api/spotify/tracks", {cache: "no-store"});
+    ok = r.ok; spTracks = ok ? (await r.json()).tracks || [] : [];
+  } catch { spTracks = []; }
+  $("spMode").hidden = $("spTrack").hidden = !ok;            // a studio from before covers: inspired songs only
+  if (!ok) $("spMode").value = "inspired";
+  spotifyPicker();
+}
+$("spMode").onchange = spotifyPicker;
+$("spTrack").onchange = spotifyPicker;
 $("spGo").onclick = async () => {
   $("spGo").disabled = true; $("spOut").hidden = true;
   try {
-    const r = await (await fetch("/api/spotify/run", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({limit: +$("spCount").value})})).json();
+    const track = $("spTrack").value;
+    const r = await (await fetch("/api/spotify/run", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({limit: track ? 1 : +$("spCount").value, mode: $("spMode").value, track: track || null})})).json();
     if (!r.ok) { $("spGo").disabled = false; $("spNote").textContent = r.error || "Couldn't start"; return; }
   } catch (e) { $("spGo").disabled = false; $("spNote").textContent = e.message; return; }
   setTimeout(spotifyStatus, 300);
 };
-spotifyStatus();
+spotifyStatus(); spotifyTracks();
 rewriteFromHash();
 
 </script>

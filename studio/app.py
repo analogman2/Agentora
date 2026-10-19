@@ -1143,12 +1143,30 @@ def spotify_status():
                 "auth_command": f"python3 {SPOTIFY_SCRIPT} auth"}
 
 
-def spotify_run(limit):
-    """Start one run in the background; it returns once its songs are queued (they then show up in the Library)."""
+def spotify_tracks():
+    """The newest liked songs for the 🎵 picker, with what each mode (inspired / cover) has made of them."""
+    if not spotify_status()["configured"]:
+        return {"tracks": [], "error": "Sign in to Spotify first"}
+    try:
+        p = subprocess.run([sys.executable, str(SPOTIFY_SCRIPT), "tracks", "--scan", "200"], capture_output=True, text=True, timeout=120)
+        return {"tracks": json.loads(p.stdout)}
+    except Exception as e:
+        logging.getLogger("spotify").warning("couldn't list the liked songs: %s", e)
+        return {"tracks": [], "error": "Couldn't list your liked songs"}
+
+
+def spotify_run(limit, mode="inspired", track=None):
+    """Start one run in the background; it returns once its songs are queued (they then show up in the Library).
+    mode: "inspired" (a new original song) or "cover" (the original lyrics word for word); track: one liked song's id."""
     try:
         limit = max(1, min(5, int(limit if limit is not None else 3)))
     except (TypeError, ValueError):
         raise BadRequest("limit must be 1-5")
+    mode = mode or "inspired"
+    if mode not in ("inspired", "cover"):
+        raise BadRequest("mode must be inspired or cover")
+    if track and not re.fullmatch(r"[A-Za-z0-9]{10,40}", str(track)):
+        raise BadRequest("track must be a Spotify track id")
     if not spotify_status()["configured"]:
         return {"ok": False, "error": "Sign in to Spotify first"}
     with lock:
@@ -1162,7 +1180,8 @@ def spotify_run(limit):
     def go():
         out = ""
         try:
-            p = subprocess.run([sys.executable, str(SPOTIFY_SCRIPT), "run", "--limit", str(limit), "--seconds", seconds, "--verbose"],
+            p = subprocess.run([sys.executable, str(SPOTIFY_SCRIPT), "run", "--limit", str(limit), "--seconds", seconds, "--verbose",
+                                "--mode", mode] + (["--track", str(track)] if track else []),
                                capture_output=True, text=True, timeout=20 * 60)
             out = (p.stdout.strip() or p.stderr.strip()[-600:] or f"Finished (exit {p.returncode}).")
             if p.returncode:
@@ -1176,9 +1195,9 @@ def spotify_run(limit):
         finally:
             with lock:
                 spotify.update(running=False, last_output=out[:4000], last_finished=time.time())
-            logging.getLogger("spotify").info("spotify run finished (limit %d, %d lines of summary)", limit, out.count("\n") + 1)
+            logging.getLogger("spotify").info("spotify run finished (%s, %d lines of summary)", mode, out.count("\n") + 1)
 
-    logging.getLogger("spotify").info("spotify run started (limit %d)", limit)
+    logging.getLogger("spotify").info("spotify run started (%s, limit %d%s)", mode, limit, ", one track" if track else "")
     threading.Thread(target=go, name="spotify-run", daemon=True).start()
     return {"ok": True, "limit": limit}
 
@@ -1295,6 +1314,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, state())
         if path == "/api/spotify/status":
             return self.send(200, spotify_status())
+        if path == "/api/spotify/tracks":
+            return self.send(200, spotify_tracks())
         if path == "/api/health":
             st = state()
             return self.send(200, {"ok": True, "gpu_owner": st["gpu"]["owner"], "queued": len(st["queue"]),
@@ -1372,7 +1393,8 @@ class Handler(BaseHTTPRequestHandler):
                 b = self.body()
                 return self.send(200, rewrite_suggestions(str(b.get("id") or ""), b.get("ask") or ""))
             if path == "/api/spotify/run":
-                r = spotify_run(self.body().get("limit"))
+                b = self.body()
+                r = spotify_run(b.get("limit"), b.get("mode"), b.get("track"))
                 return self.send(200 if r["ok"] else 409, r)
             m = re.fullmatch(r"/api/jobs/([\w-]+)/cancel", path)
             if m:
