@@ -67,7 +67,7 @@
   let closedFor = null; try { closedFor = sessionStorage.getItem(key); } catch (e) {}
   const bar = document.createElement("div");
   bar.className = "agentora-np"; bar.hidden = true; bar.setAttribute("role", "region"); bar.setAttribute("aria-label", "Now playing on the radio");
-  bar.innerHTML = `<img alt=""><div class="t" title="Open the radio"><b></b><span></span></div>
+  bar.innerHTML = `<img alt="" title="Open this song"><div class="t" title="Open this song"><b></b><span></span></div>
     <button data-np="like" title="Thumbs up: more like this" aria-label="Thumbs up">👍</button>
     <button data-np="skip" title="Skip this song (for everyone listening)" aria-label="Skip">⏭</button>
     <button data-np="open" title="Go to the radio" aria-label="Go to the radio">📻</button>
@@ -98,8 +98,11 @@
     bar.querySelector('[data-np="like"]').classList.toggle("on", d.now.feedback === "keep");
   }
   bar.addEventListener("click", async e => {
-    const b = e.target.closest("[data-np]"), t = e.target.closest(".t");
-    if (t) return open("radio", cur ? "#song/" + encodeURIComponent(cur.id) : "");
+    const b = e.target.closest("[data-np]"), t = e.target.closest(".t, img");
+    if (t) {                                       // the song's page, in this tab: phones won't bring another tab forward
+      location.href = url("radio", cur ? "#song/" + encodeURIComponent(cur.id) : "");
+      return;
+    }
     if (!b || !cur) return;
     if (b.dataset.np === "open") return open("radio");
     if (b.dataset.np === "close") { closedFor = cur.id; try { sessionStorage.setItem(key, cur.id); } catch (e) {} bar.hidden = true; document.body.classList.remove("agentora-np-shown"); return; }

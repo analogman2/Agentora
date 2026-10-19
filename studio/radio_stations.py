@@ -40,7 +40,7 @@ def create_station(body):
         raise app.BadRequest("There's already a Spotify station")
     desc = app.clean_text(body.get("description"), "Description", 2000, required=(kind == "text"))
     if kind == "spotify" and not desc:
-        desc = "New original songs inspired by my Spotify liked songs, written by Hermes's Spotify agent."
+        desc = "Covers of my Spotify liked songs: the original lyrics and titles, sung by YuE2."
     vocals = body.get("vocals", "mix")
     if vocals not in ("vocals", "instrumental", "mix"):
         raise app.BadRequest("vocals must be vocals, instrumental or mix")

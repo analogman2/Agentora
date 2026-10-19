@@ -87,7 +87,8 @@ def spool_loop():
 
 # ----------------------------------------------------------------------------- 🎵 Spotify stations
 # They write nothing themselves: Hermes's spotify-liked-songs agent (app.spotify_run) queues Music Studio songs from
-# liked songs it hasn't used yet, and the station adopts each finished one as a new song to air.
+# liked songs it hasn't used yet, and the station adopts each finished one as a new song to air. They make 🎤 covers
+# unless the station's "spotify_mode" says "inspired".
 
 _spotify = {"next": 0.0, "asked": 0.0}
 
@@ -122,7 +123,7 @@ def feed_spotify(s):
     ready, fly = len(station_tracks(sid)), inflight(sid)
     if ready + fly >= rs.state["target_ahead"]:
         return
-    r = app.spotify_run(min(3, rs.state["target_ahead"] - ready - fly))
+    r = app.spotify_run(min(3, rs.state["target_ahead"] - ready - fly), s.get("spotify_mode") or "cover")
     _spotify["next"] = now + 5 * 60
     if r["ok"]:
         _spotify["asked"] = now
@@ -135,7 +136,7 @@ def request_song(sid, like=None):
     if sid not in rs.stations:
         raise app.BadRequest("No such station")
     if rs.stations[sid]["kind"] == "spotify":
-        r = app.spotify_run(1)
+        r = app.spotify_run(1, rs.stations[sid].get("spotify_mode") or "cover")
         if not r["ok"]:
             raise app.BadRequest(r["error"])
         return {"ok": True, "banked": False}
