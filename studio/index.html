@@ -162,8 +162,10 @@ dialog pre { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(
         <label class="f" for="lyrics"><span id="lyricsLabel">Lyrics</span> <span class="hint" id="lyricsHint">— use section tags; one line per sung phrase</span></label>
         <div class="row" id="writerBtns" style="margin:2px 0 6px">
           <span style="flex:0 0 auto"><button class="btn small accent" type="button" id="openWriter">✨ Write lyrics for me</button>
-          <button class="btn small adv-only" type="button" id="polish" title="Keep your words; fix section tags, line breaks and repeated choruses">Polish my lyrics</button></span>
+          <button class="btn small adv-only" type="button" id="polish" title="Keep your words; fix section tags, line breaks and repeated choruses">Polish my lyrics</button>
+          <button class="btn small" type="button" id="libLyrics" title="Fill in the lyrics of a random song from the radio library. Press again for another one">🎲 Lyrics from the library</button></span>
         </div>
+        <div class="small muted" id="libLyricsNote" hidden></div>
         <div class="writer" id="writer" hidden>
           <label class="f" for="idea" style="margin-top:0">What's the song about?</label>
           <textarea id="idea" rows="2" placeholder="e.g. a summer road trip with old friends, windows down, not wanting it to end"></textarea>
@@ -606,6 +608,37 @@ function useLyrics(append) {
   if (writerResult.title && (!$("title").value.trim() || !append)) $("title").value = writerResult.title;
   lyricStats(); saveForm(); $("lyrics").focus();
 }
+// 🎲 Lyrics from the library: each press fills in another library song's lyrics, in a shuffled order that only repeats
+// once every song has had its turn. Lyrics you typed yourself are kept for ↩ Undo.
+const libLy = {bag: [], last: null, mine: null};
+async function libraryLyrics() {
+  const btn = $("libLyrics"), note = $("libLyricsNote");
+  if (!libLy.bag.length) {
+    btn.disabled = true;
+    try {
+      const r = await fetch("/api/radio/songs"); if (!r.ok) throw new Error(r.statusText);
+      const {tracks} = await r.json(), seen = new Set();
+      const songs = tracks.filter(t => t.mode === "song" && t.lyrics && !seen.has(t.lyrics.trim()) && seen.add(t.lyrics.trim())
+        && t.lyrics.split("\n").filter(l => l.trim() && !/^\[.*\]$/.test(l.trim())).length >= 8);   // not the tags-only ones
+      for (let i = songs.length - 1; i > 0; i--) { const k = Math.floor(Math.random() * (i + 1)); [songs[i], songs[k]] = [songs[k], songs[i]]; }
+      if (songs.length > 1 && libLy.last && songs[songs.length - 1].id === libLy.last.id) songs.unshift(songs.pop());   // no repeat across rounds
+      libLy.bag = songs;
+    } catch (e) { note.hidden = false; note.textContent = "Couldn't load the library: " + e.message; return; }
+    finally { btn.disabled = false; }
+    if (!libLy.bag.length) { note.hidden = false; note.textContent = "No songs with lyrics in the library yet."; return; }
+  }
+  const cur = $("lyrics").value;
+  if (cur.trim() && (!libLy.last || cur !== libLy.last.lyrics)) libLy.mine = cur;     // your own words: keep them for Undo
+  const t = libLy.last = libLy.bag.pop();
+  $("lyrics").value = t.lyrics; lyricStats(); saveForm();
+  note.hidden = false;
+  note.innerHTML = `Lyrics from “${esc(t.title)}”${t.station_name ? ` (${esc(t.station_name)})` : ""}. Edit them freely, or press 🎲 again for another song.`
+    + (libLy.mine != null ? ` <button class="linkbtn" type="button" id="libLyricsUndo">↩ Undo, back to my lyrics</button>` : "");
+  if (libLy.mine != null) $("libLyricsUndo").onclick = () => {
+    $("lyrics").value = libLy.mine; libLy.mine = null; libLy.last = null; lyricStats(); saveForm(); note.textContent = "Your lyrics are back.";
+  };
+}
+$("libLyrics").onclick = libraryLyrics;
 $("openWriter").onclick = () => { $("writer").hidden = !$("writer").hidden; if (!$("writer").hidden) $("idea").focus(); };
 $("wClose").onclick = () => { $("writer").hidden = true; };
 $("wStructure").onchange = () => { $("wStructureCustom").hidden = $("wStructure").value !== "custom"; };

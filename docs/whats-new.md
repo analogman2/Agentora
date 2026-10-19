@@ -90,6 +90,7 @@ Agentora started as [yue2-xpu-radio](https://github.com/zebgop-ops/yue2-xpu-radi
 
 - **Easy and Advanced modes.**
   - **Easy** shows presets, style, lyrics, ✨ Write lyrics for me, and Create.
+  - **🎲 Lyrics from the library** fills in the lyrics of a random song from the radio library, naming the song. Each press brings another one, and none repeats until all have had a turn. Lyrics you typed yourself come back with **↩ Undo**.
   - **Advanced** brings back the tempo slider, style chips, writer options, takes, seeds, sampling and the score editor.
   - Your choice is remembered.
 - **✏️ Rewrite a song**, started from the song itself (a radio song page or a library row):

@@ -3,7 +3,7 @@
 
 Fails on any JavaScript error or failed script load, and walks the main flows: Now Playing, the Library (All songs,
 search, sort, select), a station, a song page, playing a song from the Library in the player bar, lyrics on the song page and Now Playing, the ☰ side panel,
-⚙ settings, the Music Studio's Easy / Advanced switch and ☰ panel, and the Home page's ☰ panel. Nothing is changed:
+⚙ settings, the Music Studio's Easy / Advanced switch, 🎲 lyrics from the library and ☰ panel, and the Home page's ☰ panel. Nothing is changed:
 the library song it plays only plays in this headless browser.
 Usage: tests/e2e_ui.py [--radio URL] [--home URL] [--chrome PATH] [--shots DIR]
 """
@@ -128,6 +128,16 @@ with sync_playwright() as p:
         must("GPU" in panel and "Apps" in panel.title() or "APPS" in panel, "panel content")
         return "Easy/Advanced switch, ☰ panel"
     check("Music Studio", music)
+    def library_lyrics():                               # this headless browser's own form; nothing is saved on the server
+        js("setMode('song'); $('lyrics').value = 'my own words'")
+        got = []
+        for _ in range(3):
+            js("$('libLyrics').click()"); time.sleep(1); got.append(js("$('lyrics').value"))
+        note = js("$('libLyricsNote').textContent")
+        must(len(set(got)) == 3 and "my own words" not in got and note.startswith("Lyrics from"), f"3 presses -> {len(set(got))} different; {note[:80]}")
+        js("$('libLyricsUndo').click()"); must(js("$('lyrics').value") == "my own words", "undo didn't bring my lyrics back")
+        return note.split(".")[0]
+    check("Music Studio: 🎲 lyrics from the library, undo", library_lyrics)
 
     print("Home")
     def home():
