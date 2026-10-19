@@ -129,7 +129,8 @@ function renderBar() {
   $("bCover").src = t ? trackArt(t) : stationArt(st);
   $("bLink").href = t ? (t.station ? `#lib/${encodeURIComponent(t.station)}/${encodeURIComponent(t.id)}` : `#song/${encodeURIComponent(t.id)}`) : "#now";
   $("bTitle").textContent = t ? t.title : lid ? "Next song on the way…" : st ? st.name : "Pick a station";
-  $("bStation").textContent = lp.t ? `${t.station_name || "Music Studio"} · from your library` : t ? (t.station_name || (st && st.name) || "") + (t.airing === "rerun" ? " · rerun" : t.airing === "runner-up" ? " · runner-up" : "") : st ? (lid ? "tuning in…" : "press play") : "Agentora";
+  $("bStation").textContent = (lp.t ? `${t.station_name || "Music Studio"} · from your library` : t ? (t.station_name || (st && st.name) || "") + (t.airing === "rerun" ? " · rerun" : t.airing === "runner-up" ? " · runner-up" : "") : st ? (lid ? "tuning in…" : "press play") : "Agentora")
+    + (t && t.credit ? " · " + t.credit : "");
   $("bUp").classList.toggle("on-up", !!t && t.feedback === "keep");
   setAddKey(!!t && !!t.in_playlist);
   ["bUp", "bDown", "bAdd", "bSkip", "bBack"].forEach(k => $(k).disabled = !t);

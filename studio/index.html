@@ -448,7 +448,7 @@ const STATUS = { queued: "waiting", running: "making", done: "done", failed: "fa
 function badge(st) { return `<span class="badge b-${esc(st)}"><span class="dot"></span>${esc(STATUS[st] || st)}</span>`; }
 function meta(j) {
   const bits = [j.mode === "instrumental" ? "instrumental" : null, j.takes > 1 ? `take ${j.take}/${j.takes}` : null,
-                j.seconds ? mmss(j.seconds) : null, j.author ? "by " + j.author : null,
+                j.seconds ? mmss(j.seconds) : null, authorText(j.author),
                 new Date((j.finished || j.created) * 1000).toLocaleString([], {dateStyle: "medium", timeStyle: "short"})].filter(Boolean);
   return bits.map(esc).join(" · ");
 }
@@ -465,11 +465,17 @@ function renderQueue(st) {
   const q = st.queue;
   $("qcount").textContent = q.length ? `(${q.length})` : "";
   if (!q.length) { $("queue").innerHTML = `<div class="empty">Nothing in the queue.</div>`; return; }
-  $("queue").innerHTML = q.map(j => `<div class="job"><div class="top">${badge(j.status)}<span class="title">${esc(j.title)}</span></div>
+  $("queue").innerHTML = q.map(j => `<div class="job"><div class="top">${badge(j.status)}<span class="title">${esc(j.title)}</span>${(j.author || "").startsWith("Spotify ") ? `<span class="small muted"> · ${esc(authorText(j.author))}</span>` : ""}</div>
     <div class="style" title="${esc(j.style)}">${esc(j.style)}</div>${progressBlock(j)}
     <div class="actions"><button class="btn small danger" data-act="cancel" data-id="${esc(j.id)}">Cancel</button></div></div>`).join("");
 }
 let libSig = "";
+function authorText(a) {        // 🎵 Spotify songs: a cover keeps the original title, so say whose song it is
+  if (!a) return null;
+  if (a.startsWith("Spotify cover ")) return "🎤 Cover" + (a.includes(" · ") ? " · original by " + a.split(" · ").slice(1).join(" · ") : "");
+  if (a.startsWith("Spotify ")) return "✨ From your Spotify likes";
+  return "by " + a;
+}
 function renderLibrary(st) {
   const mine = new Set(store.get("mine", [])), qtext = $("search").value.trim().toLowerCase(), f = $("filter").value;
   const items = st.library.filter(j => (f === "all" || (f === "mine" && mine.has(j.id)) || (f === "done" && j.status === "done") || (f === "failed" && j.status !== "done")) &&
@@ -556,7 +562,7 @@ async function act(kind, id) {
       ${kv("Quality steps", j.ode_steps)}${kv("Score sampling", samp(j.abc_sampling))}${kv("Song sampling", samp(j.semantic_sampling))}
       ${kv("Score tokens", t.abc ? `${t.abc.output_tokens} @ ${t.abc.output_tps.toFixed(0)} tok/s` : null)}
       ${kv("Song tokens", t.semantic ? `${t.semantic.output_tokens} @ ${t.semantic.output_tps.toFixed(0)} tok/s` : null)}
-      ${kv("Truncated", j.truncated && (j.truncated.abc || j.truncated.semantic) ? "yes — hit the length limit" : null)}${kv("By", j.author)}${kv("Error", j.error)}</dl>
+      ${kv("Truncated", j.truncated && (j.truncated.abc || j.truncated.semantic) ? "yes — hit the length limit" : null)}${kv("By", j.author && authorText(j.author).replace(/^by /, ""))}${kv("Error", j.error)}</dl>
       <h3 style="font-size:14px">Style</h3><pre>${esc(j.style)}</pre>
       <h3 style="font-size:14px">${j.mode === "instrumental" ? "Structure" : "Lyrics"}</h3><pre>${esc(j.lyrics || "(none)")}</pre>
       ${j.score_abc ? `<h3 style="font-size:14px">Score</h3><pre>${esc(j.score_abc)}</pre>` : ""}

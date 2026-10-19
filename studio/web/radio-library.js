@@ -157,7 +157,7 @@ async function selAction(act) {
 }
 function songRow(t, opts = {}) {
   const fb = t.feedback === "keep" ? "👍" : t.feedback === "dislike" ? "👎" : t.feedback === "skip" ? "⏭" : "";
-  const sub = [opts.when, opts.noStation ? "" : t.station_name, opts.extra, t.style].filter(Boolean).join(" · ");
+  const sub = [opts.when, opts.noStation ? "" : t.station_name, opts.extra, t.credit, t.style].filter(Boolean).join(" · ");
   return `<li class="row${sel.on && sel.ids.has(t.id) ? " picked" : ""}" data-id="${esc(t.id)}" data-audio="${esc(t.audio)}">
     ${sel.on && opts.select !== false ? `<input type="checkbox" class="selbox" data-act="sel-one" aria-label="Select “${esc(t.title)}”" ${sel.ids.has(t.id) ? "checked" : ""}>` : ""}
     <div class="thumb" data-act="preview" title="Preview this song"><img src="${trackArt(t)}" alt="" loading="lazy"><span class="pv">▶</span></div>

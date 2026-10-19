@@ -22,12 +22,21 @@ def track_details(tid):
 
 # ----------------------------------------------------------------------------- API
 
+def credit(j):
+    """🎤 covers keep the original title; the credit says whose song it is (author "Spotify cover <id> · <artist>")."""
+    a = j.get("author") or ""
+    if not a.startswith("Spotify cover "):
+        return None
+    artist = a.split(" · ", 1)[1].strip() if " · " in a else ""
+    return "🎤 Cover" + (f" · original by {artist}" if artist else "")
+
+
 def track_view(j):
     cover = art.stamp(art.song_path(j["id"]))
     return {"cover": f"/files/{j['id']}/cover.jpg?v={cover}" if cover else None, "id": j["id"], "title": j["title"], "style": j["style"], "lyrics": j.get("lyrics", ""), "mode": j["mode"],
             "seconds": j.get("seconds"), "station": j.get("station"), "critic": j.get("critic"), "feedback": j.get("radio_feedback"),
             "played_at": j.get("played_at"), "audio": f"/files/{j['id']}/song.mp3", "in_playlist": bool(j.get("playlist_at")),
-            "station_name": rs.stations[j["station"]]["name"] if j.get("station") in rs.stations else None}
+            "station_name": rs.stations[j["station"]]["name"] if j.get("station") in rs.stations else None, "credit": credit(j)}
 
 
 def rerun_library():
