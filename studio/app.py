@@ -1164,7 +1164,7 @@ def spotify_run(limit, mode="inspired", track=None):
         limit = max(1, min(5, int(limit if limit is not None else 3)))
     except (TypeError, ValueError):
         raise BadRequest("limit must be 1-5")
-    mode = mode or "inspired"
+    mode = mode or "cover"                           # covers unless asked for an inspired song
     if mode not in ("inspired", "cover"):
         raise BadRequest("mode must be inspired or cover")
     if track and not re.fullmatch(r"[A-Za-z0-9]{10,40}", str(track)):

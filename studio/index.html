@@ -274,7 +274,7 @@ dialog pre { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(
         <div class="spotify" id="spotify">
           <button class="btn small accent" type="button" id="spGo" title="Hermes's agent writes new original songs inspired by liked songs it hasn't used yet">🎵 From my Spotify likes</button>
           <select id="spMode" aria-label="Inspired song or cover" style="flex:0 0 auto;width:auto;padding:3px 6px" title="Inspired: a new original song in its own words. Cover: the original lyrics word for word, credited to the original artist.">
-            <option value="inspired">✨ Inspired</option><option value="cover">🎤 Cover</option></select>
+            <option value="cover" selected>🎤 Cover</option><option value="inspired">✨ Inspired</option></select>
           <select id="spTrack" aria-label="Which liked song" style="flex:1 1 200px;width:auto;padding:3px 6px"><option value="">The newest liked songs not used yet</option></select>
           <select id="spCount" aria-label="How many songs" style="flex:0 0 auto;width:auto;padding:3px 6px"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select>
           <span class="small muted" id="spNote"></span>
@@ -817,11 +817,11 @@ async function spotifyTracks() {
     const r = await fetch("/api/spotify/tracks", {cache: "no-store"});
     ok = r.ok; spTracks = ok ? (await r.json()).tracks || [] : [];
   } catch { spTracks = []; }
-  $("spMode").hidden = $("spTrack").hidden = !ok;            // a studio from before covers: inspired songs only
-  if (!ok) $("spMode").value = "inspired";
+  $("spMode").hidden = $("spTrack").hidden = !ok;
   spotifyPicker();
 }
-$("spMode").onchange = spotifyPicker;
+$("spMode").value = store.get("spotifyMode", "cover") === "inspired" ? "inspired" : "cover";   // covers unless you chose otherwise
+$("spMode").onchange = () => { store.set("spotifyMode", $("spMode").value); spotifyPicker(); };
 $("spTrack").onchange = spotifyPicker;
 $("spGo").onclick = async () => {
   $("spGo").disabled = true; $("spOut").hidden = true;

@@ -100,6 +100,8 @@ Agentora started as [yue2-xpu-radio](https://github.com/zebgop-ops/yue2-xpu-radi
   4. Press **Create song**. The new version remembers which song it rewrote. A 👍 on it also teaches the original's station.
   5. **Stop rewriting** puts back whatever was in the form before.
 - **📻 Play next** on every song sends it to the radio.
+- **🎤 Covers are the default** (2026-10-19): the Music Studio's Spotify picker starts on Cover and remembers your choice, the Spotify station plays its covers before any inspired songs, and Hermes's agent makes covers unless asked otherwise.
+- **Newest first means newest made** (2026-10-19): on a station and in All songs it sorts by when the song was made, not when it last played; rows say "made …" or "played …".
 - **Tap the song in the now-playing bar** on Home or the Music Studio (its title or cover) to open its page on the radio, in the same tab (2026-10-19).
 - **🎵 From my Spotify likes** (2026-10-18), above the Library: pick 1–5 and Hermes's Spotify agent writes new, original songs inspired by liked songs it hasn't used yet. They join the queue within a minute or so and land in the Library when recorded; a second press makes nothing new. If Spotify isn't signed in yet, the button shows the command to do it.
 - **✨ Inspired or 🎤 Cover** (2026-10-18): inspired songs are now written from each liked song's real lyrics (from LRCLIB) instead of just its title, and a 🎤 Cover sings the original lyrics word for word, keeping the original title, with a 🎤 Cover · original by … credit beside it. Pick one liked song from the list, or let it take the newest ones it hasn't used for that mode, going back through up to 2,000 likes. Covers are for your own listening.

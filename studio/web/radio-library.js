@@ -238,7 +238,7 @@ async function stationView(id) {
   const p = s.profile, air = R.on && R.station === id, playing = air && lid;
   const sub = id === RERUNS ? s.meta : `${tracks.filter(t => !t.up_next).length} songs · ${s.ready} ready to air · 👍 ${s.stats.kept}`;
   const row = (t) => songRow(t, {folder: id === RERUNS ? "history" : id, noStation: id !== RERUNS,
-    when: t.up_next ? "up next" : t.played_at ? whenText(t.played_at) : "", extra: t.airings > 1 ? `played ${t.airings}×` : ""});
+    when: t.up_next ? "up next" : t.played_at ? "played " + whenText(t.played_at) : "", extra: t.airings > 1 ? `played ${t.airings}×` : ""});
   return crumbs([s.name, "#"]) + `<section class="shead">
       <div class="art"><img src="${stationArt(s)}" alt=""></div>
       <div class="tx"><h1>${esc(s.name)}</h1><div class="muted small">${esc(sub)}${air ? ' · <b class="onair">ON AIR</b>' : ""}</div>
@@ -251,7 +251,7 @@ async function stationView(id) {
         ${air ? "" : `<div class="small muted">Playing it retunes the radio for everyone listening.</div>`}</div>
     </section>
     <section class="section"><p class="label">Songs</p>
-      ${tracks.length ? songList("station:" + id, tracks, row, [["as-is", "Newest first"], "oldest", "top", "played", "title"])
+      ${tracks.length ? songList("station:" + id, tracks, row, ["made", "madeOld", "top", "played", "title"])
         : `<p class="muted small">No songs yet — press play and the first one is written for you.</p>`}</section>
     <details class="section aboutbox" ${tracks.length ? "" : "open"}><summary>About this station${id !== RERUNS ? " & settings" : ""}</summary>
       <div class="about">
@@ -278,7 +278,10 @@ $("page").addEventListener("input", (e) => { if (e.target.classList.contains("lf
 // ---------- the controls on every song list: search these songs, sort them, ☑ Select
 const songWhen = (t) => t.listened_at || t.added_at || t.played_at || t.created || 0;
 const songLove = (t) => (t.feedback === "keep" ? 2 : 0) + (t.in_playlist ? 1 : 0) - (t.feedback === "dislike" ? 3 : 0);
+const songMade = (t) => String(t.id || "");       // song ids start with when they were made: 20261018-231756-…
 const LIST_SORTS = {
+  made: ["Newest first", (a, b) => songMade(b).localeCompare(songMade(a))],
+  madeOld: ["Oldest first", (a, b) => songMade(a).localeCompare(songMade(b))],
   newest: ["Newest first", (a, b) => songWhen(b) - songWhen(a)],
   oldest: ["Oldest first", (a, b) => songWhen(a) - songWhen(b)],
   top: ["Your favourites first", (a, b) => songLove(b) - songLove(a) || ((b.critic || {}).score || 0) - ((a.critic || {}).score || 0)],
@@ -321,9 +324,9 @@ async function collectionView() {
   if (view.sub === "all") {
     const all = cache.all || await loadAll();
     return crumbs(FOLDERS.all) + (all.length ? songList("all", all, t => songRow(t, {folder: "all",
-        when: t.up_next ? "up next" : t.played_at ? whenText(t.played_at) : t.created ? whenText(t.created) : "",
+        when: t.up_next ? "up next" : t.played_at ? "played " + whenText(t.played_at) : t.created ? "made " + whenText(t.created) : "",
         extra: t.source !== "radio" ? "Music Studio" : t.airings > 1 ? `played ${t.airings}×` : ""}),
-      [["as-is", "Newest first"], "oldest", "top", "played", "title", "station"]) : `<p class="empty">No songs yet.</p>`);
+      ["made", "madeOld", "top", "played", "title", "station"]) : `<p class="empty">No songs yet.</p>`);
   }
   if (view.sub === "history") {
     const h = cache.listened || [];

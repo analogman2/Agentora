@@ -121,6 +121,8 @@ def next_track(sid, mark=True):
     else:
         with app.lock:
             ready = sorted(rsp.station_tracks(sid, ("approved",)), key=lambda j: j.get("approved_at", 0))
+        if (rs.stations.get(sid) or {}).get("kind") == "spotify" and (rs.stations[sid].get("spotify_mode") or "cover") == "cover":
+            ready.sort(key=lambda j: not (j.get("author") or "").startswith("Spotify cover "))   # 🎤 covers before inspired songs
         j, airing = (ready[0], "new") if ready else _filler(sid)
     if not j:
         return None

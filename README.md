@@ -173,7 +173,7 @@ Most radio and audio settings (bitrate, loudness, EQ, quality steps, takes, writ
 | `GET /api/radio/stations/<id>/history?limit=500&upcoming=1` | every song of a station, the ones waiting to air first |
 | `POST /api/radio/stations/<id>/song` `{like}` | write and record a song now (optionally "more like" a song) |
 | `POST /api/rewrite/suggest` `{id, ask}` | ✏️ ideas for rewriting a song, or turn a request into edits |
-| `POST /api/spotify/run` `{limit, mode, track}` | 🎵 run the Spotify-likes agent in the background (1–5 songs, default 3; `mode` `inspired` or `cover`; `track` = one liked song's id; one run at a time, 409 if busy or not signed in) |
+| `POST /api/spotify/run` `{limit, mode, track}` | 🎵 run the Spotify-likes agent in the background (1–5 songs, default 3; `mode` `cover` (default) or `inspired`; `track` = one liked song's id; one run at a time, 409 if busy or not signed in) |
 | `GET /api/spotify/tracks` | the newest 200 liked songs, each with its `inspired` and `cover` status (for the picker) |
 | `GET /api/spotify/status` | `{running, last_output, last_finished, configured}` (configured = `~/.hermes/spotify-songs/token.json` exists) |
 
