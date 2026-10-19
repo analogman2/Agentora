@@ -274,9 +274,11 @@ def load_library():
             job = json.loads(f.read_text(encoding="utf-8"))
         except Exception:
             continue
-        if job.get("status") in ("queued", "running"):
+        if job.get("status") == "running":
             job.update(status="failed", error="Interrupted: the studio restarted before this finished", stage="")
             save_job(job)
+        elif job.get("status") == "queued" and job.get("stage"):
+            job["stage"] = ""                          # still queued: the worker picks it up again after a restart
         jobs[job["id"]] = job
 
 
@@ -1180,9 +1182,13 @@ def spotify_run(limit, mode="inspired", track=None):
     def go():
         out = ""
         try:
-            p = subprocess.run([sys.executable, str(SPOTIFY_SCRIPT), "run", "--limit", str(limit), "--seconds", seconds, "--verbose",
-                                "--mode", mode] + (["--track", str(track)] if track else []),
-                               capture_output=True, text=True, timeout=20 * 60)
+            for _ in range(60):                            # another run (Hermes, a terminal) holds the agent's lock: wait up to 10 min
+                p = subprocess.run([sys.executable, str(SPOTIFY_SCRIPT), "run", "--limit", str(limit), "--seconds", seconds, "--verbose",
+                                    "--mode", mode] + (["--track", str(track)] if track else []),
+                                   capture_output=True, text=True, timeout=20 * 60)
+                if not p.stdout.startswith("Another run"):
+                    break
+                time.sleep(10)
             out = (p.stdout.strip() or p.stderr.strip()[-600:] or f"Finished (exit {p.returncode}).")
             if p.returncode:
                 logging.getLogger("spotify").warning("spotify run exited %s", p.returncode)
