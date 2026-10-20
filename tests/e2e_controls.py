@@ -227,8 +227,13 @@ with sync_playwright() as p:
         click("#bBack"); t3 = js("document.getElementById('bTitle').textContent"); assert t1 != t2, f"skip didn't change song ({t1})"; return f"{t1} → ⏭ {t2} → ⏮ {t3}"
     check("bar", "⏭ / ⏮ (library play)", t)
     def t():
-        load(SG); click('[data-act="song-play"]'); h = js("document.getElementById('bLink').getAttribute('href')"); click("#bLink"); assert SONG in js("location.hash"), f"{h} → {js('location.hash')}"; return h
-    check("bar", "tap song → its page", t)
+        load(SG); click('[data-act="song-play"]'); click("#bLink"); assert js("nps.open"), "Now Playing didn't open"
+        h = js("document.getElementById('npsMore').getAttribute('href')"); click("#npsMore"); assert SONG in js("location.hash") and not js("nps.open"), f"{h} → {js('location.hash')}"; return h
+    check("bar", "tap Now Playing → sheet → song details", t)
+    def t():
+        load(SG); click('[data-act="song-play"]'); click("#bLink"); sent.clear(); click('#npsCtl [data-proxy="bUp"]'); r = req("POST", r"/api/radio/feedback")
+        js("document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}))"); time.sleep(0.4); assert not js("nps.open"), "Escape didn't close it"; return r
+    check("bar", "Now Playing sheet: 👍 copy, Esc closes", t)
     def t():
         load(R + "/radio#now"); click("#bPlay"); assert js("window.__play") > 0; return "stream play attempted"
     check("bar", "▶ live radio", t)

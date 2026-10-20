@@ -457,6 +457,26 @@ def upnext_view():
     return out
 
 
+def peek_next():
+    """The song the playout loop would air next, without taking it (Now Playing's "up next" cover). Same order as
+    playout_loop: a ⏮ pick, 📻 Play next, the history walk, then the station's spool. Random picks (Reruns, a filler
+    rerun) aren't known in advance: None."""
+    with rs.nav_lock:
+        t = rs.nav["queued"]
+        c = rs.nav["cursor"]
+        if not t and c is not None and c < len(rs.nav["hist"]) - 1:
+            t = _hist_track(c + 1)
+    if not t:
+        j = _upnext_job()
+        t = rlb.track_view(j) | {"airing": "request"} if j else None
+    sid = rs.state["station"]
+    if not t and rs.state["on"] and sid and sid != rs.RERUNS:
+        t = rlb.next_track(sid, mark=False)
+        if t and t["airing"] not in ("new", "runner-up"):
+            t = None
+    return {k: v for k, v in t.items() if k not in ("lyrics", "critic")} if t else None
+
+
 def _take_queued():
     with rs.nav_lock:
         t, rs.nav["queued"] = rs.nav["queued"], None

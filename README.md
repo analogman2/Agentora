@@ -33,6 +33,7 @@ The **Image & Video Studio** used to be part of Agentora; since 2026-10-16 it is
 - **It learns from you.** 👍, 👎, skips, playlist saves and even how long you listen become short taste notes the songwriter follows. **More like this** on any song writes a new one in its spirit, and a **🎲 Variety** slider per station decides how far songs may wander from its core sound.
 - **Cover art for every station and song**, drawn between songs by Z-Image Turbo from a name-free description of the music, so there's no text or band likenesses.
 - **One live broadcast.** Everyone hears the same 192 kbps MP3 stream (`/radio/stream.mp3`). A 15 s cushion rides out Wi-Fi and mobile hiccups, ⏭ and ⏮ cut over in about a second, ⏮ walks back through the station's history like any player, and **📻 Play next** queues any song in the library.
+- **Now Playing at the bottom of every page.** Tap it for the song's cover, details and lyrics, with the previous and next songs' covers either side (tap one to go there) and the full controls underneath.
 - **A library laid out like folders:** Library › station › song, with a path bar, an ↑ button, and previous/next inside each folder.
 - **Lyrics you can read along with**, on each song's page and under Now Playing (they follow the song that's on). [Verse] / [Chorus] tags become labelled blocks; instrumentals say so plainly.
 - **🎲 Lyrics from the library.** In the Music Studio, one press fills in a random library song's lyrics to sing in a new style; press again for another (no repeats until every song has had a turn, ↩ Undo brings your own words back).
@@ -165,7 +166,7 @@ Most radio and audio settings (bitrate, loudness, EQ, quality steps, takes, writ
 | | |
 |---|---|
 | `GET :7861/stream.mp3` | the live broadcast, from the stream relay (`/radio/stream.mp3` on :7860 redirects there) |
-| `GET /api/radio/state` | stations, what's on air, what's being made, GPU owner, play-next list |
+| `GET /api/radio/state` | stations, what's on air, what's being made, GPU owner, play-next list, `next` (the song that airs next, when it is known) |
 | `POST /api/radio/power` `{on, station}` | switch on/off or retune |
 | `POST /api/radio/skip` `{track, kind}` / `POST /api/radio/back` `{track, steps}` | ⏭ / ⏮ (steps 0 = restart the song, 1 = previous) |
 | `POST /api/radio/upnext` `{ids}` | 📻 play these library songs next |

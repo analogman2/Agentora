@@ -1,4 +1,4 @@
-// Agentora radio page, part 2 of 5: The live broadcast: connecting and recovering, ⏭ ⏮ and play next, the player bar, Now Playing, the lock screen, loading data.
+// Agentora radio page, part 2 of 5: The live broadcast: connecting and recovering, ⏭ ⏮ and play next, the player bar, the Now Playing sheet, the lock screen, loading data.
 // Plain scripts loaded in order by radio.html; they share one global scope.
 // ---------------- the broadcast: one shared live stream, every listener hears the same song
 let lid = null, shownId = undefined, prevOn = null;
@@ -105,7 +105,7 @@ function setPlayingUI() {
   $("bPlayIcon").innerHTML = on ? '<path d="M7 5h4v14H7zM13 5h4v14h-4z"/>' : '<path d="M8 5v14l11-7z"/>';
   $("bPlay").setAttribute("aria-label", on ? "Pause" : "Play");
   $("favicon").href = playing && hearing() ? "/icons/radio-live.svg" : "/icons/radio.svg";
-  updateMediaSession();
+  updateMediaSession(); npsMirror();
 }
 function syncNow() {
   if (lp.t) {                                      // a library song: the bar follows it, not the broadcast
@@ -113,7 +113,7 @@ function syncNow() {
     const el = pv.currentTime || 0, dur = pv.duration || lp.t.seconds || 0;
     $("bEl").textContent = mmss(el); $("bDur").textContent = dur ? mmss(dur) : "—";
     $("bProg").style.width = dur ? Math.min(100, 100 * el / dur) + "%" : "0";
-    return;
+    return npsProgress();
   }
   const h = hearing(), id = h ? h.id : null;
   if (id !== shownId) { shownId = id; current = h ? {...h} : null; renderBar(); if (view.tab === "now") renderView(); setPlayingUI(); loadHistory(); }
@@ -122,12 +122,12 @@ function syncNow() {
     $("bEl").textContent = mmss(Math.min(el, dur || el)); $("bDur").textContent = dur ? mmss(dur) : "—";
     $("bProg").style.width = dur ? Math.min(100, 100 * el / dur) + "%" : "0";
   } else { $("bEl").textContent = "0:00"; $("bDur").textContent = "0:00"; $("bProg").style.width = "0"; }
+  npsProgress();
   if (view.tab === "now") status(lid && !current && R ? waitText() : "");
 }
 function renderBar() {
   const t = current, st = stOf(selected);
   $("bCover").src = t ? trackArt(t) : stationArt(st);
-  $("bLink").href = t ? (t.station ? `#lib/${encodeURIComponent(t.station)}/${encodeURIComponent(t.id)}` : `#song/${encodeURIComponent(t.id)}`) : "#now";
   $("bTitle").textContent = t ? t.title : lid ? "Next song on the way…" : st ? st.name : "Pick a station";
   $("bStation").textContent = (lp.t ? `${t.station_name || "Music Studio"} · from your library` : t ? (t.station_name || (st && st.name) || "") + (t.airing === "rerun" ? " · rerun" : t.airing === "runner-up" ? " · runner-up" : "") : st ? (lid ? "tuning in…" : "press play") : "Agentora")
     + (t && t.credit ? " · " + t.credit : "");
@@ -135,6 +135,7 @@ function renderBar() {
   setAddKey(!!t && !!t.in_playlist);
   ["bUp", "bDown", "bAdd", "bSkip", "bBack"].forEach(k => $(k).disabled = !t);
   $("wash").style.background = t ? `radial-gradient(1200px 600px at 20% 0%, hsla(${trackHue(t)},70%,55%,.16), transparent 70%)` : "none";
+  npsRender();
 }
 function waitText() {
   const st = R && stOf(selected), g = R && R.gpu;
@@ -148,7 +149,10 @@ function waitText() {
   return "Writing the first song for this station…";
 }
 let statusText = "";
-function status(t) { statusText = t || ""; const el = $("npStatus"); if (el && el.textContent !== statusText) el.textContent = statusText; }
+function status(t) {
+  statusText = t || "";
+  for (const el of [$("npStatus"), $("npsStatus")]) if (el && el.textContent !== statusText) el.textContent = statusText;
+}
 let toastT = 0;
 function toast(t) { const el = $("toast"); el.textContent = t; el.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove("show"), 3500); }
 
@@ -183,9 +187,9 @@ function secondsIntoSong() {
   const h = hearing(), pos = streamPos();
   return h && pos != null && h.start_pos != null ? pos - h.start_pos : null;
 }
-async function backNow() {
+async function backNow(prev) {                    // prev: straight to the previous song (Now Playing's left cover)
   const into = secondsIntoSong();
-  const again = Date.now() - backAt < 4000 || (into != null && into < 6); backAt = Date.now();
+  const again = prev || Date.now() - backAt < 4000 || (into != null && into < 6); backAt = Date.now();
   toast(again ? "⏮ Previous song…" : "⏮ Back to the start of this song…");
   try {
     const r = await post("/api/radio/back", again ? {steps: 1} : {track: current ? current.id : null, steps: 0});
@@ -206,6 +210,164 @@ async function setPlaylist(id, on) {
   loadHistory(); if (view.tab !== "now") renderView();
 }
 $("bAdd").onclick = async () => { if (current) try { await setPlaylist(current.id, !current.in_playlist); } catch (e) { toast(e.message); } };
+
+// ---------------- Now Playing sheet: tap the bar. The current cover in the middle, the previous song's peeking in on the
+// left and the next one's on the right (tap one to go there), the song's details, and the bar's controls at the bottom.
+// It shows the same state as the bar (current, lp, R); its buttons are copies of the bar's and press them.
+const NPS_KEYS = ["bDown", "bBack", "bPlay", "bSkip", "bUp", "bAdd"];
+const nps = {open: false, around: {prev: null, next: null}};
+$("npsCtl").innerHTML = NPS_KEYS.map(k => $(k).outerHTML.replace(`id="${k}"`, `data-proxy="${k}"`).replace(/ id="bPlayIcon"/, "")).join("");
+// the bar is inert while the sheet is open, so call its handlers rather than click it
+$("npsCtl").addEventListener("click", e => { const b = e.target.closest("[data-proxy]"), src = b && $(b.dataset.proxy); if (src && !src.disabled) src.onclick(); });
+function npsMirror() {                              // the copies follow the bar's buttons: icon, on/off, disabled, labels
+  if (!nps.open) return;
+  for (const k of NPS_KEYS) {
+    const src = $(k), b = $("npsCtl").querySelector(`[data-proxy="${k}"]`), html = src.innerHTML.replace(' id="bPlayIcon"', "");
+    if (b.innerHTML !== html) b.innerHTML = html;
+    b.className = src.className; b.disabled = src.disabled; b.title = src.title;
+    for (const a of ["aria-label", "aria-pressed"]) if (src.hasAttribute(a)) b.setAttribute(a, src.getAttribute(a));
+  }
+}
+// previous / next: a Library list plays through that list; the broadcast uses the songs aired around the one this device
+// hears (the stream runs ahead of the ear), then the listen history, and the radio's own pick for what airs next
+function npsAround() {
+  if (lp.t) return {prev: lp.queue[lp.i - 1] || null, next: lp.queue[lp.i + 1] || null, lib: true};
+  const aired = (R && R.stream && R.stream.aired) || [], k = current ? aired.findIndex(a => a.id === current.id && a.start_pos === current.start_pos) : -1;
+  let prev = null, next = null;
+  if (k >= 0) {
+    for (let i = k - 1; i >= 0 && !prev; i--) if (aired[i].id) prev = aired[i];
+    for (let i = k + 1; i < aired.length && !next; i++) if (aired[i].id) next = aired[i];
+  }
+  if (!prev && cache.listened) prev = cache.listened.find(t => !current || t.id !== current.id) || null;
+  if (!next && R && R.next && (!current || R.next.id !== current.id)) next = R.next;
+  return {prev, next};
+}
+function npsSide(el, cap, t, dir, live) {
+  const label = dir === "prev" ? "Previous" : "Up next";
+  // a cover can be pressed when there's somewhere to go: the Library list, or the broadcast this device is tuned to
+  const can = !!t && (lp.t || (live && current));
+  const none = dir === "prev" ? "Nothing before this" : lp.t ? "End of the list" : selected === RERUNS ? "Shuffled at random" : lid || (R && R.on) ? "A new song is on the way" : "Nothing queued";
+  el.classList.toggle("empty", !t);
+  el.innerHTML = t ? `<img src="${trackArt(t)}" alt="">` : `<span aria-hidden="true">${dir === "prev" ? "⏮" : selected === RERUNS && !lp.t ? "🔀" : "♪"}</span>`;
+  el.disabled = cap.disabled = !can;
+  const what = t ? `${label}: ${t.title}${t.station_name ? " · " + t.station_name : ""}` : `${label}: ${none}`;
+  el.title = can ? `${what} (tap to play${lp.t ? "" : " — for everyone listening"})` : what;
+  el.setAttribute("aria-label", el.title);
+  cap.innerHTML = `<span>${dir === "prev" ? "‹ " : ""}${label}${dir === "next" ? " ›" : ""}</span><b>${esc(t ? t.title : none)}</b>`;
+  cap.title = el.title;
+}
+function npsRender() {
+  if (!nps.open) return;
+  const t = current, st = stOf(t ? t.station : selected), live = !!lid;
+  $("npsCover").src = t ? trackArt(t) : stationArt(st);
+  $("npsTitle").textContent = $("bTitle").textContent;
+  const stName = t ? (t.station_name || (st && st.name) || (lp.t ? "Music Studio" : "")) : "";   // no song: the title is the station
+  $("npsSub").textContent = [stName && "📻 " + stName, t && t.credit].filter(Boolean).join(" · ");
+  $("npsSt").textContent = lp.t ? "From your library" : live ? "Live radio · everyone hears this" : t ? "" : "Press ▶ to tune in";
+  $("npsSt").href = t && t.station ? `#lib/${encodeURIComponent(t.station)}` : "#now";
+  $("npsMore").style.visibility = t ? "" : "hidden";
+  if (t) $("npsMore").href = songHref(t);
+  $("npsStyle").textContent = t ? t.style || "" : "";
+  const chips = t ? [t.airing === "rerun" ? "Rerun" : t.airing === "runner-up" ? "Runner-up take" : t.airing === "history" ? "Replay" : t.airing === "request" ? "Requested" : null,
+    (t.duration || t.seconds) ? mmss(t.duration || t.seconds) : null, t.mode === "instrumental" || (t.lyrics != null && !t.lyrics) ? "Instrumental" : t.lyrics ? "Vocals" : null,
+    t.feedback === "keep" ? "👍 Liked" : null, t.in_playlist ? "♥ In my playlist" : null].filter(Boolean) : [];
+  $("npsChips").innerHTML = chips.map(c => `<span class="chip">${esc(c)}</span>`).join("");
+  const ly = $("npsLy");
+  ly.hidden = !t || t.lyrics == null;
+  if (t && ly.dataset.id !== t.id) { ly.dataset.id = t.id; $("npsLyB").innerHTML = lyricsHTML(t); ly.open = store.get("npsLyrics", false); }
+  const a = nps.around = npsAround(); nps.sig = npsSig(a);
+  npsSide($("npsPrev"), $("npsPrevCap"), a.prev, "prev", live);
+  npsSide($("npsNext"), $("npsNextCap"), a.next, "next", live);
+  $("nps").style.setProperty("--npsWash", t ? `radial-gradient(700px 420px at 50% 0%, hsla(${trackHue(t)},70%,55%,.22), transparent 70%)` : "none");
+  status(statusText); npsMirror(); npsProgress();
+}
+function npsProgress() {
+  if (!nps.open) return;
+  $("npsEl").textContent = $("bEl").textContent; $("npsDur").textContent = $("bDur").textContent;
+  $("npsProg").style.width = $("bProg").style.width;
+  $("npsTrack").classList.toggle("seek", !!lp.t);
+  $("npsTrack").title = lp.t ? "Drag or tap to jump" : lid ? "Live: everyone hears the same moment, so there's no seeking" : "";
+  if (!lp.t && nps.sig !== npsSig(npsAround())) npsRender();   // a new "up next" pick or history entry
+}
+const npsSig = (a) => [a.prev && a.prev.id, a.prev && a.prev.cover, a.next && a.next.id, a.next && a.next.cover].join("|");
+function npsGo(dir) {
+  const a = nps.around;
+  if (!a[dir]) return;
+  if (lp.t) return lpPlay(lp.i + (dir === "prev" ? -1 : 1));
+  if (!current) return;
+  if (dir === "next") $("bSkip").onclick(); else backNow(true);
+}
+$("npsPrev").onclick = $("npsPrevCap").onclick = () => npsGo("prev");
+$("npsNext").onclick = $("npsNextCap").onclick = () => npsGo("next");
+$("npsLy").addEventListener("toggle", () => store.set("npsLyrics", $("npsLy").open));
+$("npsVol").oninput = () => { $("vol").value = $("npsVol").value; $("vol").oninput(); };
+// seeking only makes sense for a Library song: the broadcast is live
+function npsSeek(e) {
+  if (!lp.t || !pv.duration) return;
+  const r = $("npsTrack").getBoundingClientRect();
+  pv.currentTime = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * pv.duration; syncNow();
+}
+$("npsTrack").addEventListener("pointerdown", e => { if (!lp.t) return; $("npsTrack").setPointerCapture(e.pointerId); npsSeek(e); });
+$("npsTrack").addEventListener("pointermove", e => { if ($("npsTrack").hasPointerCapture(e.pointerId)) npsSeek(e); });
+let npsCloseT = 0;
+function npsOpen() {
+  if (nps.open) return;
+  clearTimeout(npsCloseT); nps.open = true; nps.back = document.activeElement;
+  $("nps").hidden = $("npsFade").hidden = false;
+  document.body.classList.add("nps-on"); document.documentElement.style.overflow = "hidden";
+  for (const el of [document.querySelector(".nav"), $("page"), $("bar")]) el.inert = true;
+  $("bLink").setAttribute("aria-expanded", "true");
+  $("npsVol").value = $("vol").value; $("npsB").scrollTop = 0;
+  npsRender();
+  history.pushState({nps: 1}, "");                 // Android's back button closes the sheet
+  requestAnimationFrame(() => requestAnimationFrame(() => { $("nps").classList.add("open"); $("npsFade").classList.add("open"); }));
+  $("npsClose").focus({preventScroll: true});
+}
+function npsShut(fromHistory) {
+  if (!nps.open) return;
+  nps.open = false;
+  $("nps").classList.remove("open", "drag"); $("nps").style.transform = ""; $("npsFade").classList.remove("open");
+  document.body.classList.remove("nps-on"); document.documentElement.style.overflow = "";
+  for (const el of [document.querySelector(".nav"), $("page"), $("bar")]) el.inert = false;
+  $("bLink").setAttribute("aria-expanded", "false");
+  npsCloseT = setTimeout(() => { $("nps").hidden = $("npsFade").hidden = true; }, 260);
+  if (nps.back && nps.back.focus) nps.back.focus({preventScroll: true});
+  if (!fromHistory && history.state && history.state.nps) history.back();
+}
+window.addEventListener("popstate", () => {
+  npsShut(true);
+  if (nps.go) { const go = nps.go; nps.go = null; location.hash = go; }
+});
+$("bLink").onclick = npsOpen;
+$("npsClose").onclick = () => npsShut();
+$("npsFade").onclick = () => npsShut();
+document.addEventListener("keydown", e => { if (e.key === "Escape" && nps.open && !$("dlg").open) { e.preventDefault(); npsShut(); } });
+// a link inside the sheet (station, song details) closes it first, then opens that page
+$("nps").addEventListener("click", e => {
+  const a = e.target.closest("a[href^='#']"); if (!a) return;
+  e.preventDefault(); const go = a.getAttribute("href");
+  if (history.state && history.state.nps) { nps.go = go; npsShut(); }   // back out of the sheet's history entry, then go
+  else { npsShut(true); location.hash = go; }
+});
+// swipe down to close (phone): from the handle or header, or anywhere once the sheet is scrolled to the top
+(() => {
+  const el = $("nps"); let y0 = null, x0 = 0, dy = 0, t0 = 0;
+  el.addEventListener("touchstart", e => {
+    if (e.touches.length !== 1 || innerWidth > 760 || e.target.closest("input, .track, .nps-car, .nps-f")) return (y0 = null);
+    if (!e.target.closest(".nps-h, .nps-grab") && $("npsB").scrollTop > 0) return (y0 = null);
+    y0 = e.touches[0].clientY; x0 = e.touches[0].clientX; dy = 0; t0 = Date.now();
+  }, {passive: true});
+  el.addEventListener("touchmove", e => {
+    if (y0 == null) return;
+    dy = e.touches[0].clientY - y0;
+    if (dy <= 0 || Math.abs(e.touches[0].clientX - x0) > dy) { if (dy < -4) y0 = null; return; }
+    e.preventDefault(); el.classList.add("drag"); el.style.transform = `translateY(${dy}px)`;
+  }, {passive: false});
+  el.addEventListener("touchend", () => {
+    if (y0 == null) return; y0 = null; el.classList.remove("drag");
+    if (dy > 120 || (dy > 40 && dy / (Date.now() - t0) > 0.6)) npsShut(); else el.style.transform = "";
+  });
+})();
 
 // lock screen / notification controls
 const ms = "mediaSession" in navigator ? navigator.mediaSession : null;

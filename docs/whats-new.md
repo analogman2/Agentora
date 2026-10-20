@@ -29,7 +29,8 @@ Agentora started as [yue2-xpu-radio](https://github.com/zebgop-ops/yue2-xpu-radi
 ### A cleaner player
 
 - **Now Playing** shows the song's cover art, title, style and lyrics, with **Add to my playlist**, **Song details**, **Download** and **New cover**. The lyrics sit open under the song (tap **Lyrics** to fold them away; the page remembers) and change with each new song. A "Recently played" list sits underneath.
-- **A player bar on every page**: 👎 ⏮ ▶ ⏭ 👍 ⊕, a progress bar and volume. Tapping the song opens its page.
+- **A player bar on every page**: 👎 ⏮ ▶ ⏭ 👍 ⊕, a progress bar and volume.
+- **The bar is "Now Playing"** (2026-10-19): tap the song in it and a Now Playing view slides up (full screen on a phone, a large window on a computer). The cover sits in the middle with the previous song's cover peeking in on the left and the next song's on the right; tap one to go there (on the radio that's ⏮ / ⏭ for everyone listening). Underneath are the title, station, style, length and the lyrics, and the full controls stay at the bottom: 👎 ⏮ ▶ ⏭ 👍 ⊕, the progress bar with times (drag it to jump in a Library song) and volume. Close it with the ⌄ button, Esc, the phone's back button, a swipe down, or a click outside. The ⓘ button opens the song's page.
 - **A side panel (☰)** for the controls that used to crowd the deck: who's listening and how well it's connected, GPU and disk usage, GPU priority, links to the other apps, and Settings.
 - **The cassette deck** from the original is still at `/radio/classic`.
 

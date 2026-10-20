@@ -64,7 +64,7 @@ def api_state(listener=None):
                   for j in app.jobs.values() if j.get("source") == "radio" and j["status"] in ("queued", "running")]
         judging = sum(1 for j in app.jobs.values() if j.get("radio_status") == "judging")
     return {"on": rs.state["on"], "station": rs.state["station"], "target_ahead": rs.state["target_ahead"], "stations": st,
-            "making": making, "judging": judging, "upnext": rbc.upnext_view(), "gpu": app.state()["gpu"], "stream": rbc.stream_view(listener),
+            "making": making, "judging": judging, "upnext": rbc.upnext_view(), "next": rbc.peek_next(), "gpu": app.state()["gpu"], "stream": rbc.stream_view(listener),
             "reruns": rerun_library()}
 
 

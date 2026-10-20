@@ -86,8 +86,14 @@ with sync_playwright() as p:
         bar = js("$('bTitle').textContent + ' | ' + $('bStation').textContent")
         must("from your library" in bar and js("!pv.paused"), f"bar: {bar}")
         js("$('bSkip').click()"); time.sleep(2); nxt = js("$('bTitle').textContent")
+        js("$('bLink').click()"); time.sleep(1); shot("radio-nowplaying")         # the Now Playing sheet: previous · now · next
+        must(js("nps.open && $('npsTitle').textContent === $('bTitle').textContent"), "Now Playing sheet didn't open on the song")
+        must(js("!!$('npsPrev').querySelector('img') && !$('npsPrev').disabled"), "no previous cover in the sheet")
+        js("$('npsPrev').click()"); time.sleep(1.5); back = js("$('npsTitle').textContent")
+        must(back == bar.split(" | ")[0], f"previous cover played {back}")
+        js("document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}))"); time.sleep(0.5); must(not js("nps.open"), "Escape didn't close the sheet")
         js("lpStop()")
-        return f"{bar} -> ⏭ {nxt}"
+        return f"{bar} -> ⏭ {nxt} -> sheet ‹ {back}"
     check("play from the Library in the bar", library_play)
     def lyrics():
         ids = js("(async () => { const all = await loadAll(); const sung = all.find(t => (t.lyrics || '').includes('[')), inst = all.find(t => t.mode === 'instrumental'); return [sung && sung.id, inst && inst.id]; })()")
