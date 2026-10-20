@@ -1137,6 +1137,7 @@ def state():
 SPOTIFY_HOME = Path(os.environ.get("SPOTIFY_SONGS_HOME") or Path.home() / ".hermes" / "spotify-songs")
 SPOTIFY_SCRIPT = Path.home() / ".hermes" / "skills" / "creative" / "spotify-liked-songs" / "scripts" / "spotify_songs.py"
 spotify = {"running": False, "last_output": "", "last_finished": None, "started": None}
+spotify_list = {"at": 0.0, "tracks": None, "failed": 0.0}   # the 🎵 picker's liked songs, kept 10 min (a fetch is ~4 Spotify calls)
 
 
 def spotify_status():
@@ -1149,12 +1150,27 @@ def spotify_tracks():
     """The newest liked songs for the 🎵 picker, with what each mode (inspired / cover) has made of them."""
     if not spotify_status()["configured"]:
         return {"tracks": [], "error": "Sign in to Spotify first"}
+    with lock:
+        if spotify_list["tracks"] is not None and time.time() - spotify_list["at"] < 600:
+            return {"tracks": spotify_list["tracks"]}
+        if time.time() - spotify_list["failed"] < 120:      # Spotify just said no (429): don't ask again for 2 min
+            return {"tracks": spotify_list["tracks"] or [], "stale": spotify_list["tracks"] is not None,
+                    **({} if spotify_list["tracks"] else {"error": "Spotify is busy; try again in a few minutes"})}
     try:
         p = subprocess.run([sys.executable, str(SPOTIFY_SCRIPT), "tracks", "--scan", "200"], capture_output=True, text=True, timeout=120)
-        return {"tracks": json.loads(p.stdout)}
+        tracks = json.loads(p.stdout) if p.stdout.startswith("[") else None
+        if tracks is None:
+            raise RuntimeError(p.stdout.strip()[:120] or p.stderr.strip()[-120:] or f"exit {p.returncode}")
+        with lock:
+            spotify_list.update(at=time.time(), tracks=tracks)
+        return {"tracks": tracks}
     except Exception as e:
         logging.getLogger("spotify").warning("couldn't list the liked songs: %s", e)
-        return {"tracks": [], "error": "Couldn't list your liked songs"}
+        with lock:
+            spotify_list["failed"] = time.time()
+            if spotify_list["tracks"] is not None:          # Spotify said no (e.g. 429): the last list, rather than none
+                return {"tracks": spotify_list["tracks"], "stale": True}
+        return {"tracks": [], "error": "Spotify is busy; try again in a few minutes"}
 
 
 def spotify_run(limit, mode="inspired", track=None):
@@ -1201,6 +1217,7 @@ def spotify_run(limit, mode="inspired", track=None):
         finally:
             with lock:
                 spotify.update(running=False, last_output=out[:4000], last_finished=time.time())
+                spotify_list["at"] = 0.0                     # the next 🎵 picker load shows what this run made
             logging.getLogger("spotify").info("spotify run finished (%s, %d lines of summary)", mode, out.count("\n") + 1)
 
     logging.getLogger("spotify").info("spotify run started (%s, limit %d%s)", mode, limit, ", one track" if track else "")

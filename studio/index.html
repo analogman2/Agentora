@@ -801,12 +801,12 @@ async function spotifyStatus() {
   spWasRunning = s.running;
   clearTimeout(spTimer); if (s.running) spTimer = setTimeout(spotifyStatus, 3000);
 }
-let spTracks = [];
+let spTracks = [], spTracksErr = "";
 function spotifyPicker() {
   const cover = $("spMode").value === "cover", keep = $("spTrack").value;
   $("spCoverNote").hidden = !cover;
   const made = s => s && !["failed", "cancelled", "no_lyrics"].includes(s);
-  $("spTrack").innerHTML = `<option value="">The newest liked songs without ${cover ? "a cover" : "an inspired song"}</option>` +
+  $("spTrack").innerHTML = `<option value="">The newest liked songs without ${cover ? "a cover" : "an inspired song"}${spTracksErr ? ` (list unavailable: ${esc(spTracksErr)})` : ""}</option>` +
     spTracks.map(t => `<option value="${esc(t.id)}"${made(t[$("spMode").value]) ? " disabled" : ""}>${esc(t.name)} – ${esc(t.artist)}${made(t.inspired) ? " · ✨" : ""}${made(t.cover) ? " · 🎤" : ""}</option>`).join("");
   if (keep && [...$("spTrack").options].some(o => o.value === keep && !o.disabled)) $("spTrack").value = keep;
   $("spCount").disabled = !!$("spTrack").value;
@@ -815,7 +815,8 @@ async function spotifyTracks() {
   let ok = true;
   try {
     const r = await fetch("/api/spotify/tracks", {cache: "no-store"});
-    ok = r.ok; spTracks = ok ? (await r.json()).tracks || [] : [];
+    const d = r.ok ? await r.json() : {};
+    ok = r.ok; spTracks = d.tracks || []; spTracksErr = d.error || "";
   } catch { spTracks = []; }
   $("spMode").hidden = $("spTrack").hidden = !ok;
   spotifyPicker();

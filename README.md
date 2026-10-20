@@ -262,7 +262,10 @@ End-to-end tests against the running services. Run them while nobody is listenin
 ~/venv-yue2/bin/python tests/e2e_radio.py --restart    # + restarts the radio while listening: the stream must not stop
 ~/venv-yue2/bin/python tests/e2e_radio.py --full       # + ✨ Improve, ✏️ rewrite ideas, and one song made start to finish (minutes)
 python tests/e2e_ui.py                                 # headless browser (Playwright): every page and flow, no JS errors
+uv run -q --no-project --with playwright python tests/e2e_controls.py   # every button, link and form (73 checks, ~25 min)
 ```
+
+`e2e_controls.py` presses each control on the radio, the classic deck, the Music Studio and Home (signed out) and checks the request it sends, the dialog or page it opens, or the sound it plays. It changes nothing: POST, PUT and DELETE never leave the browser, the stream is blocked, and the Spotify list is faked so it doesn't use up Spotify's rate limit. It's safe while people listen.
 
 `--quick` skips the broadcast tests, so it's safe while people listen.
 

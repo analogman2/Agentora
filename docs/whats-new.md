@@ -100,6 +100,7 @@ Agentora started as [yue2-xpu-radio](https://github.com/zebgop-ops/yue2-xpu-radi
   4. Press **Create song**. The new version remembers which song it rewrote. A 👍 on it also teaches the original's station.
   5. **Stop rewriting** puts back whatever was in the form before.
 - **📻 Play next** on every song sends it to the radio.
+- **The Spotify picker loads at once** (2026-10-19): the Music Studio keeps your liked songs for 10 minutes instead of asking Spotify on every visit, and says "Spotify is busy" (showing the last list) when Spotify's rate limit kicks in.
 - **🎤 Covers are the default** (2026-10-19): the Music Studio's Spotify picker starts on Cover and remembers your choice, the Spotify station plays its covers before any inspired songs, and Hermes's agent makes covers unless asked otherwise.
 - **Newest first means newest made** (2026-10-19): on a station and in All songs it sorts by when the song was made, not when it last played; rows say "made …" or "played …".
 - **Tap the song in the now-playing bar** on Home or the Music Studio (its title or cover) to open its page on the radio, in the same tab (2026-10-19).
