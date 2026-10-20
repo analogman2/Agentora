@@ -310,23 +310,40 @@ function npsSeek(e) {
 $("npsTrack").addEventListener("pointerdown", e => { if (!lp.t) return; $("npsTrack").setPointerCapture(e.pointerId); npsSeek(e); });
 $("npsTrack").addEventListener("pointermove", e => { if ($("npsTrack").hasPointerCapture(e.pointerId)) npsSeek(e); });
 let npsCloseT = 0;
-function npsOpen() {
+// dragging==true: a finger is pulling the sheet up from the bar; it follows (npsPose) until let go, then npsSettle or npsShut
+function npsOpen(dragging) {
   if (nps.open) return;
   clearTimeout(npsCloseT); nps.open = true; nps.back = document.activeElement;
   $("nps").hidden = $("npsFade").hidden = false;
   document.body.classList.add("nps-on"); document.documentElement.style.overflow = "hidden";
-  for (const el of [document.querySelector(".nav"), $("page"), $("bar")]) el.inert = true;
   $("bLink").setAttribute("aria-expanded", "true");
   $("npsVol").value = $("vol").value; $("npsB").scrollTop = 0;
   npsRender();
   history.pushState({nps: 1}, "");                 // Android's back button closes the sheet
-  requestAnimationFrame(() => requestAnimationFrame(() => { $("nps").classList.add("open"); $("npsFade").classList.add("open"); }));
+  if (dragging === true) { npsDrag(true); npsPose(0); }
+  else requestAnimationFrame(() => requestAnimationFrame(npsSettle));
+}
+function npsSettle() {                             // all the way open (from wherever a drag left it)
+  if (!nps.open) return;
+  npsDrag(false); $("nps").classList.add("open"); $("npsFade").classList.add("open");
+  // not while a finger is still on the bar: an inert bar would lose the drag
+  for (const el of [document.querySelector(".nav"), $("page"), $("bar")]) el.inert = true;
   $("npsClose").focus({preventScroll: true});
+}
+function npsDrag(on) {
+  for (const el of [$("nps"), $("npsFade")]) { el.classList.toggle("drag", on); if (!on) el.style.transform = el.style.opacity = ""; }
+}
+const npsPhone = () => innerWidth <= 760;
+const npsSpan = () => npsPhone() ? ($("nps").offsetHeight || innerHeight) : innerHeight;   // how far the sheet travels
+function npsPose(p) {                              // 0 = closed (down at the bar) … 1 = open
+  p = Math.max(0, Math.min(1, p));
+  $("nps").style.transform = npsPhone() ? `translateY(${((1 - p) * 100).toFixed(2)}%)` : `translate(-50%, calc(-50% + ${((1 - p) * 100).toFixed(2)}vh))`;
+  $("npsFade").style.opacity = String(p);
 }
 function npsShut(fromHistory) {
   if (!nps.open) return;
   nps.open = false;
-  $("nps").classList.remove("open", "drag"); $("nps").style.transform = ""; $("npsFade").classList.remove("open");
+  npsDrag(false); $("nps").classList.remove("open"); $("npsFade").classList.remove("open");
   document.body.classList.remove("nps-on"); document.documentElement.style.overflow = "";
   for (const el of [document.querySelector(".nav"), $("page"), $("bar")]) el.inert = false;
   $("bLink").setAttribute("aria-expanded", "false");
@@ -338,7 +355,6 @@ window.addEventListener("popstate", () => {
   npsShut(true);
   if (nps.go) { const go = nps.go; nps.go = null; location.hash = go; }
 });
-$("bLink").onclick = npsOpen;
 $("npsClose").onclick = () => npsShut();
 $("npsFade").onclick = () => npsShut();
 document.addEventListener("keydown", e => { if (e.key === "Escape" && nps.open && !$("dlg").open) { e.preventDefault(); npsShut(); } });
@@ -349,23 +365,68 @@ $("nps").addEventListener("click", e => {
   if (history.state && history.state.nps) { nps.go = go; npsShut(); }   // back out of the sheet's history entry, then go
   else { npsShut(true); location.hash = go; }
 });
-// swipe down to close (phone): from the handle or header, or anywhere once the sheet is scrolled to the top
+// The whole bar pulls up: a tap anywhere but its buttons opens the sheet; a vertical drag from anywhere (a button too)
+// pulls the sheet up with the finger or mouse. Past a third of the way, or a quick flick, it opens; else it drops back.
+// The same in reverse closes it: drag the header down (mouse or finger), or anywhere once the sheet is scrolled to the top.
+let npsEatClick = 0;                               // the click a drag's release would fire on the button it started on
+window.addEventListener("click", e => { if (Date.now() < npsEatClick) { npsEatClick = 0; e.preventDefault(); e.stopPropagation(); } }, true);
+$("bar").addEventListener("click", e => { if (!nps.open && !e.target.closest("button:not(#bLink), a, input")) npsOpen(); });
+function npsGesture(el, opening, ok) {
+  let g = null;
+  const flick = () => {                            // speed over the last 100 ms of movement, px/ms
+    const [tl, yl] = g.pts[g.pts.length - 1], [t, y] = g.pts.find(([t]) => tl - t <= 100);
+    return (opening ? y - yl : yl - y) / Math.max(16, tl - t);
+  };
+  el.addEventListener("pointerdown", e => {
+    if (g || e.button > 0 || (opening ? nps.open : !nps.open) || !ok(e)) return;
+    g = {id: e.pointerId, x0: e.clientX, y0: e.clientY, drag: false, pts: [[e.timeStamp, e.clientY]]};
+  });
+  el.addEventListener("pointermove", e => {
+    if (!g || e.pointerId !== g.id) return;
+    const d = opening ? g.y0 - e.clientY : e.clientY - g.y0, dx = Math.abs(e.clientX - g.x0);
+    if (!g.drag) {
+      if (d < 8 && dx < 8) return;
+      if (d < 8 || dx > d) { g = null; return; }   // sideways, or the other way: not this gesture
+      g.drag = true; try { el.setPointerCapture(e.pointerId); } catch {}
+      if (opening) npsOpen(true); else npsDrag(true);
+    }
+    g.pts.push([e.timeStamp, e.clientY]); if (g.pts.length > 5) g.pts.shift();
+    npsPose(opening ? d / npsSpan() : 1 - d / npsSpan());
+  });
+  const end = (e, cancel) => {
+    if (!g || e.pointerId !== g.id) return;
+    const was = g, d = opening ? was.y0 - e.clientY : e.clientY - was.y0, fast = !cancel && was.drag && flick() > .4 && d > 24;
+    g = null;
+    if (!was.drag) return;
+    npsEatClick = Date.now() + 500;
+    const far = !cancel && d > npsSpan() / 3;
+    if (opening) (far || fast) ? npsSettle() : npsShut(); else (far || fast) ? npsShut() : npsSettle();
+  };
+  el.addEventListener("pointerup", e => end(e));
+  el.addEventListener("pointercancel", e => end(e, true));
+}
+npsGesture($("bar"), true, e => !e.target.closest("input"));
+npsGesture($("nps"), false, e => e.pointerType === "mouse" && !!e.target.closest(".nps-h, .nps-grab"));
+// a finger closing it: touch events, so a drag at the top of the scrolled-up sheet can stop the page's pull-to-refresh
 (() => {
-  const el = $("nps"); let y0 = null, x0 = 0, dy = 0, t0 = 0;
+  const el = $("nps"); let y0 = null, x0 = 0, dy = 0, pts = [];
   el.addEventListener("touchstart", e => {
-    if (e.touches.length !== 1 || innerWidth > 760 || e.target.closest("input, .track, .nps-car, .nps-f")) return (y0 = null);
+    if (e.touches.length !== 1 || !nps.open || e.target.closest("input, .track, .nps-car, .nps-f")) return (y0 = null);
     if (!e.target.closest(".nps-h, .nps-grab") && $("npsB").scrollTop > 0) return (y0 = null);
-    y0 = e.touches[0].clientY; x0 = e.touches[0].clientX; dy = 0; t0 = Date.now();
+    y0 = e.touches[0].clientY; x0 = e.touches[0].clientX; dy = 0; pts = [[e.timeStamp, y0]];
   }, {passive: true});
   el.addEventListener("touchmove", e => {
     if (y0 == null) return;
-    dy = e.touches[0].clientY - y0;
-    if (dy <= 0 || Math.abs(e.touches[0].clientX - x0) > dy) { if (dy < -4) y0 = null; return; }
-    e.preventDefault(); el.classList.add("drag"); el.style.transform = `translateY(${dy}px)`;
+    const y = e.touches[0].clientY; dy = y - y0;
+    if (dy <= 0 || Math.abs(e.touches[0].clientX - x0) > dy) { if (dy < -4) { y0 = null; npsSettle(); } return; }
+    e.preventDefault(); npsDrag(true); npsPose(1 - dy / npsSpan());
+    pts.push([e.timeStamp, y]); if (pts.length > 5) pts.shift();
   }, {passive: false});
-  el.addEventListener("touchend", () => {
-    if (y0 == null) return; y0 = null; el.classList.remove("drag");
-    if (dy > 120 || (dy > 40 && dy / (Date.now() - t0) > 0.6)) npsShut(); else el.style.transform = "";
+  el.addEventListener("touchend", e => {
+    if (y0 == null) return; y0 = null;
+    if (dy < 8) return npsSettle();
+    const [tl, yl] = pts[pts.length - 1], [t, y] = pts.find(([t]) => tl - t <= 100) || pts[pts.length - 1], v = (yl - y) / Math.max(16, tl - t);
+    (dy > npsSpan() / 3 || (dy > 24 && v > .4)) ? npsShut() : npsSettle();
   });
 })();
 
