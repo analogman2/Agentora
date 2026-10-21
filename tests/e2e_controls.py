@@ -118,7 +118,7 @@ with sync_playwright() as p:
 
     # ---------------- radio: navigation
     def t():
-        load(R + "/radio#lib"); click('a[data-tab="now"]'); assert js("location.hash") == "#now"; click('a[data-tab="lib"]'); assert js("location.hash") == "#lib"; return "#now, #lib"
+        load(R + "/radio#lib"); click('a[data-tab="now"]'); assert js("location.hash") == "#stations" and js("document.querySelector('a[data-tab=now]').textContent") == "Stations"; click('a[data-tab="lib"]'); assert js("location.hash") == "#lib"; return "#stations, #lib"
     check("radio", "top tabs", t)
     def t():
         load(R + "/radio#now"); links = js("[...document.querySelectorAll('a[data-app]')].map(a => a.dataset.app + '=' + a.href)")
@@ -231,7 +231,7 @@ with sync_playwright() as p:
         h = js("document.getElementById('npsMore').getAttribute('href')"); click("#npsMore"); assert SONG in js("location.hash") and not js("nps.open"), f"{h} → {js('location.hash')}"; return h
     check("bar", "tap Now Playing → sheet → song details", t)
     def t():
-        load(SG); click('[data-act="song-play"]'); click("#bLink"); sent.clear(); click('#npsCtl [data-proxy="bUp"]'); r = req("POST", r"/api/radio/feedback")
+        load(SG); click('[data-act="song-play"]'); click("#bLink"); sent.clear(); click('#npsCtl [data-key="bUp"]'); r = req("POST", r"/api/radio/feedback")
         js("document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}))"); time.sleep(0.4); assert not js("nps.open"), "Escape didn't close it"; return r
     check("bar", "Now Playing sheet: 👍 copy, Esc closes", t)
     def t():

@@ -135,7 +135,8 @@ async def shared_file(request):
 
 
 async def nowplaying(request):
-    """What's on the radio, for the now-playing bar on the Studio's pages."""
+    """What's on the radio, for the now-playing bar and Now Playing view on Home: the songs that aired around now (the
+    page works out which one listeners hear), the radio's pick for what airs next, and the station."""
     try:
         async with http.get(RADIO + "/api/radio/state", timeout=aiohttp.ClientTimeout(total=3)) as r:
             d = await r.json()
@@ -145,18 +146,33 @@ async def nowplaying(request):
     aired = [a for a in sv.get("aired", []) if a.get("start_pos") is not None and a["start_pos"] <= (sv.get("pos") or 0)]
     a = aired[-1] if aired and aired[-1].get("id") else None
     st = next((x for x in d.get("stations", []) if x["id"] == d.get("station")), None)
+    if not st and d.get("station") == "__reruns__":
+        st = {"id": "__reruns__", "name": "Reruns"}
+    keep = ("id", "title", "cover", "style", "lyrics", "mode", "seconds", "duration", "station", "station_name", "credit",
+            "feedback", "in_playlist", "airing", "start_pos")
     return web.json_response({"on": d.get("on"), "now": a and {"id": a["id"], "title": a.get("title"), "cover": a.get("cover"), "feedback": a.get("feedback")},
-                              "station": st and {"id": st["id"], "name": st["name"], "art": st.get("art")}})
+                              "station": st and {"id": st["id"], "name": st["name"], "art": st.get("art")},
+                              "stream": {"pos": sv.get("pos"), "clock": sv.get("clock"), "listeners": sv.get("listeners", 0),
+                                         "aired": [{k: x.get(k) for k in keep} for x in sv.get("aired", [])]},
+                              "next": d.get("next") and {k: d["next"].get(k) for k in keep}})
 
 
 async def nowplaying_action(request):
-    """👍 / skip from the now-playing bar, passed on to the radio (which has no sign-in of its own)."""
+    """The now-playing bar and Now Playing view: 👍 👎 ⏭ ⏮ and the playlist, passed on to the radio (which has no sign-in of its own)."""
     action = request.match_info["action"]
-    if action not in ("feedback", "skip"):
+    if action not in ("feedback", "skip", "back", "playlist"):
         raise web.HTTPNotFound()
     b = await request.json()
-    body = {"track": str(b.get("track") or "")[:64], "kind": b.get("kind") if b.get("kind") in ("keep", "clear", "skip") else "skip"}
-    async with http.post(f"{RADIO}/api/radio/{action}", json=body, timeout=aiohttp.ClientTimeout(total=5)) as r:
+    track = str(b.get("track") or "")[:64]
+    if action == "feedback":
+        body = {"track": track, "kind": b.get("kind") if b.get("kind") in ("keep", "clear", "dislike") else "keep"}
+    elif action == "skip":
+        body = {"track": track, "kind": "dislike" if b.get("kind") == "dislike" else "skip"}
+    elif action == "back":
+        body = {"steps": 1} if b.get("steps") != 0 else {"track": track or None, "steps": 0}
+    else:
+        body = {"track": track, "on": bool(b.get("on"))}
+    async with http.post(f"{RADIO}/api/radio/{action}", json=body, timeout=aiohttp.ClientTimeout(total=8)) as r:
         return web.json_response(await r.json(content_type=None), status=r.status)
 
 

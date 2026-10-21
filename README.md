@@ -33,7 +33,7 @@ The **Image & Video Studio** used to be part of Agentora; since 2026-10-16 it is
 - **It learns from you.** 👍, 👎, skips, playlist saves and even how long you listen become short taste notes the songwriter follows. **More like this** on any song writes a new one in its spirit, and a **🎲 Variety** slider per station decides how far songs may wander from its core sound.
 - **Cover art for every station and song**, drawn between songs by Z-Image Turbo from a name-free description of the music, so there's no text or band likenesses.
 - **One live broadcast.** Everyone hears the same 192 kbps MP3 stream (`/radio/stream.mp3`). A 15 s cushion rides out Wi-Fi and mobile hiccups, ⏭ and ⏮ cut over in about a second, ⏮ walks back through the station's history like any player, and **📻 Play next** queues any song in the library.
-- **Now Playing at the bottom of every page.** Pull it up (or tap it) for the song's cover, details and lyrics, with the previous and next songs' covers either side (tap one to go there) and the full controls underneath.
+- **Now Playing at the bottom of every page** (radio, Music Studio, Home). Pull it up (or tap it) for the song's cover, details and lyrics, with the previous and next songs' covers either side (tap or swipe to go there) and the full controls underneath. Only one song plays at a time, across every Agentora tab.
 - **A library laid out like folders:** Library › station › song, with a path bar, an ↑ button, and previous/next inside each folder.
 - **Lyrics you can read along with**, on each song's page and under Now Playing (they follow the song that's on). [Verse] / [Chorus] tags become labelled blocks; instrumentals say so plainly.
 - **🎲 Lyrics from the library.** In the Music Studio, one press fills in a random library song's lyrics to sing in a new style; press again for another (no repeats until every song has had a turn, ↩ Undo brings your own words back).
@@ -86,8 +86,8 @@ The code, by job:
 | `studio/radio.html` + `studio/web/radio-*.js` | the radio page: core, player, library, panel, extras (plain scripts, no build step) |
 | `studio/index.html` | the Music Studio |
 | `studio/logsetup.py` | logging for every component |
-| `tests/e2e_radio.py`, `tests/e2e_ui.py` | end-to-end tests (below) |
-| `home/` | Home and accounts (`server.py`, port 7871; `auth.py`), the Home page (`home.html`), the Hermes dashboard and Jim gates (`hermes_gate.py`, 7880 and 7885), and the shared look and app switcher (`shared/agentora.css`, `shared/agentora.js`) |
+| `tests/e2e_radio.py`, `tests/e2e_ui.py`, `tests/e2e_controls.py`, `tests/e2e_solo.py` | end-to-end tests (below) |
+| `home/` | Home and accounts (`server.py`, port 7871; `auth.py`), the Home page (`home.html`), the Hermes dashboard and Jim gates (`hermes_gate.py`, 7880 and 7885), and the shared look, app switcher and Now Playing (the view, the one-song-at-a-time guard and the player Home and the Music Studio use: `shared/agentora.css`, `shared/agentora.js`) |
 | `tools/tailnet-relay.py` | serves the apps (7860, 7861, 7871, 7880, 7885, and the Image & Video Studio's 7870) on the Tailscale and home-network addresses, with HTTPS from the Tailscale certificate |
 | `systemd/` | user units for every service: `yue2-studio`, `agentora-stream`, `agentora-gpu`, `agentora-speech`, `agentora-home`, `hermes-gate`, `jim-gate`, `tailnet-relay`, `agentora-ollama-amd` |
 
@@ -263,7 +263,8 @@ End-to-end tests against the running services. Run them while nobody is listenin
 ~/venv-yue2/bin/python tests/e2e_radio.py --restart    # + restarts the radio while listening: the stream must not stop
 ~/venv-yue2/bin/python tests/e2e_radio.py --full       # + ✨ Improve, ✏️ rewrite ideas, and one song made start to finish (minutes)
 python tests/e2e_ui.py                                 # headless browser (Playwright): every page and flow, no JS errors
-uv run -q --no-project --with playwright python tests/e2e_controls.py   # every button, link and form (73 checks, ~25 min)
+uv run -q --no-project --with playwright python tests/e2e_controls.py   # every button, link and form (74 checks, ~25 min)
+uv run -q --no-project --with playwright python tests/e2e_solo.py       # one song at a time: two songs in a row, two tabs
 ```
 
 `e2e_controls.py` presses each control on the radio, the classic deck, the Music Studio and Home (signed out) and checks the request it sends, the dialog or page it opens, or the sound it plays. It changes nothing: POST, PUT and DELETE never leave the browser, the stream is blocked, and the Spotify list is faked so it doesn't use up Spotify's rate limit. It's safe while people listen.

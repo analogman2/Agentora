@@ -17,64 +17,12 @@ audio.crossOrigin = "anonymous";                   // the stream comes from the 
 audio.volume = store.get("vol", 0.85); $("vol").value = audio.volume;
 $("vol").oninput = () => { audio.volume = +$("vol").value; store.set("vol", audio.volume); };
 
-// ---------------- lyrics: [Verse] / [Chorus] tags become labelled blocks; other [...] lines are stage notes
-const LY_SECTION = /^(verse|chorus|pre-?chorus|post-?chorus|bridge|intro|outro|hook|refrain|interlude|break|instrumental|solo|coda|drop|breakdown)\b/i;
-function lyricsHTML(t) {
-  const blocks = [];
-  let cur = null, sung = 0;
-  for (const raw of String((t && t.lyrics) || "").replace(/\r/g, "").split("\n")) {
-    const line = raw.trim(), tag = line.match(/^\[([^\]]{1,120})\]$/);
-    if (tag && LY_SECTION.test(tag[1].trim())) { cur = {tag: tag[1].trim(), lines: []}; blocks.push(cur); continue; }
-    if (!cur) { cur = {tag: null, lines: []}; blocks.push(cur); }
-    if (tag) cur.lines.push(`<span class="lynote">${esc(tag[1])}</span>`);
-    else if (line) { cur.lines.push(`<span class="lyl">${esc(line)}</span>`); sung++; }
-  }
-  if (!sung) return `<p class="lynone">${t && t.mode === "instrumental" ? "🎼 Instrumental: this song has no lyrics."
-    : "No lyrics were saved for this song."}</p>`;
-  return `<div class="lyrics">${blocks.filter(b => b.lines.length || b.tag).map(b => {
-    const chorus = b.tag && /^(chorus|hook|refrain)/i.test(b.tag);
-    return `<div class="lysec${chorus ? " chorus" : ""}">${b.tag ? `<div class="lytag">${esc(b.tag)}</div>` : ""}${b.lines.join("")}</div>`;
-  }).join("")}</div>`;
-}
+const lyricsHTML = agentoraLyrics;                 // [Verse] / [Chorus] blocks (shared with every app's Now Playing)
 
 // ---------------- generated cover art (deterministic from a seed: same song, same cover)
-function prng(seed) {
-  let h = 2166136261; for (const c of String(seed)) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
-  return () => { h += 0x6D2B79F5; let t = h; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; };
-}
+const prng = agentoraPrng;
 function hueOf(st) { let h = 0; for (const ch of (st ? (st.id || "") + (st.name || "") : "agentora")) h = (h * 31 + ch.charCodeAt(0)) % 360; return h; }
-const artCache = new Map();
-function songArt(seed, baseHue) {
-  const key = seed + "|" + baseHue; if (artCache.has(key)) return artCache.get(key);
-  const r = prng(seed), h = ((baseHue ?? r() * 360) + (r() - .5) * 70 + 360) % 360, h2 = (h + 25 + r() * 70) % 360, h3 = (h + 150 + r() * 60) % 360;
-  const c = (hh, s, l, a = 1) => `hsla(${hh.toFixed(0)},${s}%,${l}%,${a})`;
-  const style = Math.floor(r() * 4);
-  let shapes = "";
-  if (style === 0) {                                         // soft blobs
-    for (let i = 0; i < 6; i++) shapes += `<circle cx="${r() * 300}" cy="${r() * 300}" r="${50 + r() * 110}" fill="${c([h, h2, h3][i % 3], 70 + r() * 20, 45 + r() * 25, .55 + r() * .3)}"/>`;
-    shapes = `<g filter="url(#b)">${shapes}</g>`;
-  } else if (style === 1) {                                  // sunset sun + horizon
-    const y = 150 + r() * 60;
-    shapes = `<circle cx="${80 + r() * 140}" cy="${y - 20}" r="${60 + r() * 40}" fill="${c(h3, 85, 62, .95)}"/>` +
-      Array.from({length: 7}, (_, i) => `<rect x="0" y="${y + i * 16 + i * i}" width="300" height="${4 + i * 1.5}" fill="${c(h, 60, 14 + i * 3, .9)}"/>`).join("");
-  } else if (style === 2) {                                  // waves
-    for (let i = 0; i < 9; i++) {
-      const y = 40 + i * 30, a = 10 + r() * 26, f = 1 + r() * 2.5;
-      let d = `M0 ${y}`; for (let x = 0; x <= 300; x += 15) d += ` L${x} ${(y + Math.sin(x / 300 * Math.PI * 2 * f + i) * a).toFixed(1)}`;
-      shapes += `<path d="${d}" fill="none" stroke="${c(i % 2 ? h2 : h3, 80, 70, .75)}" stroke-width="${2 + r() * 5}"/>`;
-    }
-  } else {                                                   // rings
-    const cx = 60 + r() * 180, cy = 60 + r() * 180;
-    for (let i = 14; i > 0; i--) shapes += `<circle cx="${cx}" cy="${cy}" r="${i * 22}" fill="none" stroke="${c(i % 2 ? h2 : h3, 75, 65, .5)}" stroke-width="${3 + (i % 3) * 3}"/>`;
-  }
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300"><defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${c(h, 65, 42)}"/><stop offset="1" stop-color="${c(h2, 70, 18)}"/></linearGradient>
-    <filter id="b"><feGaussianBlur stdDeviation="22"/></filter>
-    <filter id="n"><feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .07 0"/></filter></defs>
-    <rect width="300" height="300" fill="url(#g)"/>${shapes}<rect width="300" height="300" filter="url(#n)"/></svg>`;
-  const url = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
-  artCache.set(key, url); return url;
-}
+const artCache = new Map(), songArt = agentoraSongArt;   // generated covers (shared with every app's Now Playing)
 // drawn cover art when it exists (made by the Image & Video Studio's picture model), else the generated pattern
 const stationArt = (st) => st && st.art && st.id !== RERUNS ? `/api/radio/stations/${encodeURIComponent(st.id)}/art?v=${st.art}` : patternArt(st);
 function patternArt(st) {

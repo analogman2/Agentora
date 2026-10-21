@@ -28,9 +28,11 @@ Agentora started as [yue2-xpu-radio](https://github.com/zebgop-ops/yue2-xpu-radi
 
 ### A cleaner player
 
-- **Now Playing** shows the song's cover art, title, style and lyrics, with **Add to my playlist**, **Song details**, **Download** and **New cover**. The lyrics sit open under the song (tap **Lyrics** to fold them away; the page remembers) and change with each new song. A "Recently played" list sits underneath.
+- **Stations** (the first tab, called Now Playing until 2026-10-20; old `#now` links still work) shows the song's cover art, title, style and lyrics, with **Add to my playlist**, **Song details**, **Download** and **New cover**. The lyrics sit open under the song (tap **Lyrics** to fold them away; the page remembers) and change with each new song. A "Recently played" list sits underneath.
 - **A player bar on every page**: 👎 ⏮ ▶ ⏭ 👍 ⊕, a progress bar and volume.
 - **The bar is "Now Playing"** (2026-10-19): the whole bar pulls up like a drawer (it has a grab handle on top). Drag up anywhere on it, even from a button, and the Now Playing view follows your finger or mouse; let go a third of the way up, or flick, and it opens, otherwise it drops back. A tap anywhere on the bar that isn't a button opens it too; the buttons still just do their job. Drag it back down the same way to close. The view slides up (full screen on a phone, a large window on a computer). The cover sits in the middle with the previous song's cover peeking in on the left and the next song's on the right; tap one to go there (on the radio that's ⏮ / ⏭ for everyone listening). Underneath are the title, station, style, length and the lyrics, and the full controls stay at the bottom: 👎 ⏮ ▶ ⏭ 👍 ⊕, the progress bar with times (drag it to jump in a Library song) and volume. Close it with the ⌄ button, Esc, the phone's back button, a swipe down, or a click outside. The ⓘ button opens the song's page.
+- **Swipe the covers** (2026-10-20): in Now Playing, swipe the covers sideways to go to the previous or next song; the covers follow your finger. A short swipe springs back; a swipe past about a third of a cover, or a quick flick, goes there. A drag up or down never counts as a swipe. On the live radio a swipe skips or goes back for everyone listening, just like ⏭ and ⏮. Tapping a side cover still works.
+- **Now Playing on Home and in the Music Studio too** (2026-10-20): their bar at the bottom pulls up (or taps open) into the same Now Playing view, with the same controls. It shows the song playing in that page, or else the radio's song with the songs that aired before it and the one coming up; ⏭ ⏮ 👍 👎 ⊕ and swipes work on the radio from there, and the middle button opens the radio to listen.
 - **A side panel (☰)** for the controls that used to crowd the deck: who's listening and how well it's connected, GPU and disk usage, GPU priority, links to the other apps, and Settings.
 - **The cassette deck** from the original is still at `/radio/classic`.
 
@@ -44,7 +46,7 @@ Agentora started as [yue2-xpu-radio](https://github.com/zebgop-ops/yue2-xpu-radi
 - **Previous / Next** at the bottom of a song page moves through the folder you came from: the station, your playlist or your history.
 - **Whole rows are clickable**: clicking anywhere on a song row opens it.
 - **Playing a station opens it**: pressing ▶ on a station goes straight to its page, with the song in the player bar, instead of a separate Now Playing step.
-- **🎲 Random** (Library, Now Playing and the start page) plays a station picked at random.
+- **🎲 Random** (Library, Stations and the start page) plays a station picked at random.
 - **☑ Select** on any song list, with **Select all**, then 📻 Play next, + Playlist, − Playlist or Delete for all of them at once.
 - **Search** across stations, titles, styles and lyrics.
 
@@ -101,6 +103,7 @@ Agentora started as [yue2-xpu-radio](https://github.com/zebgop-ops/yue2-xpu-radi
   4. Press **Create song**. The new version remembers which song it rewrote. A 👍 on it also teaches the original's station.
   5. **Stop rewriting** puts back whatever was in the form before.
 - **📻 Play next** on every song sends it to the radio.
+- **▶ Play plays in Now Playing** (2026-10-20): every song in the Library (and the original you're rewriting) has a ▶ Play button that plays it in the Now Playing bar at the bottom, then carries on through the list; the old built-in players are gone. Only one song plays at a time: starting one stops the last, and that goes for every Agentora tab, so playing a song in the Music Studio pauses the radio in another tab (and the other way round).
 - **The Spotify picker loads at once** (2026-10-19): the Music Studio keeps your liked songs for 10 minutes instead of asking Spotify on every visit, and says "Spotify is busy" (showing the last list) when Spotify's rate limit kicks in.
 - **🎤 Covers are the default** (2026-10-19): the Music Studio's Spotify picker starts on Cover and remembers your choice, the Spotify station plays its covers before any inspired songs, and Hermes's agent makes covers unless asked otherwise.
 - **Newest first means newest made** (2026-10-19): on a station and in All songs it sorts by when the song was made, not when it last played; rows say "made …" or "played …".

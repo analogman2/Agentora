@@ -1,7 +1,7 @@
 // Agentora radio page, part 3 of 5: The pages: routes, the path bar, song / station / Library / list pages, the list controls (search, sort, select), and playing from the Library.
 // Plain scripts loaded in order by radio.html; they share one global scope.
 // ---------------- views, laid out like folders (hash routes):
-//   #now                         what's playing
+//   #stations                    what's playing, or the stations to pick from (#now: its old name)
 //   #lib                         Library: ♥ My playlist, 🕘 Listen history, and every station
 //   #lib/playlist  #lib/history  a song list
 //   #lib/<station id>            a station: all its songs, then "About this station"
@@ -10,7 +10,8 @@
 // Older addresses (#browse, #collection/..., #station/<id>, #song/<id>) still work.
 const view = {tab: "now", sub: "playlist", id: null, parent: null, q: ""};
 function route() {
-  let [tab, a, b] = decodeURIComponent(location.hash.slice(1) || "now").split("/");
+  let [tab, a, b] = decodeURIComponent(location.hash.slice(1) || "stations").split("/");
+  if (tab === "now") tab = "stations";
   if (tab === "browse") { tab = "lib"; a = undefined; }
   if (tab === "collection") { tab = "lib"; a = a === "stations" ? undefined : (a || "playlist"); }
   if (tab === "station") { tab = "lib"; b = undefined; }
@@ -423,10 +424,10 @@ function lpPlay(i) {
   const t = lp.queue[i]; if (!t) return lpStop();
   lp.i = i; lp.t = t;
   if (lid) { wantPlay = false; disconnect(); toast("Playing from your library — press ▶ on a station to go back to the radio."); }
-  pv.src = t.audio; pv.play().catch(err => toast(err.message));
+  pv.src = t.audio; agentoraSolo.start(pv, () => pv.play().catch(err => toast(err.message)));
   syncNow(); lpMark();
 }
-function lpBack() { if (pv.currentTime > 3 || lp.i <= 0) { pv.currentTime = 0; pv.play().catch(() => {}); } else lpPlay(lp.i - 1); }
+function lpBack() { if (pv.currentTime > 3 || lp.i <= 0) { pv.currentTime = 0; agentoraSolo.start(pv, () => pv.play().catch(() => {})); } else lpPlay(lp.i - 1); }
 function lpStop(quiet) {
   lp.t = null; lp.queue = []; lp.i = -1; pv.pause(); pv.removeAttribute("src");
   current = null; shownId = undefined; lpMark();
@@ -434,7 +435,7 @@ function lpStop(quiet) {
 }
 async function preview(src, row, id) {
   id = id || (row && row.dataset.id);
-  if (lp.t && lp.t.id === id) { pv.paused ? pv.play().catch(e => toast(e.message)) : pv.pause(); return; }   // same song: play / pause
+  if (lp.t && lp.t.id === id) { pv.paused ? agentoraSolo.start(pv, () => pv.play().catch(e => toast(e.message))) : pv.pause(); return; }   // same song: play / pause
   let queue = lpQueueFrom(row);
   if (!queue.length) {                             // a song page or a tile: just that song
     let t = lpTrack(id);

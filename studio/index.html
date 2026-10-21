@@ -63,7 +63,6 @@ body.easy .adv-only { display: none !important; }
 .rw { border: 1px solid var(--accent); border-radius: 12px; padding: 12px 14px; margin-bottom: 16px; background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
 .rw .rwhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .rw .rwhead b { flex: 1 1 200px; }
-.rw audio { height: 32px; max-width: 100%; }
 .rw .ideas { display: grid; gap: 8px; margin: 10px 0; }
 .rw .idea { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
 .rw .idea div { flex: 1; min-width: 0; }
@@ -87,7 +86,7 @@ legend { font-size: 13px; font-weight: 600; padding: 0 6px; color: var(--muted);
 .prog > i { display: block; height: 100%; background: var(--accent); transition: width .5s; }
 .prog.indet > i { width: 30%; animation: slide 1.4s ease-in-out infinite; }
 @keyframes slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
-.job audio { width: 100%; height: 36px; margin-top: 8px; }
+.job .play { min-width: 76px; }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .toolbar { display: flex; gap: 8px; margin-bottom: 10px; } .toolbar input { flex: 1; }
 .spotify { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
@@ -129,7 +128,7 @@ dialog pre { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(
     <section class="panel" id="create">
       <div class="rw" id="rw" hidden>
         <div class="rwhead"><b>✏️ Rewriting “<span id="rwTitle"></span>”</b>
-          <audio id="rwAudio" controls preload="none" title="The original"></audio>
+          <button class="btn small" type="button" id="rwPlay" title="Play the original in the Now Playing player">▶ Play the original</button>
           <button class="linkbtn" type="button" id="rwClose" title="Put back what was in the form before">Stop rewriting</button></div>
         <p class="small muted" style="margin:6px 0 0">Everything from the original is filled in below. Apply an idea or say what to change, then press <b>Create song</b>.</p>
         <div class="ideas" id="rwIdeas"></div>
@@ -476,21 +475,38 @@ function authorText(a) {        // 🎵 Spotify songs: a cover keeps the origina
   if (a.startsWith("Spotify ")) return "✨ From your Spotify likes";
   return "by " + a;
 }
+// ▶ Play: every song plays in the one Now Playing player (shared with Home and the radio; one song at a time, in every tab),
+// going on through the list it was played from
+let libItems = [];
+const songAudio = (j) => { const f = new Set(j.files || []); return f.has("song.mp3") ? `/files/${encodeURIComponent(j.id)}/song.mp3` : f.has("audio.flac") ? `/files/${encodeURIComponent(j.id)}/audio.flac` : null; };
+const asTrack = (j) => ({id: j.id, title: j.title || "Untitled", style: j.style, audio: songAudio(j), seconds: j.seconds, mode: j.mode, sub: authorText(j.author) || "🎵 Music Studio"});
+const nowId = () => window.agentoraPlayer && agentoraPlayer.t && !agentoraPlayer.audio.paused ? agentoraPlayer.t.id : null;
+const playLabel = (id) => nowId() === id ? "❚❚ Pause" : "▶ Play";
+function markPlaying() { document.querySelectorAll('[data-act="play"]').forEach(b => { b.textContent = playLabel(b.dataset.id); b.classList.toggle("on", nowId() === b.dataset.id); }); }
+document.addEventListener("DOMContentLoaded", () => window.agentoraPlayer && agentoraPlayer.on(markPlaying));
+function playSong(id) {
+  const P = window.agentoraPlayer; if (!P) return;
+  if (P.t && P.t.id === id) return P.toggle();
+  const list = libItems.filter(songAudio).map(asTrack);
+  P.play(list, Math.max(0, list.findIndex(t => t.id === id)));
+}
 function renderLibrary(st) {
   const mine = new Set(store.get("mine", [])), qtext = $("search").value.trim().toLowerCase(), f = $("filter").value;
   const items = st.library.filter(j => (f === "all" || (f === "mine" && mine.has(j.id)) || (f === "done" && j.status === "done") || (f === "failed" && j.status !== "done")) &&
     (!qtext || [j.title, j.style, j.author].join(" ").toLowerCase().includes(qtext)));
   $("libcount").textContent = `(${st.library.filter(j => j.status === "done").length} songs)`;
   const sig = items.map(j => j.id + j.status).join("|") + f + qtext;
-  if (sig === libSig) return; libSig = sig;   // don't re-render (keeps audio playing)
+  libItems = items;
+  if (sig === libSig) return; libSig = sig;
   if (!items.length) { $("library").innerHTML = `<div class="empty">${st.library.length ? "No matches." : "No songs yet — make the first one!"}</div>`; return; }
   $("library").innerHTML = items.map(j => {
     const id = esc(j.id), files = new Set(j.files || []);
-    const audio = files.has("song.mp3") || files.has("audio.flac") ? `<audio controls preload="none" src="/files/${id}/${files.has("song.mp3") ? "song.mp3" : "audio.flac"}"></audio>` : "";
+    const audio = "";
     const err = j.status !== "done" ? `<div class="small" style="color:var(--bad)">${esc(j.error || j.status)}</div>` : "";
     return `<div class="job"><div class="top">${j.status !== "done" ? badge(j.status) : ""}<span class="title">${esc(j.title)}</span><span class="muted small">${meta(j)}</span></div>
       <div class="style" title="${esc(j.style)}">${esc(j.style)}</div>${err}${audio}
       <div class="actions">
+        ${songAudio(j) ? `<button class="btn small accent play" data-act="play" data-id="${id}" title="Play in the Now Playing player">${playLabel(j.id)}</button>` : ""}
         ${files.has("song.mp3") ? `<a class="btn small" href="/files/${id}/song.mp3?download=1">⬇ MP3</a>` : ""}
         ${files.has("audio.flac") ? `<a class="btn small" href="/files/${id}/audio.flac?download=1">⬇ FLAC</a>` : ""}
         <button class="btn small" data-act="details" data-id="${id}">Details</button>
@@ -536,6 +552,7 @@ async function act(kind, id) {
   if (kind === "cancel") { await fetch(`/api/jobs/${id}/cancel`, {method: "POST"}); return tick(); }
   if (kind === "delete") { if (!confirm("Delete this song for everyone?")) return; await fetch(`/api/jobs/${id}`, {method: "DELETE"}); libSig = ""; return tick(); }
   if (kind === "rewrite") return startRewrite(id);
+  if (kind === "play") return playSong(id);
   if (kind === "upnext") {
     const b = document.querySelector(`[data-act="upnext"][data-id="${id}"]`);
     const r = await fetch("/api/radio/upnext", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ids: [id]})});
@@ -677,7 +694,7 @@ async function startRewrite(id) {
   rw.id = id; rw.undo = []; rw.title = j.title || "Untitled";
   fillFrom(j, {newSeed: true});
   $("title").value = rw.title.replace(/ \(rewrite( \d+)?\)$/, "") + " (rewrite)"; saveForm();
-  $("rwTitle").textContent = rw.title; $("rwAudio").src = `/files/${encodeURIComponent(id)}/song.mp3`;
+  $("rwTitle").textContent = rw.title; rw.track = asTrack(j); $("rwPlay").hidden = !rw.track.audio;
   $("rw").hidden = false; $("rwStatus").textContent = ""; $("rwAsk").value = "";
   $("create").scrollIntoView({behavior: "smooth"});
   loadIdeas();
@@ -685,7 +702,7 @@ async function startRewrite(id) {
 function endRewrite(restore) {
   const backup = store.get("rwBackup", null);
   if (restore && backup && Object.keys(backup).length) { loadForm(backup); saveForm(); }
-  store.set("rwBackup", null); rw.id = null; $("rw").hidden = true; $("rwAudio").removeAttribute("src");
+  store.set("rwBackup", null); rw.id = null; $("rw").hidden = true;
   if (location.hash.startsWith("#rewrite=")) history.replaceState(null, "", location.pathname);
 }
 async function suggest(ask) {
@@ -740,6 +757,7 @@ $("rwGo").onclick = async () => {
 };
 $("rwAsk").addEventListener("keydown", (e) => { if (e.key === "Enter") $("rwGo").click(); });
 $("rwClose").onclick = () => endRewrite(true);
+$("rwPlay").onclick = () => { if (rw.track && window.agentoraPlay) agentoraPlay([rw.track]); };
 function rewriteFromHash() { const m = location.hash.match(/^#rewrite=([\w-]+)/); if (m) startRewrite(m[1]); }
 window.addEventListener("hashchange", rewriteFromHash);
 
