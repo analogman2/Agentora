@@ -1156,12 +1156,17 @@ def _lrclib(url):
     raise BadRequest("The lyrics site isn't answering right now — try again in a minute.")
 
 
+lyrics_found = {}       # LRCLIB id → the search hit (its lyrics included), so picking one needs no second request; kept 30 min
+
+
 def lyrics_find(q):
     """Songs matching a typed name ("song", or "song artist"): the best few, those with lyrics first."""
     q = re.sub(r"\s+", " ", str(q or "")).strip()[:120]
     if len(q) < 2:
         raise BadRequest("Type a song name")
     hits = _lrclib(f"{LRCLIB}/search?" + urllib.parse.urlencode({"q": q})) or []
+    for k in [k for k, (t, _) in list(lyrics_found.items()) if time.time() - t > 1800]:
+        lyrics_found.pop(k, None)
     out, seen = [], set()
     for h in hits:
         has = bool((h.get("plainLyrics") or h.get("syncedLyrics") or "").strip())
@@ -1169,6 +1174,7 @@ def lyrics_find(q):
         if key in seen or not (has or h.get("instrumental")):
             continue
         seen.add(key)
+        lyrics_found[str(h.get("id"))] = (time.time(), h)
         out.append({"id": h.get("id"), "title": h.get("trackName") or "", "artist": h.get("artistName") or "",
                     "album": h.get("albumName") or "", "seconds": round(h.get("duration") or 0), "instrumental": bool(h.get("instrumental"))})
     out.sort(key=lambda x: x["instrumental"])
@@ -1194,7 +1200,8 @@ def tag_lyrics(text):
 def lyrics_get(lid):
     if not re.fullmatch(r"\d{1,12}", str(lid or "")):
         raise BadRequest("id must be an LRCLIB song id")
-    h = _lrclib(f"{LRCLIB}/get/{lid}")
+    hit = lyrics_found.get(str(lid))
+    h = hit[1] if hit else _lrclib(f"{LRCLIB}/get/{lid}")
     if not h:
         raise BadRequest("That song isn't on the lyrics site any more")
     if h.get("instrumental"):
