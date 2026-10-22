@@ -12,7 +12,7 @@ re-enables an automatic return after that many idle minutes (default 0 = never).
 Library layout: DATA/<job id>/job.json, plus DATA/<job id>/song/ (YuE2 artifacts)
 and song.mp3. Stdlib HTTP server; run with the YuE2 venv's python.
 """
-import dataclasses, json, multiprocessing as mp, os, queue, urllib.request, random, re, shutil, subprocess, sys, threading, time, traceback, uuid
+import dataclasses, json, multiprocessing as mp, os, queue, urllib.request, urllib.parse, urllib.error, random, re, shutil, subprocess, sys, threading, time, traceback, uuid
 import logging
 import logsetup                     # logging for every component: journal + logs/<component>.log
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -1110,7 +1110,8 @@ def rewrite_suggestions(jid, ask=""):
 
 def summary(job):
     keys = ("id", "batch", "take", "takes", "title", "author", "mode", "style", "cot", "seed", "status", "stage",
-            "progress", "created", "started", "finished", "seconds", "gen_seconds", "error", "cfg_scale", "max_seconds")
+            "progress", "created", "started", "finished", "seconds", "gen_seconds", "error", "cfg_scale", "max_seconds",
+            "radio_feedback", "playlist_at")
     s = {k: job.get(k) for k in keys}
     d = DATA / job["id"]
     s["files"] = [name for name, (rel, _) in FILES.items() if (d / rel).is_file()]
@@ -1131,6 +1132,77 @@ def state():
                             radio_on=radio.state["on"], radio_generating=radio.generating()),
                 "queue": [summary(j) for j in queue], "library": [summary(j) for j in library[:300]],
                 "limits": {"max_queued": MAX_QUEUED}, "lyrics_writers": [label for _, _, label in LYRICS_LLMS]}
+
+
+# ---------------- 🔎 lyrics by song name: LRCLIB (lrclib.net), a free, open lyrics database (no key), as the Spotify covers use
+LRCLIB = "https://lrclib.net/api"
+LRCLIB_AGENT = "Agentora Music Studio (local, personal use)"     # LRCLIB asks clients to name themselves
+
+
+def _lrclib(url):
+    req = urllib.request.Request(url, headers={"User-Agent": LRCLIB_AGENT})
+    for attempt in (1, 2):                                  # it hiccups now and then: one quick retry
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None
+            err = f"HTTP {e.code}"
+        except Exception as e:
+            err = str(e)
+        logging.getLogger("lyrics").warning("LRCLIB %s (try %d): %s", url.rsplit("/api", 1)[-1][:80], attempt, err)
+        time.sleep(1)
+    raise BadRequest("The lyrics site isn't answering right now — try again in a minute.")
+
+
+def lyrics_find(q):
+    """Songs matching a typed name ("song", or "song artist"): the best few, those with lyrics first."""
+    q = re.sub(r"\s+", " ", str(q or "")).strip()[:120]
+    if len(q) < 2:
+        raise BadRequest("Type a song name")
+    hits = _lrclib(f"{LRCLIB}/search?" + urllib.parse.urlencode({"q": q})) or []
+    out, seen = [], set()
+    for h in hits:
+        has = bool((h.get("plainLyrics") or h.get("syncedLyrics") or "").strip())
+        key = ((h.get("trackName") or "").lower(), (h.get("artistName") or "").lower())
+        if key in seen or not (has or h.get("instrumental")):
+            continue
+        seen.add(key)
+        out.append({"id": h.get("id"), "title": h.get("trackName") or "", "artist": h.get("artistName") or "",
+                    "album": h.get("albumName") or "", "seconds": round(h.get("duration") or 0), "instrumental": bool(h.get("instrumental"))})
+    out.sort(key=lambda x: x["instrumental"])
+    return {"results": out[:8]}
+
+
+def tag_lyrics(text):
+    """Plain lyrics → YuE2's format: stanzas become [Verse]s, a stanza sung more than once is the [Chorus]."""
+    text = re.sub(r"^\[\d+:\d+(?:\.\d+)?\]\s?", "", text.replace("\r\n", "\n"), flags=re.M)
+    stanzas = [[l.strip() for l in b.split("\n") if l.strip()] for b in re.split(r"\n\s*\n", text.strip())]
+    stanzas = [b for b in stanzas if b]
+    if len(stanzas) == 1 and len(stanzas[0]) > 8:          # no blank lines: four lines a section
+        stanzas = [stanzas[0][i:i + 4] for i in range(0, len(stanzas[0]), 4)]
+    if any(SECTION_RE.match(b[0].strip("[]() ")) for b in stanzas):   # already tagged: just tidy it
+        return normalize_lyrics(text)[1]
+    count = {}
+    for b in stanzas:
+        count["\n".join(b).lower()] = count.get("\n".join(b).lower(), 0) + 1
+    parts = [("[Chorus]" if count["\n".join(b).lower()] > 1 else "[Verse]") + "\n" + "\n".join(b) for b in stanzas]
+    return normalize_lyrics("\n\n".join(parts))[1]
+
+
+def lyrics_get(lid):
+    if not re.fullmatch(r"\d{1,12}", str(lid or "")):
+        raise BadRequest("id must be an LRCLIB song id")
+    h = _lrclib(f"{LRCLIB}/get/{lid}")
+    if not h:
+        raise BadRequest("That song isn't on the lyrics site any more")
+    if h.get("instrumental"):
+        return {"title": h.get("trackName") or "", "artist": h.get("artistName") or "", "lyrics": "", "instrumental": True}
+    raw = h.get("plainLyrics") or h.get("syncedLyrics") or ""
+    if not raw.strip():
+        raise BadRequest("No lyrics for that song yet")
+    return {"title": h.get("trackName") or "", "artist": h.get("artistName") or "", "lyrics": tag_lyrics(raw), "instrumental": False}
 
 
 # ---------------- 🎵 songs from jt's Spotify likes: runs Hermes's spotify-liked-songs agent (it has its own ledger and lock)
@@ -1339,6 +1411,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, spotify_status())
         if path == "/api/spotify/tracks":
             return self.send(200, spotify_tracks())
+        if path in ("/api/lyrics/find", "/api/lyrics/get"):
+            qs = urllib.parse.parse_qs(self.path.partition("?")[2])
+            try:
+                return self.send(200, lyrics_find(qs.get("q", [""])[0]) if path.endswith("find") else lyrics_get(qs.get("id", [""])[0]))
+            except BadRequest as e:
+                return self.send(400, {"error": str(e)})
         if path == "/api/health":
             st = state()
             return self.send(200, {"ok": True, "gpu_owner": st["gpu"]["owner"], "queued": len(st["queue"]),

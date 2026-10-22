@@ -519,17 +519,28 @@ window.agentoraPlayer = (() => {
   const local = {                                   // a song playing here
     info() {
       const t = P.t;
-      return {key: `l:${t.id}:${P.i}`, title: t.title, cover: t.cover || agentoraSongArt(t.id, 0), sub: [t.sub || (THIS === "music" ? "🎵 Music Studio" : ""), t.credit].filter(Boolean).join(" · "),
+      return {key: `l:${t.id}:${P.i}`, title: t.title, cover: t.cover || agentoraSongArt(t.id, 0), sub: [...new Set([t.sub || (THIS === "music" ? "🎵 Music Studio" : ""), t.credit].filter(Boolean))].join(" · "),   // a cover's credit can be its sub too
               kicker: `Playing here · ${THIS === "music" ? "Music Studio" : "Home"}`, more: songUrl(t.id), style: t.style || "", chips: chips(t),
               lyrics: t.lyrics != null ? agentoraLyrics(t) : null, status: ""};
     },
     around: () => ({prev: view(P.queue[P.i - 1], true), next: view(P.queue[P.i + 1], true), notes: {next: "End of the list"}}),
     go: (d) => P.go(d === "prev" ? -1 : 1),
-    controls: () => [
-      {key: "back", html: I.prev, title: "Back: restart · press again for the previous song", label: "Back"},
-      {key: "toggle", html: P.audio.paused ? I.play : I.pause, play: true, title: P.audio.paused ? "Play" : "Pause", label: P.audio.paused ? "Play" : "Pause"},
-      {key: "next", html: I.next, title: "Next song in the list", label: "Next", disabled: P.i >= P.queue.length - 1}],
-    control: (k) => k === "back" ? P.back() : k === "toggle" ? P.toggle() : P.go(1),
+    controls() {
+      const t = P.t;
+      return [{key: "down", html: I.down, title: "Thumbs down — fewer like this (skips to the next song)", label: "Thumbs down"},
+              {key: "back", html: I.prev, title: "Back: restart · press again for the previous song", label: "Back"},
+              {key: "toggle", html: P.audio.paused ? I.play : I.pause, play: true, title: P.audio.paused ? "Play" : "Pause", label: P.audio.paused ? "Play" : "Pause"},
+              {key: "next", html: I.next, title: "Next song in the list", label: "Next", disabled: P.i >= P.queue.length - 1},
+              {key: "up", html: I.up, on: t.feedback === "keep", pressed: t.feedback === "keep", title: "Thumbs up — make more songs like this", label: "Thumbs up"},
+              {key: "add", html: t.in_playlist ? I.added : I.add, on: !!t.in_playlist, pressed: !!t.in_playlist, title: t.in_playlist ? "In your playlist — press to remove" : "Add to my playlist", label: "Add to my playlist"}];
+    },
+    control(k) {                                  // 👍 👎 ⊕ teach the radio's taste and fill the playlist, as on the radio
+      const t = P.t;
+      if (k === "down") { t.feedback = "dislike"; act("feedback", {track: t.id, kind: "dislike"}); return P.i < P.queue.length - 1 ? P.go(1) : sheet.render(); }
+      if (k === "up") { const on = t.feedback === "keep"; t.feedback = on ? null : "keep"; sheet.render(); return act("feedback", {track: t.id, kind: on ? "clear" : "keep"}); }
+      if (k === "add") { t.in_playlist = !t.in_playlist; sheet.render(); return act("playlist", {track: t.id, on: t.in_playlist}); }
+      return k === "back" ? P.back() : k === "toggle" ? P.toggle() : P.go(1);
+    },
     progress() {
       const a = P.audio, dur = a.duration || P.t.seconds || 0;
       return {el: agTime(a.currentTime), dur: dur ? agTime(dur) : "—", frac: dur ? a.currentTime / dur : 0,

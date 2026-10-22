@@ -165,6 +165,11 @@ dialog pre { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(
           <button class="btn small" type="button" id="libLyrics" title="Fill in the lyrics of a random song from the radio library. Press again for another one">🎲 Lyrics from the library</button></span>
         </div>
         <div class="small muted" id="libLyricsNote" hidden></div>
+        <form class="row" id="findLyrics" style="margin:0 0 6px" autocomplete="off">
+          <input type="search" id="flQ" placeholder="🔎 Song name (and artist), e.g. No Scrubs TLC" aria-label="Find lyrics by song name" style="flex:1 1 220px">
+          <button class="btn small" type="submit" id="flGo">Find lyrics</button>
+        </form>
+        <div id="flResults" class="actions" hidden></div>
         <div class="writer" id="writer" hidden>
           <label class="f" for="idea" style="margin-top:0">What's the song about?</label>
           <textarea id="idea" rows="2" placeholder="e.g. a summer road trip with old friends, windows down, not wanting it to end"></textarea>
@@ -521,7 +526,8 @@ function authorText(a) {        // 🎵 Spotify songs: a cover keeps the origina
 // going on through the list it was played from
 let libItems = [];
 const songAudio = (j) => { const f = new Set(j.files || []); return f.has("song.mp3") ? `/files/${encodeURIComponent(j.id)}/song.mp3` : f.has("audio.flac") ? `/files/${encodeURIComponent(j.id)}/audio.flac` : null; };
-const asTrack = (j) => ({id: j.id, title: j.title || "Untitled", style: j.style, audio: songAudio(j), seconds: j.seconds, mode: j.mode, sub: authorText(j.author) || "🎵 Music Studio"});
+const asTrack = (j) => ({id: j.id, title: j.title || "Untitled", style: j.style, audio: songAudio(j), seconds: j.seconds, mode: j.mode, sub: authorText(j.author) || "🎵 Music Studio",
+                        feedback: j.radio_feedback || null, in_playlist: !!j.playlist_at});
 const nowId = () => window.agentoraPlayer && agentoraPlayer.t && !agentoraPlayer.audio.paused ? agentoraPlayer.t.id : null;
 const playLabel = (id) => nowId() === id ? "❚❚ Pause" : "▶ Play";
 function markPlaying() { document.querySelectorAll('[data-act="play"]').forEach(b => { b.textContent = playLabel(b.dataset.id); b.classList.toggle("on", nowId() === b.dataset.id); }); }
@@ -708,6 +714,45 @@ async function libraryLyrics() {
   };
 }
 $("libLyrics").onclick = libraryLyrics;
+// 🔎 Find lyrics: type a song's name, pick the match, and its lyrics (tagged into verses and choruses) and title fill the form.
+// Lyrics you typed yourself are kept for ↩ Undo, as with 🎲.
+$("findLyrics").onsubmit = async (e) => {
+  e.preventDefault();
+  const q = $("flQ").value.trim(), box = $("flResults"), note = $("libLyricsNote");
+  if (q.length < 2) return $("flQ").focus();
+  $("flGo").disabled = true; box.hidden = false; box.innerHTML = `<span class="small muted">Searching…</span>`;
+  try {
+    const r = await fetch("/api/lyrics/find?q=" + encodeURIComponent(q)), d = await r.json();
+    if (!r.ok) throw new Error(d.error || r.statusText);
+    box.innerHTML = d.results.length ? d.results.map(x =>
+      `<button class="btn small" type="button" data-lid="${x.id}" title="${esc(x.album)}${x.seconds ? " · " + mmss(x.seconds) : ""}">${esc(x.title)} — ${esc(x.artist)}${x.instrumental ? " (instrumental)" : ""}</button>`).join("")
+      : `<span class="small muted">No lyrics found for “${esc(q)}”. Try the exact title, or add the artist.</span>`;
+  } catch (err) { box.innerHTML = `<span class="small muted">${esc(err.message)}</span>`; }
+  finally { $("flGo").disabled = false; }
+};
+$("flResults").onclick = async (e) => {
+  const b = e.target.closest("[data-lid]"); if (!b) return;
+  const note = $("libLyricsNote");
+  b.disabled = true;
+  try {
+    const r = await fetch("/api/lyrics/get?id=" + b.dataset.lid), d = await r.json();
+    if (!r.ok) throw new Error(d.error || r.statusText);
+    if (d.instrumental) { note.hidden = false; note.textContent = `“${d.title}” is an instrumental: no lyrics to fill in.`; return; }
+    const cur = $("lyrics").value;
+    if (cur.trim() && (!libLy.last || cur !== libLy.last.lyrics)) libLy.mine = cur;
+    libLy.last = {lyrics: d.lyrics};
+    if (mode !== "song") setMode("song");
+    $("lyrics").value = d.lyrics; if (!$("title").value.trim()) $("title").value = d.title;
+    lyricStats(); saveForm(); $("flResults").hidden = true;
+    note.hidden = false;
+    note.innerHTML = `Lyrics of “${esc(d.title)}” by ${esc(d.artist)}, from LRCLIB. Check the [Verse]/[Chorus] tags and trim it if it's long. A cover is for your own listening; playing it in public needs a licence.`
+      + (libLy.mine != null ? ` <button class="linkbtn" type="button" id="libLyricsUndo">↩ Undo, back to my lyrics</button>` : "");
+    if (libLy.mine != null) $("libLyricsUndo").onclick = () => {
+      $("lyrics").value = libLy.mine; libLy.mine = null; libLy.last = null; lyricStats(); saveForm(); note.textContent = "Your lyrics are back.";
+    };
+  } catch (err) { note.hidden = false; note.textContent = "Couldn't get the lyrics: " + err.message; }
+  finally { b.disabled = false; }
+};
 $("openWriter").onclick = () => { $("writer").hidden = !$("writer").hidden; if (!$("writer").hidden) $("idea").focus(); };
 $("wClose").onclick = () => { $("writer").hidden = true; };
 $("wStructure").onchange = () => { $("wStructureCustom").hidden = $("wStructure").value !== "custom"; };
