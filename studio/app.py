@@ -1106,6 +1106,54 @@ def rewrite_suggestions(jid, ask=""):
     raise BadRequest("The AI couldn't come up with suggestions right now — try again in a minute.")
 
 
+ENHANCE_SYSTEM = """You write style prompts for YuE2, an AI model that makes full songs from a style line and lyrics.
+Turn the user's rough style into one vivid, specific style line that makes a distinctive song, not a generic one.
+Rules:
+- Comma-separated descriptors only, 25-45 words. Start with the language (English unless the user says otherwise).
+- Keep everything the user asked for (genre, voice, language, tempo, mood); sharpen it, don't replace it.
+- Add: a specific sub-genre or era, the lead voice (gender, timbre, delivery), 3-5 specific instruments or sounds,
+  the mood, production texture (e.g. tape saturation, wide reverb, crisp modern mix), one distinctive twist that
+  lifts it above the average song (e.g. a gospel choir in the last chorus, a half-time bridge, a talk-box hook),
+  and a tempo as "NN BPM".
+- For an instrumental, end with "no vocals" and describe the lead instrument instead of a voice.
+- No artist or band names, no song titles, no sentences, no quotes.
+Reply with JSON only: {"style": "...", "why": "one short sentence on what you changed"}"""
+
+
+def enhance_style(b):
+    """✨ Enhance: the style box (and a glance at the lyrics) → a richer, more specific style line."""
+    import radio
+    style = clean_text(b.get("style"), "Style", 1500)
+    lyrics = clean_text(b.get("lyrics"), "Lyrics", 20000)
+    title = clean_text(b.get("title"), "Title", 120)
+    mode = "instrumental" if b.get("mode") == "instrumental" else "song"
+    if not (style or lyrics or title):
+        raise BadRequest("Type a style (even a word or two, like \"sad rap\") or some lyrics first")
+    ctx = [f"Make: {'an instrumental (no vocals)' if mode == 'instrumental' else 'a song with vocals'}",
+           f"The user's style: {style or '(none yet: pick one that suits the lyrics)'}"]
+    if title:
+        ctx.append(f"Title: {title}")
+    if lyrics and mode == "song":
+        ctx.append("The lyrics, for the mood (don't quote them):\n" + lyrics[:1500])
+    for base, model, label in radio.gpu_first(radio.llm_candidates()):
+        try:
+            llm_used(model)
+            body = {"model": model, "temperature": 0.8, "max_tokens": 400, "response_format": {"type": "json_object"},
+                    "chat_template_kwargs": {"enable_thinking": False},
+                    "messages": [{"role": "system", "content": ENHANCE_SYSTEM}, {"role": "user", "content": "\n\n".join(ctx)}], **LLM_EXTRA}
+            r = json.loads(urllib.request.urlopen(urllib.request.Request(base + "/chat/completions", json.dumps(body).encode(),
+                           {"Content-Type": "application/json"}), timeout=120).read())
+            text = r["choices"][0]["message"]["content"]
+            data = json.loads(text[text.find("{"):text.rfind("}") + 1])
+            new = re.sub(r"\s+", " ", str(data.get("style") or "")).strip().strip('"').rstrip(".")
+            if len(new) >= 20 and new.lower() != style.lower():
+                log(f"style enhanced via {label}")
+                return {"style": new[:600], "why": re.sub(r"\s+", " ", str(data.get("why") or "")).strip()[:240], "source": label}
+        except Exception as e:
+            log(f"style enhance via {label} failed: {e}")
+    raise BadRequest("The AI couldn't enhance the style right now — try again in a minute.")
+
+
 # ----------------------------------------------------------------------------- HTTP
 
 def summary(job):
@@ -1497,6 +1545,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, {"ids": new_jobs(self.body())})
             if path == "/api/lyrics":
                 return stream_lyrics(self, self.body())
+            if path == "/api/style/enhance":
+                return self.send(200, enhance_style(self.body()))
             if path == "/api/rewrite/suggest":
                 b = self.body()
                 return self.send(200, rewrite_suggestions(str(b.get("id") or ""), b.get("ask") or ""))

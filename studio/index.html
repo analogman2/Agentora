@@ -30,14 +30,14 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 .b-studio .dot, .b-done .dot { background: var(--ok); } .b-switching .dot, .b-running .dot, .b-queued .dot { background: var(--warn); }
 .b-llm .dot { background: var(--accent); } .b-failed .dot { background: var(--bad); }
 .layout { display: grid; gap: 16px; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); align-items: start; }
-@media (max-width: 920px) { .layout { grid-template-columns: 1fr; } }
+@media (max-width: 920px) { .layout { grid-template-columns: minmax(0, 1fr); } }   /* minmax(0, …): long library text mustn't widen the page on phones */
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; min-width: 0; }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; margin-bottom: 14px; }
 .seg button { font: inherit; border: 0; background: transparent; color: var(--text); padding: 7px 14px; cursor: pointer; }
 .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
 label.f { display: block; font-weight: 600; font-size: 14px; margin: 12px 0 6px; }
 label.f .hint { font-weight: 400; color: var(--muted); font-size: 13px; }
-input[type=text], input[type=number], textarea, select {
+input[type=text], input[type=search], input[type=number], textarea, select {
   width: 100%; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
 textarea { resize: vertical; }
 textarea.lyrics { min-height: 190px; font: 14px/1.5 var(--mono); }
@@ -59,6 +59,12 @@ input:focus, textarea:focus, select:focus { outline: 2px solid color-mix(in srgb
 .linkbtn { font: inherit; font-size: 13px; background: none; border: 0; color: var(--accent); cursor: pointer; padding: 0; }
 /* Easy mode hides the fine controls; ✏️ rewrite panel */
 body.easy .adv-only { display: none !important; }
+body:not(.easy) .easy-only { display: none !important; }
+.spice { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 4px 18px; margin: 10px 0 2px; }
+.spice label { display: block; font-size: 13px; font-weight: 600; }
+.spice .ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: -2px; }
+.spice input[type=range] { width: 100%; }
+#spiceNote { margin: 4px 0 0; }
 .toprow { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
 .rw { border: 1px solid var(--accent); border-radius: 12px; padding: 12px 14px; margin-bottom: 16px; background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
 .rw .rwhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -150,8 +156,19 @@ dialog pre { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(
       <label class="f" for="style">Style <span class="hint">— genre, mood, voice, instruments, language, tempo</span></label>
       <div class="row" style="margin-bottom:6px">
         <select id="preset" aria-label="Style presets"><option value="">Start from a preset…</option></select>
+        <button class="btn small accent" type="button" id="enhance" style="flex:0 0 auto" title="The AI turns your style into a richer, more specific one (a few words like “sad rap” are enough)">✨ Enhance</button>
       </div>
       <textarea id="style" rows="3" placeholder="e.g. English, warm piano pop, expressive female voice, acoustic piano, light drums, 88 BPM"></textarea>
+      <div class="easy-only" id="spiceBox">
+        <div class="spice">
+          <div><label for="sp-creative">🎲 Creativity</label><input type="range" id="sp-creative" min="0" max="100" step="5" value="50"><div class="ends"><span>Safe</span><span>Adventurous</span></div></div>
+          <div><label for="sp-energy">⚡ Energy</label><input type="range" id="sp-energy" min="0" max="100" step="5" value="50"><div class="ends"><span>Chill</span><span>Hype</span></div></div>
+          <div><label for="sp-arrange">🎛️ Arrangement</label><input type="range" id="sp-arrange" min="0" max="100" step="5" value="50"><div class="ends"><span>Simple</span><span>Rich</span></div></div>
+          <div><label for="sp-mood">🌗 Mood</label><input type="range" id="sp-mood" min="0" max="100" step="5" value="50"><div class="ends"><span>Dark</span><span>Bright</span></div></div>
+        </div>
+        <div class="small muted" id="spiceNote">Sliders in the middle leave your style as it is.</div>
+      </div>
+      <div class="small muted" id="enhanceNote" hidden></div>
       <div id="chips" class="adv-only"></div>
       <div class="chipgroup adv-only"><span>Tempo</span>
         <span class="range" style="display:inline-flex;width:calc(100% - 90px)"><input type="range" id="bpm" min="0" max="180" step="2" value="0" aria-label="Tempo"><output id="bpmOut">auto</output></span>
@@ -167,7 +184,7 @@ dialog pre { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(
         <div class="small muted" id="libLyricsNote" hidden></div>
         <form class="row" id="findLyrics" style="margin:0 0 6px" autocomplete="off">
           <input type="search" id="flQ" placeholder="🔎 Song name (and artist), e.g. No Scrubs TLC" aria-label="Find lyrics by song name" style="flex:1 1 220px">
-          <button class="btn small" type="submit" id="flGo">Find lyrics</button>
+          <button class="btn small" type="submit" id="flGo" style="flex:0 0 auto">🔎 Find lyrics</button>
         </form>
         <div id="flResults" class="actions" hidden></div>
         <div class="writer" id="writer" hidden>
@@ -279,7 +296,7 @@ dialog pre { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(
           <button class="btn small accent" type="button" id="spGo" title="Hermes's agent writes new original songs inspired by liked songs it hasn't used yet">🎵 From my Spotify likes</button>
           <select id="spMode" aria-label="Inspired song or cover" style="flex:0 0 auto;width:auto;padding:3px 6px" title="Inspired: a new original song in its own words. Cover: the original lyrics word for word, credited to the original artist.">
             <option value="cover" selected>🎤 Cover</option><option value="inspired">✨ Inspired</option></select>
-          <select id="spTrack" aria-label="Which liked song" style="flex:1 1 200px;width:auto;padding:3px 6px"><option value="">The newest liked songs not used yet</option></select>
+          <select id="spTrack" aria-label="Which liked song" style="flex:1 1 200px;width:auto;min-width:0;max-width:100%;padding:3px 6px"><option value="">The newest liked songs not used yet</option></select>
           <select id="spCount" aria-label="How many songs" style="flex:0 0 auto;width:auto;padding:3px 6px"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select>
           <span class="small muted" id="spNote"></span>
           <pre class="small muted" id="spOut" hidden></pre>
@@ -465,6 +482,59 @@ function updateEta() {
     (lastState && lastState.gpu.owner === "llm" ? " · +1 min to pause the LLM first" : "");
 }
 
+// ---------------- Easy mode sliders: the middle changes nothing; each side adds words to the style (and 🎲 loosens or
+// tightens how freely the melody and chords are composed), so songs don't all come out middle-of-the-road
+const SPICE = {
+  energy: [[0, 20, "mellow, laid-back, soft dynamics"], [20, 40, "relaxed groove"], [60, 80, "upbeat, driving rhythm"],
+           [80, 101, "high energy, punchy drums, explosive chorus"]],
+  arrange: [[0, 25, "minimal sparse arrangement"], [25, 40, "stripped-back arrangement"], [60, 80, "rich layered arrangement, countermelodies, dynamic build"],
+            [80, 101, "rich layered arrangement, countermelodies, dramatic build and breakdown, key change, instrumental solo"]],
+  mood: [[0, 20, "dark, moody, minor key, tense"], [20, 40, "bittersweet, melancholic"], [60, 80, "warm, hopeful"],
+         [80, 101, "bright, euphoric, major key, feel-good"]],
+  creative: [[0, 30, "simple familiar chord progression"], [70, 101, "unexpected chord changes, inventive melody"]],
+};
+const spiceVal = (k) => +$("sp-" + k).value;
+function spiceWords() {
+  const have = new Set(styleTokens().map(t => t.toLowerCase())), out = [];
+  for (const [k, bands] of Object.entries(SPICE)) {
+    const v = spiceVal(k), band = bands.find(([lo, hi]) => v >= lo && v < hi);
+    if (band) for (const w of band[2].split(", ")) if (!have.has(w.toLowerCase())) { have.add(w.toLowerCase()); out.push(w); }
+  }
+  return out;
+}
+function spiceSampling() {        // 🎲 Creativity: 0 → safer than the default, 50 → the model's defaults, 100 → adventurous
+  const c = (spiceVal("creative") - 50) / 50;
+  if (!c) return {abc: {}, semantic: {}};
+  const r = (x) => Math.round(x * 1000) / 1000;
+  return {abc: {temperature: r(0.7 + c * (c > 0 ? 0.35 : 0.2)), top_p: r(Math.min(0.98, 0.9 + c * (c > 0 ? 0.07 : 0.05)))},
+          semantic: {temperature: r(1.0 + c * (c > 0 ? 0.12 : 0.08))}};
+}
+function spiceNote() {
+  const w = spiceWords(), c = spiceVal("creative");
+  $("spiceNote").textContent = !w.length && c === 50 ? "Sliders in the middle leave your style as it is."
+    : (w.length ? "Adds to the style: " + w.join(", ") + "." : "") + (c !== 50 ? ` Composes ${c > 50 ? "more adventurously" : "more safely"} than usual.` : "");
+  store.set("spice", Object.fromEntries(Object.keys(SPICE).map(k => [k, spiceVal(k)])));
+}
+for (const k of Object.keys(SPICE)) { const el = $("sp-" + k), v = store.get("spice", {})[k]; if (v != null) el.value = v; el.oninput = spiceNote; }
+$("style").addEventListener("input", spiceNote);
+$("sp-creative").ondblclick = $("sp-energy").ondblclick = $("sp-arrange").ondblclick = $("sp-mood").ondblclick = (e) => { e.target.value = 50; spiceNote(); };
+spiceNote();
+
+// ✨ Enhance: the local AI rewrites the style into a vivid, specific one (keeping what you asked for); ↩ Undo puts yours back
+$("enhance").onclick = async () => {
+  const btn = $("enhance"), note = $("enhanceNote"), before = $("style").value;
+  btn.disabled = true; btn.textContent = "✨ Enhancing…"; note.hidden = false; note.textContent = "The AI is working on your style…";
+  try {
+    const r = await fetch("/api/style/enhance", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({style: before, lyrics: $("lyrics").value, title: $("title").value, mode})});
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || r.statusText);
+    $("style").value = d.style; syncChips(); spiceNote(); saveForm();
+    note.innerHTML = `✨ ${esc(d.why || "Style enhanced.")} <button class="linkbtn" type="button" id="enhanceUndo">↩ Undo</button> · press ✨ again for another take`;
+    $("enhanceUndo").onclick = () => { $("style").value = before; syncChips(); spiceNote(); saveForm(); note.textContent = "Your style is back."; };
+  } catch (e) { note.textContent = "Couldn't enhance: " + e.message; }
+  finally { btn.disabled = false; btn.textContent = "✨ Enhance"; }
+};
+
 // ---------------- submit
 async function submit() {
   $("formErr").textContent = "";
@@ -475,6 +545,11 @@ async function submit() {
     abc_sampling: samplingOverrides("abc"), semantic_sampling: samplingOverrides("semantic"),
   };
   if (rw.id) body.rewrite_of = rw.id;
+  if (document.body.classList.contains("easy") && body.style.trim()) {    // Easy mode: the sliders
+    const w = spiceWords(), sp = spiceSampling();
+    if (w.length) body.style = body.style.trim().replace(/,\s*$/, "") + ", " + w.join(", ");
+    body.abc_sampling = {...body.abc_sampling, ...sp.abc}; body.semantic_sampling = {...body.semantic_sampling, ...sp.semantic};
+  }
   if (!body.style.trim()) return ($("formErr").textContent = "Add a style first — pick a preset or a few chips.");
   if (mode === "song" && !body.lyrics.trim()) return ($("formErr").textContent = "Add some lyrics (or switch to Instrumental).");
   $("go").disabled = true;
