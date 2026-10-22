@@ -399,21 +399,96 @@ window.agentoraPlayer = (() => {
       emit();
     } catch (e) {}
   }
+  // Phones: with the screen off, Chrome freezes a page that has stopped playing, so the next song (or a reload after a
+  // network hiccup) would never start. A looping silent clip plays through every gap (between songs, while loading,
+  // while retrying), as on the radio page, and a failed load is retried from where it stopped.
+  const bridge = new Audio(); bridge.loop = true; bridge.volume = 0.01;
+  bridge.src = (() => {                                     // 1 s of silence as a tiny WAV
+    const n = 8000, b = new ArrayBuffer(44 + n), v = new DataView(b), w = (o, t) => [...t].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+    w(0, "RIFF"); v.setUint32(4, 36 + n, true); w(8, "WAVE"); w(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true); w(36, "data"); v.setUint32(40, n, true);
+    for (let i = 0; i < n; i++) v.setUint8(44 + i, 128);
+    return URL.createObjectURL(new Blob([b], {type: "audio/wav"}));
+  })();
+  const bridgeOn = () => { if (bridge.paused) bridge.play().catch(() => {}); };
+  const bridgeOff = () => { if (!bridge.paused) bridge.pause(); };
+  let want = false, switching = false, retry = {n: 0, timer: null}, lastPos = 0;   // switching: a new source is loading
+  P.blocked = false;                                        // the phone refused to start a song: the UI shows ▶ and we try again on wake
+  function playNow() {
+    agentoraSolo.start(a, () => a.play().then(() => { P.blocked = false; retry.n = 0; }).catch(e => {
+      if (e.name === "NotAllowedError") { P.blocked = true; switching = false; bridgeOff(); emit(); }
+      else if (e.name !== "AbortError") recover();
+    }));
+  }
+  function recover() {                                      // the song stopped loading (Wi-Fi napped, the server restarted): pick it up again
+    if (!want || !P.t || retry.timer) return;
+    if (retry.n >= 6) { want = false; bridgeOff(); emit(); return; }
+    bridgeOn();
+    const pos = Math.max(lastPos, a.currentTime || 0), src = P.t.audio;
+    retry.timer = setTimeout(() => {
+      retry.timer = null; retry.n++;
+      if (!want || !P.t || P.t.audio !== src) return;
+      switching = true; a.src = src + (src.includes("?") ? "&" : "?") + "r=" + Date.now();
+      a.addEventListener("loadedmetadata", () => { if (pos > 1) try { a.currentTime = pos; } catch (e) {} }, {once: true});
+      playNow();
+    }, Math.min(15000, 1000 * 2 ** retry.n));
+  }
   function load() {
     const t = P.t; if (!t) return P.stop();
-    a.src = t.audio; agentoraSolo.start(a, () => a.play().catch(() => {}));
+    want = true; lastPos = 0; retry.n = 0; clearTimeout(retry.timer); retry.timer = null;
+    bridgeOn(); switching = true; a.src = t.audio; playNow(); session();
     [P.queue[P.i - 1], t, P.queue[P.i + 1]].forEach(enrich); emit();
   }
   P.play = (list, i = 0) => { P.queue = (list || []).filter(t => t && t.audio); P.i = Math.max(0, Math.min(i, P.queue.length - 1)); load(); };
   P.go = (d) => { const j = P.i + d; if (j < 0 || j >= P.queue.length) return; P.i = j; load(); };
-  const resume = () => agentoraSolo.start(a, () => a.play().catch(() => {}));
+  const resume = () => { want = true; playNow(); };
+  const pause = () => { want = false; switching = false; clearTimeout(retry.timer); retry.timer = null; bridgeOff(); a.pause(); };
   P.back = () => { if (a.currentTime > 3 || P.i <= 0) { a.currentTime = 0; resume(); } else P.go(-1); };
-  P.toggle = () => { if (P.t) a.paused ? resume() : a.pause(); };
-  P.stop = () => { a.pause(); a.removeAttribute("src"); a.load(); P.queue = []; P.i = -1; emit(); };
+  P.toggle = () => { if (P.t) a.paused ? resume() : pause(); };
+  P.stop = () => { pause(); a.removeAttribute("src"); a.load(); P.queue = []; P.i = -1; session(); emit(); };
   P.setVolume = (v) => { a.volume = v; try { localStorage.setItem("agentora.vol", v); } catch (e) {} };
-  a.addEventListener("ended", () => P.i < P.queue.length - 1 ? P.go(1) : emit());
+  a.addEventListener("ended", () => { if (P.i < P.queue.length - 1) P.go(1); else { want = false; bridgeOff(); emit(); } });
+  a.addEventListener("playing", () => { switching = false; bridgeOff(); retry.n = 0; session(); });
+  a.addEventListener("waiting", () => { if (want) bridgeOn(); });      // buffering: keep the page "playing"
+  a.addEventListener("timeupdate", () => { if (a.currentTime > 0) lastPos = a.currentTime; sessionPos(); });
+  a.addEventListener("error", () => { if (want && a.getAttribute("src")) recover(); });
+  a.addEventListener("stalled", () => { if (want && !a.paused) setTimeout(() => { if (want && a.readyState < 3 && !a.paused) recover(); }, 8000); });
+  a.addEventListener("pause", () => {     // a pause from the phone (lock screen, a call, headphones out), not one from changing songs
+    if (!a.ended && !switching && !retry.timer && a.getAttribute("src")) { want = false; bridgeOff(); }
+    session();
+  });
   for (const ev of ["play", "pause", "loadedmetadata"]) a.addEventListener(ev, emit);
-  agentoraSolo.register(a, () => a.pause());
+  agentoraSolo.register(a, () => pause());
+  // the phone refused to start the next song while the screen was off: try again when it's back on
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && P.blocked && P.t) resume(); });
+
+  // lock screen, notification and Bluetooth controls (only once this player is used: the radio page has its own)
+  const ms = "mediaSession" in navigator ? navigator.mediaSession : null;
+  let msOn = false, msKey = "";
+  function session() {
+    if (!ms || (!msOn && !P.t)) return;
+    if (!msOn) {
+      msOn = true;
+      const h = {play: () => resume(), pause: () => pause(), previoustrack: () => P.back(), nexttrack: () => P.go(1),
+                 seekto: (d) => { if (a.duration && d.seekTime != null) a.currentTime = d.seekTime; }};
+      for (const [k, f] of Object.entries(h)) try { ms.setActionHandler(k, f); } catch (e) {}
+    }
+    const t = P.t;
+    ms.playbackState = !t ? "none" : a.paused ? "paused" : "playing";
+    const key = t ? [t.id, t.cover].join("|") : "";
+    if (key === msKey) return; msKey = key;
+    if (!t) { ms.metadata = null; return; }
+    const art = t.cover && !/^data:/.test(t.cover) ? [{src: new URL(t.cover, location.href).href, sizes: "768x768", type: "image/jpeg"}]
+              : [{src: new URL("/icons/studio-180.png", location.href).href, sizes: "180x180", type: "image/png"}];
+    try { ms.metadata = new MediaMetadata({title: t.title || "Untitled", artist: t.sub || t.credit || "Agentora", album: "Agentora", artwork: art}); } catch (e) {}
+  }
+  let posAt = 0;
+  function sessionPos() {
+    if (!ms || !msOn || !ms.setPositionState || !a.duration || !isFinite(a.duration) || Date.now() - posAt < 5000) return;
+    posAt = Date.now();
+    try { ms.setPositionState({duration: a.duration, position: Math.min(a.currentTime, a.duration), playbackRate: 1}); } catch (e) {}
+  }
+  P.on(() => { msKey = msKey && P.t ? msKey : ""; session(); });   // cover/credit arrive later (enrich): resend
   window.agentoraPlay = P.play;
   return P;
 })();

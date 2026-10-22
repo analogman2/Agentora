@@ -96,7 +96,7 @@ with sync_playwright() as p:
         return f"{bar} -> ⏭ {nxt} -> sheet ‹ {back}"
     check("play from the Library in the bar", library_play)
     def lyrics():
-        ids = js("(async () => { const all = await loadAll(); const sung = all.find(t => (t.lyrics || '').includes('[')), inst = all.find(t => t.mode === 'instrumental'); return [sung && sung.id, inst && inst.id]; })()")
+        ids = js("(async () => { const all = await loadAll(); const sung = all.find(t => (t.lyrics || '').includes('[')), inst = all.find(t => t.mode === 'instrumental' && !(t.lyrics || '').split('\\n').some(l => l.trim() && !/^\\[.*\\]$/.test(l.trim()))); return [sung && sung.id, inst && inst.id]; })()")
         must(ids[0], "no song with lyrics in the library")
         js(f"location.hash = '#lib/all/{ids[0]}'"); time.sleep(2); shot("radio-lyrics")
         secs = js("document.querySelectorAll('.songpage .lyrics .lysec .lytag').length"); must(secs > 0, "song page: no [section] labels")
