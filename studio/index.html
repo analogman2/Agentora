@@ -295,29 +295,70 @@ const mmss = (s) => s == null ? "—" : `${Math.floor(s / 60)}:${String(Math.rou
 const store = { get(k, d) { try { const v = localStorage.getItem("studio." + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
                 set(k, v) { try { localStorage.setItem("studio." + k, JSON.stringify(v)); } catch {} } };
 
-const PRESETS = {
-  "Warm piano pop": "English, warm piano pop, expressive female voice, acoustic piano, rounded bass and light drums, lyrical memorable melody, 88 BPM",
-  "Indie folk": "English, indie folk, gentle male voice, fingerpicked acoustic guitar, soft harmonies, warm and intimate, 96 BPM",
-  "80s synthwave": "English, 80s synthwave, dreamy male vocal, analog synth pads, arpeggiated bass, gated drums, nostalgic night drive, 110 BPM",
-  "Rock anthem": "English, arena rock anthem, powerful male vocal, distorted electric guitars, driving bass, big drums, uplifting chorus, 128 BPM",
-  "R&B slow jam": "English, smooth R&B, sultry female vocal, Rhodes piano, deep bass, laid-back groove, 72 BPM",
-  "Lo-fi hip hop": "English, lo-fi hip hop, relaxed rap vocal, dusty piano samples, vinyl crackle, boom-bap drums, chill, 84 BPM",
-  "EDM festival": "English, EDM, energetic female vocal, supersaw synths, four-on-the-floor kick, big build-ups and drops, 126 BPM",
-  "Jazz ballad": "English, jazz ballad, warm crooner male voice, upright bass, brushed drums, piano trio, late-night mood, 70 BPM",
-  "Country": "English, modern country, twangy male vocal, acoustic and electric guitars, pedal steel, heartfelt storytelling, 100 BPM",
-  "Mandarin pop": "Mandarin, C-pop ballad, emotional female vocal, piano and strings, cinematic build, 76 BPM",
-  "K-pop": "Korean, K-pop, bright group vocals, punchy synths, tight drums, catchy hook, 120 BPM",
-  "J-rock": "Japanese, J-rock, energetic male vocal, fast guitars, driving drums, anime opening feel, 150 BPM",
-  "Latin pop": "Spanish, Latin pop, passionate male vocal, reggaeton rhythm, nylon guitar, brass stabs, 96 BPM",
-  "Epic orchestral (instrumental)": "Instrumental, epic orchestral, soaring strings, French horns, timpani, choir pads, cinematic trailer, no vocals",
-  "Calm piano (instrumental)": "Instrumental, warm solo piano, lyrical and gentle, soft dynamics, reading music, no vocals, no singing",
-  "Ambient (instrumental)": "Instrumental, ambient electronic, evolving synth pads, soft textures, slow and spacious, no vocals",
+// Style presets, grouped by genre in the "Start from a preset" menu (keep existing names: other code looks some up)
+const PRESET_GROUPS = {
+  "Pop & rock": {
+    "Warm piano pop": "English, warm piano pop, expressive female voice, acoustic piano, rounded bass and light drums, lyrical memorable melody, 88 BPM",
+    "Dance pop": "English, dance pop, bright female vocal, glossy synths, punchy four-on-the-floor drums, catchy chorus hook, 118 BPM",
+    "Indie folk": "English, indie folk, gentle male voice, fingerpicked acoustic guitar, soft harmonies, warm and intimate, 96 BPM",
+    "80s synthwave": "English, 80s synthwave, dreamy male vocal, analog synth pads, arpeggiated bass, gated drums, nostalgic night drive, 110 BPM",
+    "Rock anthem": "English, arena rock anthem, powerful male vocal, distorted electric guitars, driving bass, big drums, uplifting chorus, 128 BPM",
+    "Pop punk": "English, pop punk, energetic male vocal, fast palm-muted guitars, driving bass, loud drums, shout-along chorus, 170 BPM",
+    "Heavy metal": "English, heavy metal, gritty powerful male vocal, down-tuned distorted guitars, double kick drums, dark and aggressive, 140 BPM",
+  },
+  "R&B & soul": {
+    "R&B slow jam": "English, smooth R&B, sultry female vocal, Rhodes piano, deep bass, laid-back groove, 72 BPM",
+    "Modern R&B": "English, modern R&B, silky male vocal with layered harmonies, airy synth pads, 808 bass, crisp trap hi-hats, late-night mood, 68 BPM",
+    "90s R&B": "English, 90s R&B, soulful female vocal with stacked harmonies, new jack swing drums, synth bass, electric piano, romantic, 96 BPM",
+    "Neo-soul": "English, neo-soul, warm husky female vocal, Rhodes piano, live bass, swung drums, jazzy chords, intimate, 84 BPM",
+    "Classic soul": "English, classic 60s soul, powerful gritty male vocal, horn section, Hammond organ, tambourine, Motown groove, 108 BPM",
+    "Gospel": "English, gospel, powerful lead female vocal with full choir, Hammond organ, piano, hand claps, uplifting and joyful, 100 BPM",
+  },
+  "Hip hop & rap": {
+    "Lo-fi hip hop": "English, lo-fi hip hop, relaxed rap vocal, dusty piano samples, vinyl crackle, boom-bap drums, chill, 84 BPM",
+    "Boom bap rap": "English, 90s boom bap hip hop, confident male rap vocal, sampled soul loop, hard-hitting kick and snare, turntable scratches, 92 BPM",
+    "Trap": "English, trap, aggressive male rap vocal, booming 808 bass, rapid hi-hat rolls, dark synth melody, 140 BPM",
+    "Melodic rap": "English, melodic rap, auto-tuned male vocal mixing singing and rap, emotional piano and guitar loop, 808 bass, trap drums, 150 BPM",
+    "Female rap": "English, hip hop, fierce confident female rap vocal, bouncy 808 bass, snappy claps, playful synth hook, 100 BPM",
+    "West coast G-funk": "English, west coast G-funk hip hop, laid-back male rap vocal, whiny synth lead, funky bass, talk box, sunny cruising, 94 BPM",
+    "Drill": "English, UK drill, menacing male rap vocal, sliding 808 bass, skippy hi-hats, dark piano and strings, 142 BPM",
+    "Conscious hip hop": "English, conscious hip hop, thoughtful male rap vocal, jazzy piano sample, upright bass, soulful backing vocals, 88 BPM",
+  },
+  "Dance & electronic": {
+    "EDM festival": "English, EDM, energetic female vocal, supersaw synths, four-on-the-floor kick, big build-ups and drops, 126 BPM",
+    "Deep house": "English, deep house, soulful female vocal, warm sub bass, shuffled hi-hats, lush chords, late-night club, 122 BPM",
+    "Disco": "English, 70s disco, joyful female vocal, funky guitar, slap bass, strings, four-on-the-floor drums, 118 BPM",
+    "Funk": "English, funk, gritty male vocal, slap bass, wah guitar, tight horn stabs, syncopated drums, 104 BPM",
+    "Drum and bass": "English, liquid drum and bass, airy female vocal, rolling breakbeats, deep reese bass, atmospheric pads, 174 BPM",
+  },
+  "Country, blues & jazz": {
+    "Country": "English, modern country, twangy male vocal, acoustic and electric guitars, pedal steel, heartfelt storytelling, 100 BPM",
+    "Blues": "English, electric blues, raspy male vocal, expressive lead guitar, Hammond organ, shuffle rhythm, 80 BPM",
+    "Jazz ballad": "English, jazz ballad, warm crooner male voice, upright bass, brushed drums, piano trio, late-night mood, 70 BPM",
+  },
+  "World": {
+    "Latin pop": "Spanish, Latin pop, passionate male vocal, reggaeton rhythm, nylon guitar, brass stabs, 96 BPM",
+    "Reggaeton": "Spanish, reggaeton, smooth male vocal, dembow rhythm, deep bass, catchy synth hook, party mood, 95 BPM",
+    "Afrobeats": "English, Afrobeats, smooth male vocal, syncopated percussion, log drums, bright guitar riffs, warm bass, 104 BPM",
+    "Reggae": "English, roots reggae, warm male vocal, offbeat guitar skank, deep bass, one-drop drums, organ bubble, 76 BPM",
+    "Mandarin pop": "Mandarin, C-pop ballad, emotional female vocal, piano and strings, cinematic build, 76 BPM",
+    "K-pop": "Korean, K-pop, bright group vocals, punchy synths, tight drums, catchy hook, 120 BPM",
+    "J-rock": "Japanese, J-rock, energetic male vocal, fast guitars, driving drums, anime opening feel, 150 BPM",
+  },
+  "Instrumental": {
+    "Epic orchestral (instrumental)": "Instrumental, epic orchestral, soaring strings, French horns, timpani, choir pads, cinematic trailer, no vocals",
+    "Calm piano (instrumental)": "Instrumental, warm solo piano, lyrical and gentle, soft dynamics, reading music, no vocals, no singing",
+    "Ambient (instrumental)": "Instrumental, ambient electronic, evolving synth pads, soft textures, slow and spacious, no vocals",
+    "Hip hop beat (instrumental)": "Instrumental, hip hop beat, dusty soul sample, punchy boom-bap drums, deep bass, head-nodding groove, no vocals, 90 BPM",
+    "Trap beat (instrumental)": "Instrumental, trap beat, dark bell melody, booming 808 bass, rolling hi-hats, hard snares, no vocals, 140 BPM",
+  },
 };
+const PRESETS = Object.assign({}, ...Object.values(PRESET_GROUPS));
 const CHIPS = {
-  Genre: ["pop", "rock", "indie", "folk", "R&B", "hip hop", "EDM", "jazz", "blues", "country", "metal", "lo-fi", "synthwave", "classical", "cinematic", "reggae", "funk", "soul"],
+  Genre: ["pop", "rock", "indie", "folk", "R&B", "neo-soul", "soul", "gospel", "hip hop", "trap", "boom bap", "drill", "EDM", "house", "disco", "funk", "jazz", "blues", "country", "metal", "punk", "lo-fi", "synthwave", "classical", "cinematic", "reggae", "reggaeton", "afrobeats"],
   Mood: ["uplifting", "melancholic", "romantic", "energetic", "calm", "dark", "dreamy", "nostalgic", "epic", "playful"],
-  Voice: ["female vocal", "male vocal", "duet", "choir", "rap", "soft breathy voice", "powerful belting voice"],
-  Instruments: ["acoustic piano", "acoustic guitar", "electric guitar", "synth pads", "strings", "brass", "saxophone", "violin", "bass", "drums", "808s", "ukulele"],
+  Voice: ["female vocal", "male vocal", "duet", "choir", "rap", "female rap", "melodic rap", "auto-tune", "layered harmonies", "soft breathy voice", "powerful belting voice"],
+  Instruments: ["acoustic piano", "acoustic guitar", "electric guitar", "synth pads", "strings", "brass", "saxophone", "violin", "bass", "drums", "808s", "trap hi-hats", "Rhodes piano", "Hammond organ", "turntable scratches", "ukulele"],
   Language: ["English", "Mandarin", "Cantonese", "Japanese", "Korean", "Spanish", "French", "German", "Italian", "Portuguese"],
 };
 const TAGS = ["[Intro]", "[Verse]", "[Pre-Chorus]", "[Chorus]", "[Bridge]", "[Instrumental]", "[Outro]"];
@@ -331,7 +372,8 @@ let mode = "song", lastState = null;
 
 // ---------------- form building
 function buildForm() {
-  for (const name of Object.keys(PRESETS)) $("preset").insertAdjacentHTML("beforeend", `<option>${esc(name)}</option>`);
+  for (const [group, list] of Object.entries(PRESET_GROUPS))
+    $("preset").insertAdjacentHTML("beforeend", `<optgroup label="${esc(group)}">${Object.keys(list).map(n => `<option>${esc(n)}</option>`).join("")}</optgroup>`);
   $("chips").innerHTML = Object.entries(CHIPS).map(([g, list]) =>
     `<div class="chipgroup" data-group="${esc(g)}"><span>${esc(g)}</span>${list.map(c => `<button type="button" class="chip" data-chip="${esc(c)}">${esc(c)}</button>`).join(" ")}</div>`).join("");
   $("tags").innerHTML = TAGS.map(t => `<button type="button" class="chip" data-tag="${esc(t)}">${esc(t)}</button>`).join("");
