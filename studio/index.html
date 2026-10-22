@@ -528,7 +528,8 @@ $("enhance").onclick = async () => {
     const r = await fetch("/api/style/enhance", {method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({style: before, lyrics: $("lyrics").value, title: $("title").value, mode})});
     const d = await r.json(); if (!r.ok) throw new Error(d.error || r.statusText);
-    $("style").value = d.style; syncChips(); spiceNote(); saveForm();
+    $("style").value = d.style.replace(/\b(?:one\s+)?(?:distinctive|standout)\s+twist(?:\s+of|:)?\s*/gi, "");   // the AI echoing its instructions
+    syncChips(); spiceNote(); saveForm();
     note.innerHTML = `✨ ${esc(d.why || "Style enhanced.")} <button class="linkbtn" type="button" id="enhanceUndo">↩ Undo</button> · press ✨ again for another take`;
     $("enhanceUndo").onclick = () => { $("style").value = before; syncChips(); spiceNote(); saveForm(); note.textContent = "Your style is back."; };
   } catch (e) { note.textContent = "Couldn't enhance: " + e.message; }
