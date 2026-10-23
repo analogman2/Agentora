@@ -319,14 +319,34 @@ const store = { get(k, d) { try { const v = localStorage.getItem("studio." + k);
 
 // Style presets, grouped by genre in the "Start from a preset" menu (keep existing names: other code looks some up)
 const PRESET_GROUPS = {
-  "Pop & rock": {
+  "Pop": {
     "Warm piano pop": "English, warm piano pop, expressive female voice, acoustic piano, rounded bass and light drums, lyrical memorable melody, 88 BPM",
     "Dance pop": "English, dance pop, bright female vocal, glossy synths, punchy four-on-the-floor drums, catchy chorus hook, 118 BPM",
+    "Synth pop": "English, 80s synth pop, cool detached male vocal, bright analog synth leads, drum machine, pulsing bass, 120 BPM",
+    "Hyperpop": "English, hyperpop, pitched-up glitchy female vocal, distorted 808s, sparkly chiptune synths, chaotic energy, 160 BPM",
     "Indie folk": "English, indie folk, gentle male voice, fingerpicked acoustic guitar, soft harmonies, warm and intimate, 96 BPM",
     "80s synthwave": "English, 80s synthwave, dreamy male vocal, analog synth pads, arpeggiated bass, gated drums, nostalgic night drive, 110 BPM",
+  },
+  "Rock & punk": {
     "Rock anthem": "English, arena rock anthem, powerful male vocal, distorted electric guitars, driving bass, big drums, uplifting chorus, 128 BPM",
+    "Classic rock": "English, 70s classic rock, gritty bluesy male vocal, crunchy guitar riffs, Hammond organ, loose live drums, guitar solo, 116 BPM",
+    "Grunge": "English, 90s grunge, raw strained male vocal, fuzzy down-tuned guitars, quiet verse loud chorus, heavy drums, angsty, 104 BPM",
+    "Alternative rock": "English, alternative rock, moody male vocal, jangly and distorted guitars, melodic bass, dynamic drums, 124 BPM",
+    "Indie rock": "English, indie rock, cool female vocal, bright clean guitars, driving bass, tight drums, catchy riff, 132 BPM",
     "Pop punk": "English, pop punk, energetic male vocal, fast palm-muted guitars, driving bass, loud drums, shout-along chorus, 170 BPM",
-    "Heavy metal": "English, heavy metal, gritty powerful male vocal, down-tuned distorted guitars, double kick drums, dark and aggressive, 140 BPM",
+    "Punk rock": "English, 70s punk rock, snarling shouted male vocal, raw buzzsaw guitars, fast simple drums, rebellious, 180 BPM",
+    "Rap rock": "English, rap rock, aggressive male rap verses and sung chorus, heavy distorted guitar riffs, turntable scratches, hard drums, 100 BPM",
+  },
+  "Metal": {
+    "Heavy metal": "English, classic heavy metal, soaring powerful male vocal, twin lead guitars, galloping bass, double kick drums, epic, 140 BPM",
+    "Thrash metal": "English, thrash metal, aggressive shouted male vocal, fast palm-muted riffs, blistering guitar solo, rapid double kick drums, 190 BPM",
+    "Metalcore": "English, metalcore, screamed verses and clean sung chorus, down-tuned chugging guitars, breakdowns, double kick drums, 150 BPM",
+    "Nu metal": "English, nu metal, angsty male vocal mixing rap and screams, seven-string down-tuned guitars, turntable scratches, groove drums, 100 BPM",
+    "Power metal": "English, power metal, high operatic male vocal, fast melodic guitar leads, keyboards, galloping double kick, triumphant choir chorus, 170 BPM",
+    "Symphonic metal": "English, symphonic metal, operatic female soprano vocal, heavy guitars, full orchestra and choir, cinematic and dramatic, 140 BPM",
+    "Doom metal": "English, doom metal, deep mournful male vocal, extremely slow crushing down-tuned guitars, heavy reverb, dark and heavy, 60 BPM",
+    "Death metal": "English, death metal, deep guttural growled male vocal, tremolo-picked down-tuned guitars, blast beats, brutal and dark, 200 BPM",
+    "Djent": "English, progressive metal djent, clean and screamed male vocal, palm-muted polyrhythmic eight-string guitar chugs, ambient synth pads, 130 BPM",
   },
   "R&B & soul": {
     "R&B slow jam": "English, smooth R&B, sultry female vocal, Rhodes piano, deep bass, laid-back groove, 72 BPM",
@@ -345,6 +365,14 @@ const PRESET_GROUPS = {
     "West coast G-funk": "English, west coast G-funk hip hop, laid-back male rap vocal, whiny synth lead, funky bass, talk box, sunny cruising, 94 BPM",
     "Drill": "English, UK drill, menacing male rap vocal, sliding 808 bass, skippy hi-hats, dark piano and strings, 142 BPM",
     "Conscious hip hop": "English, conscious hip hop, thoughtful male rap vocal, jazzy piano sample, upright bass, soulful backing vocals, 88 BPM",
+    "Old school rap": "English, 80s old school hip hop, energetic male rap vocal, Roland 808 drum machine, funky bass, turntable scratches, party vibe, 104 BPM",
+    "90s gangsta rap": "English, 90s gangsta rap, confident gritty male rap vocal, hard boom-bap drums, dark piano loop, deep bass, street storytelling, 90 BPM",
+    "Southern rap": "English, Southern hip hop, drawling male rap vocal, booming 808 bass, crunk snares, chopped soul sample, 74 BPM",
+    "Phonk": "English, Memphis phonk, dark chopped male rap vocal, cowbell melody, distorted 808 bass, lo-fi tape hiss, 130 BPM",
+    "Emo rap": "English, emo rap, sad melodic male vocal mixing singing and rap, sad guitar loop, heavy 808 bass, trap hi-hats, 140 BPM",
+    "Jazz rap": "English, jazz rap, smooth laid-back male rap vocal, muted trumpet, upright bass, dusty swung drums, 90 BPM",
+    "Grime": "English, UK grime, fast energetic male rap vocal, square-wave synth bass, sparse icy beat, 140 BPM",
+    "Battle rap": "English, hard hip hop, aggressive rapid-fire male rap vocal, punchy sparse drums, dark orchestral stabs, ominous, 95 BPM",
   },
   "Dance & electronic": {
     "EDM festival": "English, EDM, energetic female vocal, supersaw synths, four-on-the-floor kick, big build-ups and drops, 126 BPM",
@@ -377,10 +405,10 @@ const PRESET_GROUPS = {
 };
 const PRESETS = Object.assign({}, ...Object.values(PRESET_GROUPS));
 const CHIPS = {
-  Genre: ["pop", "rock", "indie", "folk", "R&B", "neo-soul", "soul", "gospel", "hip hop", "trap", "boom bap", "drill", "EDM", "house", "disco", "funk", "jazz", "blues", "country", "metal", "punk", "lo-fi", "synthwave", "classical", "cinematic", "reggae", "reggaeton", "afrobeats"],
+  Genre: ["pop", "rock", "indie", "folk", "R&B", "neo-soul", "soul", "gospel", "hip hop", "trap", "boom bap", "drill", "EDM", "house", "disco", "funk", "jazz", "blues", "country", "metal", "thrash metal", "metalcore", "nu metal", "death metal", "punk", "grunge", "lo-fi", "synthwave", "classical", "cinematic", "reggae", "reggaeton", "afrobeats"],
   Mood: ["uplifting", "melancholic", "romantic", "energetic", "calm", "dark", "dreamy", "nostalgic", "epic", "playful"],
-  Voice: ["female vocal", "male vocal", "duet", "choir", "rap", "female rap", "melodic rap", "auto-tune", "layered harmonies", "soft breathy voice", "powerful belting voice"],
-  Instruments: ["acoustic piano", "acoustic guitar", "electric guitar", "synth pads", "strings", "brass", "saxophone", "violin", "bass", "drums", "808s", "trap hi-hats", "Rhodes piano", "Hammond organ", "turntable scratches", "ukulele"],
+  Voice: ["female vocal", "male vocal", "duet", "choir", "rap", "female rap", "melodic rap", "fast rap", "screamed vocal", "growled vocal", "operatic vocal", "auto-tune", "layered harmonies", "soft breathy voice", "powerful belting voice"],
+  Instruments: ["acoustic piano", "acoustic guitar", "electric guitar", "down-tuned guitars", "guitar solo", "double kick drums", "synth pads", "strings", "brass", "saxophone", "violin", "bass", "drums", "808s", "trap hi-hats", "Rhodes piano", "Hammond organ", "turntable scratches", "ukulele"],
   Language: ["English", "Mandarin", "Cantonese", "Japanese", "Korean", "Spanish", "French", "German", "Italian", "Portuguese"],
 };
 const TAGS = ["[Intro]", "[Verse]", "[Pre-Chorus]", "[Chorus]", "[Bridge]", "[Instrumental]", "[Outro]"];
