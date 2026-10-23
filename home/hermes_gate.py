@@ -9,6 +9,7 @@ import asyncio, json, os, time
 
 import aiohttp
 from aiohttp import web
+from yarl import URL
 
 DASH = os.environ.get("GATE_UPSTREAM") or os.environ.get("HERMES_DASHBOARD", "http://127.0.0.1:9119")
 STUDIO = os.environ.get("AGENTORA_HOME", os.environ.get("GEN_STUDIO", "http://127.0.0.1:7871"))   # Agentora Home: the accounts
@@ -117,11 +118,11 @@ async def proxy(request):
     if not same_site(request):
         raise web.HTTPForbidden(text="Cross-site request refused")
     logsetup.activity(GATE, f"use {NAME}", user["name"], **who(request), every=600)
-    url = DASH + request.rel_url.path_qs
+    url = DASH + request.rel_url.raw_path_qs       # raw: an encoded / (ComfyUI saves workflows%2Fname.json) must stay encoded
     if request.headers.get("Upgrade", "").lower() == "websocket":
         return await bridge(request, url)
     body = await request.read() if request.can_read_body else None
-    async with http.request(request.method, url, headers=forward_headers(request), data=body, allow_redirects=False,
+    async with http.request(request.method, URL(url, encoded=True), headers=forward_headers(request), data=body, allow_redirects=False,
                             timeout=aiohttp.ClientTimeout(total=None, sock_read=600)) as r:
         resp = web.StreamResponse(status=r.status, headers={k: v for k, v in r.headers.items()
                                                             if k.lower() not in HOP or k.lower() == "content-encoding"})
@@ -135,7 +136,7 @@ async def proxy(request):
 async def bridge(request, url):
     protos = [p.strip() for p in request.headers.get("Sec-WebSocket-Protocol", "").split(",") if p.strip()]
     hdrs = {k: v for k, v in forward_headers(request).items() if not k.lower().startswith("sec-websocket")}
-    async with http.ws_connect(url.replace("http", "ws", 1), headers=hdrs, protocols=protos, max_msg_size=0, autoping=True) as up:
+    async with http.ws_connect(URL(url.replace("http", "ws", 1), encoded=True), headers=hdrs, protocols=protos, max_msg_size=0, autoping=True) as up:
         down = web.WebSocketResponse(protocols=protos, max_msg_size=0, autoping=True)
         await down.prepare(request)
 
