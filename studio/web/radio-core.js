@@ -14,8 +14,8 @@ let R = null, current = null, wantPlay = false, actx = null, devNodes = null, sh
 let selected = store.get("station", null);
 const audio = $("audio"), pv = $("pv");
 audio.crossOrigin = "anonymous";                   // the stream comes from the relay's port; Web Audio (EQ, meters) needs CORS
-audio.volume = store.get("vol", 0.85); $("vol").value = audio.volume;
-$("vol").oninput = () => { audio.volume = +$("vol").value; store.set("vol", audio.volume); };
+audio.volume = pv.volume = store.get("vol", 0.85); $("vol").value = audio.volume;
+$("vol").oninput = () => { audio.volume = pv.volume = +$("vol").value; store.set("vol", audio.volume); };   // the live stream and Library songs alike
 
 const lyricsHTML = agentoraLyrics;                 // [Verse] / [Chorus] blocks (shared with every app's Now Playing)
 
