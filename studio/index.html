@@ -38,6 +38,7 @@ h2 { font-size: 16px; margin: 0 0 12px; }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; margin-bottom: 14px; }
 .seg button { font: inherit; border: 0; background: transparent; color: var(--text); padding: 7px 14px; cursor: pointer; }
 .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.seg button:disabled { opacity: .4; cursor: not-allowed; }
 label.f { display: block; font-weight: 600; font-size: 14px; margin: 12px 0 6px; }
 label.f .hint { font-weight: 400; color: var(--muted); font-size: 13px; }
 input[type=text], input[type=search], input[type=number], textarea, select {
@@ -156,6 +157,10 @@ dialog pre { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(
         <div class="seg" role="group" aria-label="What to make">
           <button type="button" data-mode="song" aria-pressed="true">🎤 Song with vocals</button>
           <button type="button" data-mode="instrumental" aria-pressed="false">🎹 Instrumental</button>
+        </div>
+        <div class="seg" role="group" aria-label="Song engine" id="engineSeg">
+          <button type="button" data-engine="yue2" aria-pressed="true" title="YuE2: the radio's engine; songs and instrumentals, every Advanced control">YuE2</button>
+          <button type="button" data-engine="minimax" aria-pressed="false" title="MiniMax Music 3: clearer vocals, songs with lyrics only (no instrumentals or scores); about 2–4 min per song">MiniMax</button>
         </div>
         <div class="seg" role="group" aria-label="How many controls to show">
           <button type="button" data-ui="easy" aria-pressed="true" title="Just style, lyrics and Create">Easy</button>
@@ -472,6 +477,15 @@ function lyricStats() {
   const secs = (v.match(/^\[[^\]]+\]/gm) || []).length;
   $("lyricStats").textContent = mode === "song" ? `${lines} sung lines · ${secs} sections` : `${secs} sections`;
 }
+let engine = "yue2";
+function setEngine(e) {
+  engine = e === "minimax" ? "minimax" : "yue2";
+  document.querySelectorAll("[data-engine]").forEach(b => b.setAttribute("aria-pressed", b.dataset.engine === engine));
+  const instr = document.querySelector('[data-mode="instrumental"]');
+  instr.disabled = engine === "minimax"; instr.title = engine === "minimax" ? "MiniMax makes songs with vocals only: pick YuE2 for instrumentals" : "";
+  if (engine === "minimax" && mode === "instrumental") setMode("song");
+  saveForm(); updateEta();
+}
 function setMode(m) {
   mode = m;
   document.querySelectorAll("[data-mode]").forEach(b => b.setAttribute("aria-pressed", b.dataset.mode === m));
@@ -487,7 +501,7 @@ function setMode(m) {
 }
 const FIELDS = ["style", "lyrics", "title", "author", "cot", "takes", "seed", "maxlen", "cfg", "steps", "abc"];
 function saveForm() {
-  const f = Object.fromEntries(FIELDS.map(k => [k, $(k).value])); f.mode = mode;
+  const f = Object.fromEntries(FIELDS.map(k => [k, $(k).value])); f.mode = mode; f.engine = engine;
   f.sampling = Object.fromEntries([...document.querySelectorAll("[data-s]")].map(el => [el.id, el.value]));
   store.set("form", f);
 }
@@ -495,7 +509,7 @@ function loadForm(f) {
   if (!f) return;
   for (const k of FIELDS) if (f[k] != null && $(k)) $(k).value = f[k];
   for (const [id, v] of Object.entries(f.sampling || {})) if ($(id)) { $(id).value = v; $(id).nextElementSibling.textContent = v; }
-  setMode(f.mode || "song"); outputs(); syncChips(); lyricStats();
+  setMode(f.mode || "song"); setEngine(f.engine); outputs(); syncChips(); lyricStats();
 }
 function outputs() {
   $("maxlenOut").textContent = mmss(+$("maxlen").value);
@@ -514,7 +528,7 @@ function samplingOverrides(key) {
 }
 function updateEta() {
   const takes = +$("takes").value, cfg = +$("cfg").value > 1 ? 1.8 : 1;
-  const per = Math.round((60 + (mode === "instrumental" ? 15 : 0)) * cfg);
+  const per = engine === "minimax" ? 180 : Math.round((60 + (mode === "instrumental" ? 15 : 0)) * cfg);
   const q = lastState ? lastState.queue.length : 0;
   $("eta").textContent = `≈ ${mmss(per * takes)} per ${takes > 1 ? takes + " takes" : "song"}` + (q ? ` · ${q} ahead in the queue` : "") +
     (lastState && lastState.gpu.owner === "llm" ? " · +1 min to pause the LLM first" : "");
@@ -581,8 +595,9 @@ async function submit() {
     mode, style: $("style").value, lyrics: $("lyrics").value, title: $("title").value, author: $("author").value,
     cot: $("cot").value, takes: +$("takes").value, seed: $("seed").value, max_seconds: +$("maxlen").value,
     cfg_scale: +$("cfg").value, ode_steps: +$("steps").value, abc: $("abc").value,
-    abc_sampling: samplingOverrides("abc"), semantic_sampling: samplingOverrides("semantic"),
+    abc_sampling: samplingOverrides("abc"), semantic_sampling: samplingOverrides("semantic"), engine,
   };
+  if (engine === "minimax") { delete body.abc; delete body.cot; }      // MiniMax has no score planning
   if (rw.id) body.rewrite_of = rw.id;
   if (document.body.classList.contains("easy") && body.style.trim()) {    // Easy mode: the sliders
     const w = spiceWords(), sp = spiceSampling();
@@ -607,7 +622,7 @@ async function submit() {
 const STATUS = { queued: "waiting", running: "making", done: "done", failed: "failed", cancelled: "cancelled" };
 function badge(st) { return `<span class="badge b-${esc(st)}"><span class="dot"></span>${esc(STATUS[st] || st)}</span>`; }
 function meta(j) {
-  const bits = [j.mode === "instrumental" ? "instrumental" : null, j.takes > 1 ? `take ${j.take}/${j.takes}` : null,
+  const bits = [j.engine === "minimax" ? "MiniMax" : null, j.mode === "instrumental" ? "instrumental" : null, j.takes > 1 ? `take ${j.take}/${j.takes}` : null,
                 j.seconds ? mmss(j.seconds) : null, authorText(j.author),
                 new Date((j.finished || j.created) * 1000).toLocaleString([], {dateStyle: "medium", timeStyle: "short"})].filter(Boolean);
   return bits.map(esc).join(" · ");
@@ -719,7 +734,7 @@ async function tick() {
 // ---------------- library actions
 async function getJob(id) { const r = await fetch(`/api/jobs/${id}`); return r.json(); }
 function fillFrom(j, {newSeed = false, abc = null} = {}) {
-  setMode(j.mode || "song");
+  setMode(j.mode || "song"); setEngine(j.engine || "yue2");
   $("style").value = j.style || ""; $("lyrics").value = j.lyrics || ""; $("title").value = j.title || "";
   $("cot").value = j.cot || "full"; $("seed").value = newSeed ? "" : (j.seed ?? ""); $("maxlen").value = j.max_seconds || 360;
   $("cfg").value = j.cfg_scale || 1; $("steps").value = j.ode_steps || 32; $("abc").value = abc ?? (j.abc || "");
@@ -762,7 +777,7 @@ async function act(kind, id) {
   if (kind === "details") {
     const t = j.timing || {}, kv = (k, v) => v == null || v === "" ? "" : `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`;
     const samp = (s) => Object.keys(s || {}).length ? Object.entries(s).map(([k, v]) => `${k}=${v}`).join(", ") : "defaults";
-    openDialog(j.title, `<dl class="kvs">${kv("Status", STATUS[j.status] || j.status)}${kv("Mode", j.mode)}${kv("Length", mmss(j.seconds))}
+    openDialog(j.title, `<dl class="kvs">${kv("Status", STATUS[j.status] || j.status)}${kv("Engine", j.engine === "minimax" ? "MiniMax Music 3" : "YuE2")}${kv("Mode", j.mode)}${kv("Length", mmss(j.seconds))}
       ${kv("Made in", j.gen_seconds ? mmss(j.gen_seconds) : null)}${kv("Seed", j.seed)}${kv("Planning", j.cot)}${kv("Style adherence", j.cfg_scale || "default")}
       ${kv("Quality steps", j.ode_steps)}${kv("Score sampling", samp(j.abc_sampling))}${kv("Song sampling", samp(j.semantic_sampling))}
       ${kv("Score tokens", t.abc ? `${t.abc.output_tokens} @ ${t.abc.output_tps.toFixed(0)} tok/s` : null)}
@@ -1013,6 +1028,7 @@ setUi(store.get("ui", "easy"));
 // ---------------- events
 buildForm();
 document.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => setMode(b.dataset.mode));
+document.querySelectorAll("[data-engine]").forEach(b => b.onclick = () => setEngine(b.dataset.engine));
 $("chips").onclick = (e) => { const c = e.target.closest("[data-chip]"); if (c) toggleChip(c.dataset.chip); };
 $("tags").onclick = (e) => { const t = e.target.closest("[data-tag]"); if (t) insertTag(t.dataset.tag); };
 $("preset").onchange = () => { const p = PRESETS[$("preset").value]; if (p) { $("style").value = p; if (/instrumental/i.test($("preset").value)) setMode("instrumental"); syncChips(); saveForm(); } $("preset").value = ""; };

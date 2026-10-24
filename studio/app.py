@@ -36,6 +36,7 @@ LLM_EXTRA = json.loads(os.environ.get("STUDIO_LLM_EXTRA") or "{}")
 # seconds to wait for one song spec; a CPU-only songwriter answers requests one at a time
 LLM_TIMEOUT = int(os.environ.get("STUDIO_LLM_TIMEOUT", "180"))
 TOKENS_PER_AUDIO_SECOND = 25          # YuE2 semantic tokens per second of audio
+ENGINES = ("yue2", "minimax")         # song engines: YuE2 (the GPU worker below), MiniMax Music 3 (minimax_worker.py)
 GPU_STATE = DATA.parent / "gpu.json"  # remembers whether we paused the LLM (survives restarts)
 FILES = {"audio.flac": ("song/audio.flac", "audio/flac"), "song.mp3": ("song.mp3", "audio/mpeg"), "cover.jpg": ("cover.jpg", "image/jpeg"),
          "score.abc": ("song/score.abc", "text/plain; charset=utf-8"),
@@ -337,12 +338,17 @@ def validate(body):
     mode = body.get("mode", "song")
     if mode not in ("song", "instrumental"):
         raise BadRequest("mode must be song or instrumental")
+    engine = body.get("engine") or "yue2"
+    if engine not in ENGINES:
+        raise BadRequest("engine must be " + " or ".join(ENGINES))
+    if engine == "minimax" and (mode != "song" or body.get("abc")):
+        raise BadRequest("MiniMax makes songs from lyrics only: use YuE2 for instrumentals and custom scores")
     job = {"mode": mode,
            "title": clean_text(body.get("title"), "Title", 120),
            "author": clean_text(body.get("author"), "Name", 60),
            "style": clean_text(body.get("style"), "Style", 1500, required=True),
            "lyrics": clean_text(body.get("lyrics"), "Lyrics", 20000, required=(mode == "song")),
-           "abc": clean_text(body.get("abc"), "Score", 65536) or None}
+           "abc": clean_text(body.get("abc"), "Score", 65536) or None, "engine": engine}
     cot = body.get("cot", "full")
     if cot not in ("full", "melody", "off"):
         raise BadRequest("Planning mode must be full, melody or off")
@@ -459,6 +465,8 @@ def gpu_holders(index):
                 name = "Ollama"
             elif "ComfyUI" in text or "comfy" in text.lower():
                 name = "ComfyUI"
+            elif "minimax_worker" in text:
+                name = "MiniMax"
             elif "yue2" in text.lower() or "multiprocessing" in text:
                 name = "YuE2"
             else:
@@ -666,7 +674,8 @@ class Worker(threading.Thread):
             for j in jobs.values():           # radio work never starts (or re-takes the GPUs) while the radio is off
                 if j["status"] == "queued" and j.get("source") == "radio" and not radio.generating() and not j.get("requested"):
                     j.update(status="cancelled", stage="", finished=time.time(), radio_status="cancelled"); save_job(j)
-            return sorted((j for j in jobs.values() if j["status"] == "queued"), key=lambda j: (j.get("priority", 0), j["created"]))
+            return sorted((j for j in jobs.values() if j["status"] == "queued" and j.get("engine", "yue2") == "yue2"),
+                          key=lambda j: (j.get("priority", 0), j["created"]))
 
     def run(self):
         import radio
@@ -881,6 +890,176 @@ class Worker(threading.Thread):
             sh("sudo", "systemctl", "start", LLM_UNIT)
         self.paused_llm = False; write_gpu_state(False)
         self.set_gpu("llm" if llm_active() else "free")
+
+
+# ----------------------------------------------------------------------------- MiniMax Music 3 (second engine)
+
+MINIMAX_PY = Path(os.environ.get("MINIMAX_PYTHON", "~/venv-minimax/bin/python")).expanduser()
+MINIMAX_IDLE = float(os.environ.get("MINIMAX_IDLE", "120"))     # seconds loaded with nothing to do before it gives the card back
+
+
+class MiniMaxEngine(threading.Thread):
+    """Runs Music Studio jobs with engine "minimax" in minimax_worker.py (its own venv, its own GPU broker lease), one at
+    a time, and leaves the same files as YuE2 (song.mp3, song/result.json), so the Library, Now Playing and the radio
+    treat its songs like any other. The model stays loaded between songs and unloads after MINIMAX_IDLE seconds idle.
+    YuE2 and MiniMax don't fit on the 4090 together: the broker makes the radio step aside while MiniMax holds its lease."""
+    def __init__(self):
+        super().__init__(daemon=True, name="minimax")
+        self.proc, self.events, self.job, self.idle_since = None, queue.Queue(), None, None
+
+    def pending(self):
+        with lock:
+            return sorted((j for j in jobs.values() if j["status"] == "queued" and j.get("engine") == "minimax"),
+                          key=lambda j: j["created"])
+
+    def run(self):
+        while True:
+            try:
+                self.step()
+            except Exception:
+                log("minimax engine error:", traceback.format_exc())
+                self.stop()
+                time.sleep(5)
+
+    def start_proc(self):
+        if not MINIMAX_PY.exists():
+            raise RuntimeError(f"MiniMax isn't installed ({MINIMAX_PY} is missing)")
+        logf = open(HERE.parent / "logs" / "minimax-worker.log", "ab")
+        self.proc = subprocess.Popen([str(MINIMAX_PY), str(HERE / "minimax_worker.py"), "--serve"], stdin=subprocess.PIPE,
+                                     stdout=subprocess.PIPE, stderr=logf, cwd=str(HERE), text=True, bufsize=1)
+        self.events = queue.Queue()
+        out, events = self.proc.stdout, self.events
+
+        def read():
+            for line in out:
+                try:
+                    events.put(json.loads(line))
+                except ValueError:
+                    pass
+            events.put({"event": "exit"})
+        threading.Thread(target=read, daemon=True, name="minimax-events").start()
+        log("MiniMax: loading the model")
+
+    def stop(self):
+        if self.proc is None:
+            return
+        try:
+            self.proc.stdin.close(); self.proc.wait(30)        # EOF: it drops its lease and exits, freeing the card
+        except Exception:
+            self.proc.kill(); self.proc.wait(10)
+        self.proc, self.idle_since = None, None
+        log("MiniMax: unloaded")
+
+    def fail(self, job, error):
+        with lock:
+            job.update(status="failed", stage="", finished=time.time(), error=error[:500], progress={})
+        save_job(job); log("MiniMax failed", job["id"], error)
+
+    def step(self):
+        pend = self.pending()
+        if not pend:
+            if self.proc and self.idle_since and time.time() - self.idle_since > MINIMAX_IDLE:
+                self.stop()
+            time.sleep(1)
+            return
+        job = pend[0]
+        if self.proc is None or self.proc.poll() is not None:
+            with lock:
+                job.update(stage="Waiting for the GPU (MiniMax)")
+            self.start_proc()
+            while True:                                         # "ready" (or "fatal"/"exit") once it has its lease and the model
+                try:
+                    ev = self.events.get(timeout=1)
+                except queue.Empty:
+                    if job["status"] != "queued":               # cancelled while waiting for the card
+                        return self.stop()
+                    continue
+                if ev.get("event") != "waiting":
+                    break
+                with lock:
+                    job.update(stage=ev.get("stage") or "Waiting for the GPU")
+            if ev.get("event") != "ready":
+                self.stop()
+                return self.fail(job, ev.get("error") or "MiniMax couldn't load (see logs/minimax-worker.log)")
+            log(f"MiniMax ready in {ev.get('load_seconds')} s")
+        with lock:
+            if job["status"] != "queued":                       # cancelled while the model loaded
+                return
+            job.update(status="running", started=time.time(), stage="Starting", progress={}, device="cuda:0")
+        save_job(job)
+        self.idle_since = None
+        d = DATA / job["id"]
+        out = d / "song"
+        if out.exists():
+            shutil.rmtree(out)
+        t0 = time.time()
+        self.proc.stdin.write(json.dumps({"id": job["id"], "style": job["style"], "lyrics": job["lyrics"], "seed": job["seed"],
+                                          "max_seconds": job["max_seconds"], "out_dir": str(out)}) + "\n")
+        self.proc.stdin.flush()
+        while True:
+            if job.get("_cancel"):                              # a render can't be interrupted: end the process
+                self.proc.terminate()                           # SIGTERM: it hands its lease back first
+                try:
+                    self.proc.wait(10)
+                except subprocess.TimeoutExpired:
+                    self.proc.kill(); self.proc.wait(10)
+                self.proc = None
+                with lock:
+                    job.update(status="cancelled", stage="", finished=time.time(), progress={})
+                save_job(job); log("MiniMax cancelled", job["id"])
+                return
+            try:
+                ev = self.events.get(timeout=0.5)
+            except queue.Empty:
+                with lock:
+                    if job.get("progress", {}).get("phase") == "song":
+                        job["progress"] = dict(job["progress"], elapsed=round(time.time() - t0))
+                continue
+            kind = ev.get("event")
+            if kind == "update":
+                with lock:
+                    job.update(stage=ev.get("stage", job["stage"]), progress=ev.get("progress") or {})
+            elif kind == "done":
+                break
+            elif kind == "failed":
+                self.idle_since = time.time()
+                err = ev.get("error") or "MiniMax failed"
+                if "out of memory" in err.lower() and job.get("oom_retries", 0) < OOM_RETRIES:
+                    # something squeezed onto the card mid-song (e.g. a chat model the broker let in): try again later
+                    log(f"{job['id']} ran out of GPU memory under MiniMax (held by: {holders_text(0)}); "
+                        f"retry {job.get('oom_retries', 0) + 1}/{OOM_RETRIES}")
+                    with lock:
+                        job.update(status="queued", stage="Waiting for GPU memory (retrying)", error=None, started=None,
+                                   progress={}, oom_retries=job.get("oom_retries", 0) + 1)
+                    save_job(job)
+                    self.stop()                                 # a fresh process asks the broker for room again
+                    time.sleep(20)
+                    return
+                return self.fail(job, err)
+            elif kind == "exit":
+                self.proc = None
+                return self.fail(job, "The MiniMax process stopped while rendering this song (see logs/minimax-worker.log)")
+        self.idle_since = time.time()
+        result = ev["result"]
+        try:
+            if soften_ending(out / "audio.flac"):
+                job["faded"] = True; log("faded out an abrupt ending", job["id"])
+        except Exception:
+            log("fade-out failed", job["id"], traceback.format_exc())
+        with lock:
+            job.update(stage="Encoding MP3")
+        sh("ffmpeg", "-y", "-loglevel", "error", "-i", str(out / "audio.flac"), "-codec:a", "libmp3lame", "-b:a", "320k",
+           "-metadata", f"title={job['title']}", "-metadata", "artist=Agentora", str(d / "song.mp3"))
+        if not (d / "song.mp3").is_file() or (d / "song.mp3").stat().st_size <= 10_000:
+            return self.fail(job, "Couldn't encode the MP3")
+        (out / "audio.flac").unlink()
+        with lock:
+            job.update(status="done", stage="", finished=time.time(), seconds=result.get("audio_seconds"),
+                       truncated=result.get("truncated"), timing=result.get("timing", {}), gen_seconds=result.get("gen_seconds"),
+                       peak_vram_mb=result.get("peak_vram_mb"), progress={})
+        save_job(job)
+        log("MiniMax done", job["id"], f"{result.get('audio_seconds', 0):.1f}s audio in {result.get('gen_seconds')}s, "
+            f"peak {result.get('peak_vram_mb')} MiB")
 
 
 # ----------------------------------------------------------------------------- lyrics (via an LLM)
@@ -1161,7 +1340,7 @@ def enhance_style(b):
 def summary(job):
     keys = ("id", "batch", "take", "takes", "title", "author", "mode", "style", "cot", "seed", "status", "stage",
             "progress", "created", "started", "finished", "seconds", "gen_seconds", "error", "cfg_scale", "max_seconds",
-            "radio_feedback", "playlist_at")
+            "radio_feedback", "playlist_at", "engine")
     s = {k: job.get(k) for k in keys}
     d = DATA / job["id"]
     s["files"] = [name for name, (rel, _) in FILES.items() if (d / rel).is_file()]
@@ -1618,5 +1797,6 @@ if __name__ == "__main__":
     import radio
     radio.init(sys.modules["__main__"])
     Worker().start()
+    MiniMaxEngine().start()
     log(f"Music Studio on :{PORT}, data {DATA}, devices {DEVICES}, returns GPUs after {RETURN_MINUTES} min idle")
     Server((os.environ.get("STUDIO_HOST", "127.0.0.1"), PORT), Handler).serve_forever()

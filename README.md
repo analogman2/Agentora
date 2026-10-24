@@ -39,6 +39,7 @@ The **Image & Video Studio** used to be part of Agentora; since 2026-10-16 it is
 - **🎲 Lyrics from the library.** In the Music Studio, one press fills in a random library song's lyrics to sing in a new style; press again for another (no repeats until every song has had a turn, ↩ Undo brings your own words back).
 - **✏️ Rewrite.** Open any song in the Music Studio with its settings and lyrics filled in. Get 3–4 specific AI suggestions, or type what should change ("slower and sadder, about a brother"), apply with one click, then record.
 - **🎵 Songs from your Spotify likes.** A button above the Music Studio's Library runs Hermes's `spotify-liked-songs` agent: it reads your liked songs (newest first, back to 2,000), and for each one it hasn't used yet (1–5 per press, or one you pick) makes either **✨ Inspired**, a new original song written from the real lyrics (fetched from [LRCLIB](https://lrclib.net)) in its own words, or **🎤 Cover**, the original lyrics word for word under the original title, shown with a "🎤 Cover · original by …" credit. Each mode has its own no-repeats rule, so a song can have both. Covers are for private listening: the apps are served only on the LAN and the tailnet, and playing covers to the public needs a licence. A ledger and lock in `~/.hermes/spotify-songs/` stop repeats. The radio's **🎵 From My Spotify Likes** station airs these songs and makes 🎤 covers when it refills (a station's `spotify_mode` can say `inspired`): it adopts each one as it finishes, and while it's on air it runs the agent whenever fewer than 4 are ready or on the way (at most every 5 minutes, hourly once no liked song is left to use). When nothing new is ready it replays them, least recently aired first.
+- **A second song engine, MiniMax Music 3**, beside YuE2 in the Music Studio (a **YuE2 | MiniMax** switch, YuE2 by default), for A/B listening. See [MiniMax Music 3](#minimax-music-3-the-second-song-engine).
 - **Shares one GPU politely.** YuE2, the GPU lyricist, ComfyUI and the chat assistant take turns on the card, and a **GPU priority** switch (Radio / Studio / Assistant / Shared) decides who waits.
 - **Classic deck.** The original cassette-deck player is still at `/radio/classic`.
 
@@ -81,6 +82,7 @@ The code, by job:
 | `studio/radio_library.py` | songs, history, playlist, feedback, next track and reruns, on/off |
 | `studio/stream_relay.py` | the stream relay (stdlib only) |
 | `studio/gpu_broker.py` | the GPU broker: leases for every GPU user, and the Ollama proxy Hermes talks to (stdlib only) |
+| `studio/minimax_worker.py` | the second song engine: MiniMax Music 3 in its own venv, driven by `app.py` (see below) |
 | `studio/speech_server.py` | the speech service: Qwen3-TTS voice (GPU, under a lease) and whisper listening (GPU, CPU fallback), both under leases, OpenAI-compatible |
 | `studio/art.py`, `studio/assistant.py`, `studio/settings.py` | cover art (ComfyUI), the chat panel (Hermes), ⚙ settings |
 | `studio/radio.html` + `studio/web/radio-*.js` | the radio page: core, player, library, panel, extras (plain scripts, no build step) |
@@ -201,6 +203,28 @@ One 24 GB card serves the radio's music model (YuE2, about 10–13 GB while it r
   - An unload request (`keep_alive: 0`) for a model someone else is using is answered without unloading it.
 
 Using ComfyUI's own page (port 8188) directly bypasses the broker; everything the Studio and Designer Studio send goes through it.
+
+## MiniMax Music 3, the second song engine
+
+The Music Studio can sing a song with [MiniMax Music 3](https://huggingface.co/MiniMaxAI/MiniMax-Music3) instead of YuE2 (the **YuE2 | MiniMax** switch; `"engine": "minimax"` in `POST /api/jobs`). YuE2 stays the default and the radio's only engine.
+
+- **How it runs:** `studio/minimax_worker.py`, in its own venv `~/venv-minimax` (torch cu130 + the diffusers MiniMax Music 3 pipeline). `app.py`'s `MiniMaxEngine` starts it with `--serve`, feeds it one job at a time, and turns its `song/audio.flac` into `song.mp3` exactly like YuE2's, so the Library, Now Playing and the radio need nothing new. Its log is `logs/minimax-worker.log`.
+- **GPU:** it takes an interactive broker lease (`minimax`, 19 GB) while loaded. With CPU offload only the running stage is on the card: the 8B language model plus its depth decoder (~18 GB allocated, ~22 GB on the card with the desktop), then the 2.4B flow-matching model. YuE2 and MiniMax don't fit together, so the radio steps aside (finishes its take, unloads YuE2) while MiniMax works, and MiniMax unloads after `MINIMAX_IDLE` (120 s) with nothing queued. Before each song it checks the card itself (a lease can be granted just before YuE2, which takes none, finishes loading) and waits, lease held, until there is room; then it holds its working memory up front, so a chat model the broker lets in mid-song takes less of the card. A song that still runs out of memory goes back in the queue (twice at most), like YuE2's takes.
+- **Speed:** about 20 s to load, then 3.2–3.7 s of work per second of song (YuE2: about 0.5 s): a 1:37 rap took 5:13, a 2:35 metal song 6:43, a 1:55 R&B song 7:05. It sings the same lyrics faster than YuE2, so its songs come out shorter.
+- **Format:** lyrics keep the `[Verse]` / `[Chorus]` tags; the worker puts every tag on its own line (MiniMax drops words that share a line with a tag) and drops section numbers. A comma-list style is regrouped into MiniMax's caption sections (Global Metadata / Vocal Details / Arrangement); prose (e.g. from ✨ Enhance) passes through. Songs are capped at 5 minutes (`MINIMAX_MAX_SECONDS`), the most whose memory fits beside the models.
+- **License:** the MiniMax-Music3 Community License: free use including commercial, but a product must show "MiniMax-Music3" and needs MiniMax's written OK above US$20M a year; an Acceptable Use Policy applies (no infringing others' rights, no impersonation, machine-made content must be disclosed when posted publicly).
+
+```bash
+uv venv --python 3.12 ~/venv-minimax
+uv pip install --python ~/venv-minimax torch==2.14.1 --index-url https://download.pytorch.org/whl/cu130
+uv pip install --python ~/venv-minimax "git+https://github.com/huggingface/diffusers@dafe3733fcfdbf3c48915fe77be3aef65b5d6a2d" transformers accelerate soundfile numpy
+# only the diffusers layout (~27 GB of the repo's 57 GB)
+hf download MiniMaxAI/MiniMax-Music3 --local-dir ~/models/MiniMax-Music3 --include "condition_encoder/*" "language_model/*" "rvq_depth_decoder/*" "scheduler/*" "tokenizer/*" "transformer/*" "vocoder/*" modular_model_index.json config.json LICENSE
+# point the index at the local copy, or diffusers downloads everything again into the HF cache
+sed -i 's#"MiniMaxAI/MiniMax-Music3"#"'$HOME'/models/MiniMax-Music3"#' ~/models/MiniMax-Music3/modular_model_index.json
+# one song from the command line (takes its own broker lease)
+~/venv-minimax/bin/python studio/minimax_worker.py --once --style "English, boom bap, male rap, 92 BPM" --lyrics lyrics.txt --seconds 90 --out /tmp/song
+```
 
 ## Speech
 
