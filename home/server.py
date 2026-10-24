@@ -54,7 +54,7 @@ PRIORITY_FILE = Path.home() / ".config" / "ai-gpu-priority.json"
 
 
 PRIORITIES = {"shared": "Shared — take turns", "studio": "Image & Video Studio", "radio": "Radio", "assistant": "Assistant (Hermes)",
-              "clipsmith": "Clipsmith (Designer Studio)"}
+              "clipsmith": "Clipsmith (Designer Studio)", "gaming": "Gaming — keep the 4090 free"}
 
 
 def gpu_priority():

@@ -15,7 +15,8 @@ cover art, the lyricist). To grant a lease the broker makes room with real measu
 clients step aside (they ask GET /yield before starting new work), an idle ComfyUI is asked to unload, and idle
 Ollama models are unloaded. Order follows "Who goes first" (~/.config/ai-gpu-priority.json): shared = a person
 waiting beats background work; radio / studio / assistant / clipsmith ("designer-studio*") = that one first, and its
-jobs may unload lower-priority chat models. A lease that can't get room in time is granted anyway with roomy=false.
+jobs may unload lower-priority chat models; gaming = the 4090 is kept clear for games (background work waits, idle
+models and an idle ComfyUI are unloaded; something a person starts still runs). A lease that can't get room in time is granted anyway with roomy=false.
 
 The Ollama proxy (127.0.0.1:11435), for tools that can't ask for a lease (Hermes, Designer Studio): it sends each
 model to its home card, takes a lease for 4090 models (for the client named in X-Agentora-Client, else "assistant"),
@@ -395,7 +396,9 @@ def drop(lid):
 def should_yield(client):
     """For background clients: step aside (finish the current piece, start nothing new, give the card back)? Yes while
     someone ahead of it is waiting for the card, or holds so much of it that both wouldn't fit (a small model like the
-    voice shares the card with the radio)."""
+    voice shares the card with the radio), and always under Gaming priority."""
+    if priority() == "gaming":
+        return True, "Waiting: the GPU is kept free for gaming"
     with lock:
         live = [l for l in leases.values() if l["client"] != client]
     r, mine = rank(client, "background"), BACKGROUND_MB.get(client, 12000)
@@ -602,9 +605,30 @@ def keep_assistant_model():
     note(logging.INFO, f"waiting for room to load {model} whole ({need} MiB, {free} MiB free; in use: {', '.join(busy) or 'nothing leased'})")
 
 
+def keep_clear_for_gaming():
+    """Gaming priority: keep the 4090 clear for games. Background clients yield (should_yield); this unloads 4090
+    Ollama models and an idle ComfyUI that no live lease is using. Something a person starts (a chat on a 4090 model,
+    a picture) still gets its lease and runs; its memory goes again once it's idle."""
+    if priority() != "gaming":
+        return
+    with lock:
+        busy = {l.get("model") for l in leases.values() if l["granted"]}
+        comfy_leased = any(uses_comfy(l["client"]) and l["granted"] for l in leases.values())
+    freed = []
+    if not comfy_leased and comfy_idle() and gpu_mb_of(b"ComfyUI") > 1500:
+        urllib.request.urlopen(urllib.request.Request(A.comfy + "/free", json.dumps({"unload_models": True, "free_memory": True}).encode(),
+                                                      {"Content-Type": "application/json"}), timeout=10).read()
+        freed.append("ComfyUI")
+    for name, m in NV.loaded().items():
+        if m.get("size_vram") and name not in busy and not holders:   # the radio finishes its piece first
+            NV.unload(name); freed.append(name)
+    if freed:
+        log.info("gaming priority: unloaded %s from the 4090", ", ".join(freed))
+
+
 def keeper():
     while True:
-        for f in (keep_homes, keep_assistant_model):
+        for f in (keep_homes, keep_assistant_model, keep_clear_for_gaming):
             try:
                 f()
             except Exception:

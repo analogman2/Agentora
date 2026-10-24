@@ -65,7 +65,7 @@ def sh(*cmd, timeout=180):
 # ---- GPU priority, shared with the Image & Video Studio: which AI tool gets the graphics card first
 PRIORITY_FILE = Path.home() / ".config" / "ai-gpu-priority.json"
 PRIORITIES = {"shared": "Shared — take turns", "studio": "Image & Video Studio", "radio": "Radio", "assistant": "Assistant (Hermes)",
-              "clipsmith": "Clipsmith (Designer Studio)"}
+              "clipsmith": "Clipsmith (Designer Studio)", "gaming": "Gaming — keep the 4090 free"}
 _prio = {"t": 0, "v": "shared"}
 
 
@@ -203,6 +203,8 @@ def gpu_yield_reason():
     if why:
         return why
     p = gpu_priority()
+    if p == "gaming":
+        return "Waiting: the GPU is kept free for gaming"
     if p == "studio" and comfy_busy():
         return "Waiting: the Image & Video Studio has GPU priority and is making something"
     if p == "assistant" and assistant_on_gpu():
