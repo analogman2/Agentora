@@ -1,10 +1,10 @@
 [Unit]
-Description=Relay local web apps (radio 7860, its stream 7861, Agentora Home 7871, Image & Video Studio 7870 (its own app), Hermes gate 7880, Jim gate 7885) onto the Tailscale IP and the home-network IP
+Description=Relay local web apps (radio 7860, its stream 7861, Agentora Home 7871, Image & Video Studio 7870 (its own app), Hermes gate 7880, Jim gate 7885, ComfyUI gate 7886, landing page 7800, AI Playground 7900, Family Hub 7910, House Lights gate 7887, Price tracker 7830) onto the Tailscale IP and the home-network IP
 After=network-online.target
 
 [Service]
 # retries until tailscaled is up and has an IP
-ExecStart=/usr/bin/python3 %h/.local/bin/tailnet-relay.py --lan 7860 7861 7870 7871 7880 7885
+ExecStart=/usr/bin/python3 %h/.local/bin/tailnet-relay.py --lan 7860 7861 7870 7871 7880 7885 7886 7800 7900 7887 7910 7830
 Restart=always
 RestartSec=10
 
