@@ -67,6 +67,11 @@ Unit files live in `systemd/`.
   - `art.py`: cover art.
   - `useractivity.py`: who did what on 7860.
 - **Radio page:** `radio.html` plus `studio/web/radio-{core,player,library,panel,extras}.js`. These are plain scripts sharing one global scope, loaded in order. `$("id")` takes a bare id, `esc()` escapes HTML, and `api()` fetches.
+- **One window (since 2026-10-24):** the radio page is the whole app. Its tabs are 🏠 Home · 📻 Stations · 📚 Library · 🎵 Create (default `#home`).
+  - Home (`:7871/home?embed=1`) and Create (the Music Studio, `/?embed=1`) run in frames (`showPane` in `radio-library.js`), made on the first visit and kept alive while hidden.
+  - In a frame, `agentora.js` sets `AG_EMBED`: no switcher, ☰ or now-playing bar of its own. `agentoraOpen()` there posts to the radio page, which switches tabs (never `window.open`). Create's `agentoraPlayer` is the radio page's `agentoraHostPlayer`, so its ▶ plays in the one bar.
+  - Opened on their own, `/` and `:7871/home` redirect to `/radio#create` and `/radio#home` (a script at the top of each; `?embed=1` keeps them on their own, as the controls test does).
+  - Music ↔ radio: Create's 📻 Play next and ♡ Playlist, the radio's recordings in its Now making, a "song ready" card on the radio page (`agentoraSongReady`), ✏️ Rewrite (`#create/rewrite=<id>`) and ✏️ Write my own in this style (`#create/like=<song id>`) from the radio.
 - **Home** (`home/`)
   - `server.py` (aiohttp): Home, accounts, the Hermes chat relay, now playing, GPU priority and disk for the ☰ panel. `auth.py`: accounts and sessions (each sign-in keeps its IP and device). `hermes_gate.py`: the admin gates.
   - `shared/agentora.{css,js}`: the look shared by every app (the radio serves them from here too). It provides the app switcher, the now-playing bar, the ☰ panel (`data-agentora-panel`), the 👤 account card (`data-agentora-account`) and the brain switch.

@@ -23,7 +23,7 @@ Agentora is a fork of [zebgop-ops/yue2-xpu-radio](https://github.com/zebgop-ops/
 | <img src="docs/screens/home.png" width="300"> |
 | What's on, GPU and disk, accounts, and a chat with the local Hermes assistant |
 
-The **radio and Music Studio** are in this repository (`studio/`), and so is **Home** (`home/`: the Home page, the accounts and sign-in every app uses, the Hermes chat, and the sign-in gates for the Hermes dashboard on 7880 and Jim's panel on 7885, on port 7871). They share one look and an app switcher (`/agentora/agentora.css`, `/agentora/agentora.js`), so moving between apps keeps the radio playing in its own tab.
+The **radio and Music Studio** are in this repository (`studio/`), and so is **Home** (`home/`: the Home page, the accounts and sign-in every app uses, the Hermes chat, and the sign-in gates for the Hermes dashboard on 7880 and Jim's panel on 7885, on port 7871). They are **one page in one window**: the radio page (`:7860/radio`) has the tabs 🏠 Home · 📻 Stations · 📚 Library · 🎵 Create, with Home and the Music Studio running inside it, so switching never opens a new tab and the radio keeps playing. Songs made in Create play in the same player bar and can go straight onto the radio (📻 Play next); from any station you can open Create with its sound (✏️ Write my own in this style). The old addresses (`:7871/home`, `:7860/`) open the same page. The shared look lives in `/agentora/agentora.css` and `/agentora/agentora.js`.
 
 The **Image & Video Studio** used to be part of Agentora; since 2026-10-16 it is its own app (`~/genstudio`, port 7870, with its own accounts). Agentora shares the graphics card with it through the GPU broker.
 

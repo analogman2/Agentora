@@ -1,4 +1,4 @@
-// Agentora radio page, part 5 of 5: ✨ Improve / 💡 Suggest, resizable text boxes, the assistant chat, GPU priority, disk usage, and Create-a-song progress.
+// Agentora radio page, part 5 of 5: ✨ Improve / 💡 Suggest, resizable text boxes, disk usage, and Create-a-song progress.
 // Plain scripts loaded in order by radio.html; they share one global scope.
 // ---------- ✨ Improve / 💡 Suggest for a station's description, with the radio's own songwriter model
 const assistBar = () => `<div class="assist"><button type="button" class="btn" data-assist="improve" title="Rewrite the description into a richer brief for the songwriter">✨ Improve with AI</button>
@@ -122,99 +122,6 @@ setInterval(() => { cache.playlist = null; if (view.tab === "collection" && view
   scan(document.body);
   new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach(scan))).observe(document.body, {childList: true, subtree: true});
 })();
-
-// ---------- Assistant: chat with the local Hermes agent (Agentora admin sign-in required; the radio server relays it)
-const A = {prev: null, busy: false, log: []};
-try { const saved = JSON.parse(sessionStorage.getItem("asst") || "null"); if (saved) Object.assign(A, {prev: saved.prev, log: saved.log || []}); } catch (e) {}
-const asstSave = () => { try { sessionStorage.setItem("asst", JSON.stringify({prev: A.prev, log: A.log.slice(-60)})); } catch (e) {} };
-const asstFmt = (t) => esc(t).replace(/`([^`\n]+)`/g, "<code>$1</code>").replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
-function asstDraw() {
-  const box = $("asstLog");
-  box.innerHTML = A.log.length ? A.log.map(m => `<div class="m ${m.who}">${m.tools && m.tools.length ? `<div class="tools">🔧 ${esc(m.tools.join(" · "))}</div>` : ""}${m.who === "ai" ? asstFmt(m.text.trim()) : esc(m.text)}</div>`).join("")
-    : `<p class="small muted">Try: “What's playing?”, “Make a new synthwave station”, “Thumbs up this song”, “Make 2 pictures of a cozy cabin in snow”, or “How much disk space is left?”</p>`;
-  if (A.busy) { const last = box.lastElementChild; if (last) last.classList.add("typing"); }
-  box.scrollTop = box.scrollHeight;
-}
-async function asstCheck() {
-  let s = {allowed: false};
-  try { s = await api("/api/assistant/session"); } catch (e) {}
-  $("asstForm").hidden = !s.allowed; $("asstLogin").hidden = s.allowed;
-  $("asstWho").textContent = s.user ? s.user.name + (s.allowed ? "" : " (not an admin)") : "";
-  if (s.user && !s.allowed) $("asstErr").textContent = "Signed in as " + s.user.name + ", which isn't an admin account.";
-  return s.allowed;
-}
-async function asstShow() {
-  $("asst").hidden = false; asstDraw();
-  if (await asstCheck()) $("asstIn").focus(); else $("asstUser").focus();
-}
-$("asstOpen").onclick = asstShow;
-$("asstClose").onclick = () => { $("asst").hidden = true; };
-$("asstNew").onclick = () => { if (A.busy) return; A.prev = null; A.log = []; asstSave(); asstDraw(); $("asstIn").focus(); };
-document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("asst").hidden && document.activeElement && $("asst").contains(document.activeElement)) $("asst").hidden = true; });
-$("asstLogin").onsubmit = async (e) => {
-  e.preventDefault(); $("asstErr").textContent = "";
-  try {
-    const r = await api("/api/assistant/login", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({username: $("asstUser").value, password: $("asstPass").value})});
-    $("asstPass").value = "";
-    if (!r.allowed) { $("asstErr").textContent = "That account isn't an Agentora admin."; return; }
-    await asstCheck(); $("asstIn").focus();
-  } catch (err) { $("asstErr").textContent = err.message; }
-};
-$("asstIn").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("asstForm").requestSubmit(); } });
-$("asstForm").onsubmit = async (e) => {
-  e.preventDefault();
-  const text = $("asstIn").value.trim(); if (!text || A.busy) return;
-  $("asstIn").value = ""; A.busy = true; $("asstSend").disabled = true;
-  A.log.push({who: "me", text});
-  const reply = {who: "ai", text: "", tools: []}; A.log.push(reply); asstDraw();
-  try {
-    const r = await fetch("/api/assistant/chat", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({message: text, previous: A.prev, model: window.agentoraBrain ? agentoraBrain() : "agi"})});
-    if (!r.ok) { const j = await r.json().catch(() => ({})); if (r.status === 403) asstCheck(); throw new Error(j.error || r.statusText); }
-    const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "";
-    for (;;) {
-      const {value, done} = await rd.read(); if (done) break;
-      buf += dec.decode(value, {stream: true});
-      let i;
-      while ((i = buf.indexOf("\n\n")) >= 0) {
-        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 2);
-        if (!line.startsWith("data:")) continue;
-        let d; try { d = JSON.parse(line.slice(5)); } catch (err) { continue; }
-        if (d.delta) reply.text += d.delta;
-        if (d.tool) reply.tools.push(d.tool);
-        if (d.done) A.prev = d.done;
-        if (d.error) A.log.push({who: "err", text: d.error});
-        asstDraw();
-      }
-    }
-    if (!reply.text && !reply.tools.length) reply.text = "(no reply)";
-    if (reply.tools.some(t => t.startsWith("radio"))) setTimeout(() => { try { refresh(); } catch (err) {} }, 500);
-  } catch (err) {
-    A.log.push({who: "err", text: err.message});
-  } finally {
-    A.busy = false; $("asstSend").disabled = false; asstSave(); asstDraw();
-  }
-};
-
-// ---------- GPU priority (shared with the Image & Video Studio)
-const PRIO = [["shared", "Shared"], ["studio", "Image studio"], ["radio", "Radio"], ["assistant", "Assistant"], ["clipsmith", "Clipsmith"]];
-const PRIO_HELP = {
-  shared: "Everyone takes turns. The radio makes room before recording a song.",
-  studio: "Pictures and videos come first: the radio pauses new songs while the studio works (what's already made keeps playing).",
-  radio: "The radio comes first: the studio won't switch it off, and ComfyUI is cleared when the radio records.",
-  assistant: "Hermes comes first: its model stays loaded, and the radio waits while it's in use.",
-  clipsmith: "Clipsmith (Designer Studio) comes first: the radio pauses new songs and chat models unload while it transcribes, writes or draws."};
-let prioNow = null;
-function drawPrio(d) {
-  prioNow = d.priority;
-  $("prio").innerHTML = PRIO.map(([k, l]) => `<button type="button" data-prio="${k}" aria-pressed="${k === prioNow}" title="${esc(PRIO_HELP[k])}">${l}</button>`).join("");
-  $("prioNote").textContent = PRIO_HELP[prioNow];             // the GPU line above already says when the radio is waiting
-  $("prio").querySelectorAll("[data-prio]").forEach(b => b.onclick = async () => {
-    try { drawPrio(await api("/api/gpu/priority", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({priority: b.dataset.prio})})); }
-    catch (e) { $("prioNote").textContent = e.message; }
-  });
-}
-async function loadPrio() { try { drawPrio(await api("/api/gpu/priority")); } catch (e) {} }
-loadPrio(); setInterval(() => { if (!document.hidden) loadPrio(); }, 15000);
 
 // ---------- disk usage (side panel)
 const diskSize = (n) => n >= 2 ** 40 ? (n / 2 ** 40).toFixed(2) + " TB" : n >= 2 ** 30 ? (n / 2 ** 30).toFixed(n >= 100 * 2 ** 30 ? 0 : 1) + " GB" : Math.round(n / 2 ** 20) + " MB";

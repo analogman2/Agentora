@@ -3,8 +3,9 @@
 
 Fails on any JavaScript error or failed script load, and walks the main flows: Now Playing, the Library (All songs,
 search, sort, select), a station, a song page, playing a song from the Library in the player bar, lyrics on the song page and Now Playing, the ☰ side panel,
-⚙ settings, the Music Studio's Easy / Advanced switch, 🎲 lyrics from the library and ☰ panel, and the Home page's ☰ panel. Nothing is changed:
-the library song it plays only plays in this headless browser.
+⚙ settings, and the one-window app: Home and Create as tabs (no new windows, each pane loaded once), Create's Easy /
+Advanced switch, its ▶ playing in the radio page's bar, 🎲 lyrics from the library, a station's style into Create, and the
+old Home / Music Studio addresses landing on the radio page. Nothing is changed: the songs it plays only play in this headless browser.
 Usage: tests/e2e_ui.py [--radio URL] [--home URL] [--chrome PATH] [--shots DIR]
 """
 import argparse, sys, time
@@ -121,37 +122,70 @@ with sync_playwright() as p:
         js("$('dlg').close(); setSide(false, false)"); return "dialog with fields"
     check("⚙ settings", settings)
 
-    print("Music Studio")
+    print("one window: Home and Create are tabs of the radio page")
+    def pane(name):                                     # the frame of a pane, once it has loaded
+        js(f"location.hash = '#{name}'")
+        el = pg.wait_for_selector(f"#pane-{name} iframe", state="attached", timeout=10000)
+        f = el.content_frame(); must(f, f"no {name} pane")
+        f.wait_for_load_state(timeout=30000); f.wait_for_function("document.body && typeof agentoraOpen === 'function'", timeout=30000)
+        time.sleep(1); return f
+    def one_window():
+        js("window.__opens = 0; window.open = () => { window.__opens++; return null; }; 0")   # ; 0: don't hand Playwright a function
+        home = pane("home"); shot("tab-home")
+        must(home.evaluate("getComputedStyle(document.querySelector('.nav')).display === 'none'"), "Home's own nav shows inside the pane")
+        home.evaluate("document.querySelector('[data-app=music]').click()"); time.sleep(1.5)
+        must(js("location.hash") == "#create", f"Home's Create button went to {js('location.hash')}")
+        pane("create"); shot("tab-create")
+        js("location.hash = '#lib'"); time.sleep(1.5); js("location.hash = '#home'"); time.sleep(1)
+        frames = js("[document.querySelectorAll('#pane-home iframe').length, document.querySelectorAll('#pane-create iframe').length]")
+        must(frames == [1, 1] and js("window.__opens") == 0, f"frames {frames}, window.open called {js('window.__opens')}×")
+        return "Home → Create → Library → Home in place, each pane loaded once, no window.open"
+    check("switch tabs in one window", one_window)
     def music():
-        pg.goto(A.radio + "/"); time.sleep(3); shot("music")
-        js("document.querySelector('[data-ui=advanced]').click()"); time.sleep(0.4)
-        adv = js("!document.body.classList.contains('easy')")
-        js("document.querySelector('[data-ui=easy]').click()"); time.sleep(0.4)
-        easy = js("document.body.classList.contains('easy') && getComputedStyle(document.getElementById('adv')).display === 'none'")
+        f = pane("create")
+        f.evaluate("document.querySelector('[data-ui=advanced]').click()"); time.sleep(0.4)
+        adv = f.evaluate("!document.body.classList.contains('easy')")
+        f.evaluate("document.querySelector('[data-ui=easy]').click()"); time.sleep(0.4)
+        easy = f.evaluate("document.body.classList.contains('easy') && getComputedStyle(document.getElementById('adv')).display === 'none'")
         must(adv and easy, f"advanced={adv} easy={easy}")
-        js("document.querySelector('.agentora-panelbtn').click()"); time.sleep(2); shot("music-panel")
-        panel = js("document.querySelector('.agentora-side').innerText")
-        must("GPU" in panel and "Apps" in panel.title() or "APPS" in panel, "panel content")
-        return "Easy/Advanced switch, ☰ panel"
-    check("Music Studio", music)
+        must(f.evaluate("window.agentoraPlayer === window.parent.agentoraHostPlayer"), "Create has its own player")
+        return "Easy/Advanced switch, uses the radio page's player"
+    check("Create (Music Studio)", music)
+    def create_play():                                  # plays only in this headless browser
+        f = pane("create"); f.wait_for_function("document.querySelector('[data-act=play]')", timeout=15000)
+        f.evaluate("document.querySelector('[data-act=play]').click()"); time.sleep(3)
+        got = js("[lp.t && lp.t.title, !pv.paused, $('bTitle').textContent]"); js("pv.pause()")
+        must(got[0] and got[1] and got[2] == got[0], f"bar: {got}")
+        return f"“{got[0]}” in the radio page's bar"
+    check("Create: ▶ plays in the one player bar", create_play)
     def library_lyrics():                               # this headless browser's own form; nothing is saved on the server
-        js("setMode('song'); $('lyrics').value = 'my own words'")
+        f = pane("create"); ev = f.evaluate
+        ev("setMode('song'); $('lyrics').value = 'my own words'")
         got = []
         for _ in range(3):
-            js("$('libLyrics').click()"); time.sleep(1); got.append(js("$('lyrics').value"))
-        note = js("$('libLyricsNote').textContent")
+            ev("$('libLyrics').click()"); time.sleep(1); got.append(ev("$('lyrics').value"))
+        note = ev("$('libLyricsNote').textContent")
         must(len(set(got)) == 3 and "my own words" not in got and note.startswith("Lyrics from"), f"3 presses -> {len(set(got))} different; {note[:80]}")
-        js("$('libLyricsUndo').click()"); must(js("$('lyrics').value") == "my own words", "undo didn't bring my lyrics back")
+        ev("$('libLyricsUndo').click()"); must(ev("$('lyrics').value") == "my own words", "undo didn't bring my lyrics back")
         return note.split(".")[0]
-    check("Music Studio: 🎲 lyrics from the library, undo", library_lyrics)
-
-    print("Home")
-    def home():
-        pg.goto(A.home + "/home"); time.sleep(3)
-        js("document.querySelector('.agentora-panelbtn').click()"); time.sleep(2); shot("home-panel")
-        panel = js("document.querySelector('.agentora-side').innerText")
-        must("Radio" in panel or "RADIO" in panel, "panel content"); return "☰ panel"
-    check("Home", home)
+    check("Create: 🎲 lyrics from the library, undo", library_lyrics)
+    def station_style():                                # a station's sound into Create's style box, then ↩ Undo
+        sid = js("R.stations.find(s => s.ready).id"); js(f"location.hash = '#lib/{sid}'"); time.sleep(3)
+        js("document.querySelector('[data-act=station-like]').click()"); time.sleep(4)
+        f = pane("create"); note = f.evaluate("$('enhanceNote').textContent")
+        must(js("location.hash") == "#create" and note.startswith("📻 Style from"), f"{js('location.hash')} {note[:80]}")
+        f.evaluate("$('likeUndo').click()"); return note.split(" on the radio")[0]
+    check("Station → ✏️ Write my own in this style → Create", station_style)
+    def old_addresses():
+        pg.goto(A.home + "/home"); time.sleep(2); h = pg.url
+        pg.goto(A.radio + "/"); time.sleep(2); m = pg.url
+        must(h.endswith("/radio#home") and m.endswith("/radio#create"), f"{h} {m}"); return "Home → #home, Music Studio → #create"
+    check("old addresses open the one page", old_addresses)
+    def home_panel():
+        go(A.radio + "/radio#home"); js("$('sideBtn').click()"); time.sleep(1.5)
+        must(js("$('side').classList.contains('open') && !$('pane-home').hidden"), "panel over the Home tab"); js("setSide(false, false)")
+        return "☰ panel over the Home tab"
+    check("Home tab: ☰ panel", home_panel)
 
     b.close()
 

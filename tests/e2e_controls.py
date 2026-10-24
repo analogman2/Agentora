@@ -118,14 +118,18 @@ with sync_playwright() as p:
 
     # ---------------- radio: navigation
     def t():
-        load(R + "/radio#lib"); click('a[data-tab="now"]'); assert js("location.hash") == "#stations" and js("document.querySelector('a[data-tab=now]').textContent") == "Stations"; click('a[data-tab="lib"]'); assert js("location.hash") == "#lib"; return "#stations, #lib"
+        load(R + "/radio#lib"); click('a[data-tab="now"]'); assert js("location.hash") == "#stations" and "Stations" in js("document.querySelector('a[data-tab=now]').textContent"); click('a[data-tab="lib"]'); assert js("location.hash") == "#lib"
+        for tab in ("home", "create"):
+            click(f'a[data-tab="{tab}"]'); time.sleep(1); assert js("location.hash") == "#" + tab and js(f"!document.getElementById('pane-{tab}').hidden"), tab
+        return "#stations, #lib, #home, #create"
     check("radio", "top tabs", t)
     def t():
-        load(R + "/radio#now"); links = js("[...document.querySelectorAll('a[data-app]')].map(a => a.dataset.app + '=' + a.href)")
-        for l in links:
-            u = l.split("=", 1)[1]; assert urllib.request.urlopen(u, timeout=5).status == 200, u
-        return ", ".join(l.split("=")[0] for l in links)
-    check("radio", "app switcher links answer", t)
+        load(R + "/radio#home"); click('a[data-tab="create"]'); time.sleep(1)
+        srcs = js("[...document.querySelectorAll('.pane iframe')].map(f => f.src)"); assert len(srcs) == 2, srcs
+        for u in srcs:
+            assert urllib.request.urlopen(u, timeout=5).status == 200, u
+        return ", ".join(u.split("/", 3)[-1] for u in srcs)
+    check("radio", "Home and Create panes answer", t)
     def t():
         load(R + "/radio#now"); click('[data-act="random"]'); return req("POST", r"/api/radio/power")
     check("radio", "🎲 Random station", t)
@@ -237,17 +241,13 @@ with sync_playwright() as p:
     def t():
         load(R + "/radio#now"); click("#bPlay"); assert js("window.__play") > 0; return "stream play attempted"
     check("bar", "▶ live radio", t)
-    # ---------------- settings + assistant
+    # ---------------- settings
     def t():
         load(R + "/radio#now"); js("() => { if (!document.querySelector('#side.open')) document.getElementById('sideBtn').click(); }"); time.sleep(1); click("#setBtn")
         assert js("!!document.querySelector('dialog[open]')"), "no settings dialog"
         js("() => { const d = document.querySelector('dialog[open]'); const b = [...d.querySelectorAll('button')].find(b => /save|apply/i.test(b.textContent)); b && b.click(); }"); time.sleep(1.5)
         return req("PUT", r"/api/radio/settings") if any(s[0] == "PUT" for s in sent) else "dialog opens (no Save button pressed)"
     check("panel", "⚙ Settings → Save", t)
-    def t():
-        load(R + "/radio#now"); js("() => { if (!document.querySelector('#side.open')) document.getElementById('sideBtn').click(); }"); time.sleep(1); click("#asstOpen")
-        box = js("(() => { const t = document.querySelector('textarea, input[type=text]:not(#q)'); return t ? t.id || t.placeholder : ''; })()"); return f"chat box: {box}"
-    check("panel", "💬 Open assistant", t)
     # ---------------- classic deck
     C = R + "/radio/classic"
     for name, sel, m, pat in [("⏻ POWER", "#kPower", "POST", r"/api/radio/power"), ("⏭ SKIP", "#kSkip", "POST", r"/api/radio/skip"), ("station button", "[data-st]:not([data-st='__reruns__'])", "POST", r"/api/radio/power"),
@@ -266,7 +266,7 @@ with sync_playwright() as p:
         load(C); click("[data-new]"); assert js("!!document.querySelector('dialog[open], .modal.open, #newDlg[open]')") or js("document.body.innerText.includes('Create')"), "no form"; return "new-station form"
     check("classic", "+ New station", t)
     # ---------------- Music Studio
-    M = R + "/"
+    M = R + "/?embed=1"                             # on its own (it's the radio page's Create tab otherwise)
     def t():
         load(M); click('[data-mode="instrumental"]'); a = js("document.querySelector('[data-mode=\"instrumental\"]').getAttribute('aria-pressed')"); click('[data-mode="song"]'); assert a == "true"; return "mode toggles"
     check("studio", "🎤 / 🎹 mode", t)
@@ -331,16 +331,16 @@ with sync_playwright() as p:
     check("studio", "library ⬇ MP3", t)
     # ---------------- Home (signed out)
     def t():
-        load(H + "/home"); click("#acctBtn"); assert js("!!document.querySelector('dialog[open]')") or js("document.body.innerText.toLowerCase().includes('password')"), "no sign-in form"; return "sign-in form"
+        load(H + "/home?embed=1"); click("#acctBtn"); assert js("!!document.querySelector('dialog[open]')") or js("document.body.innerText.toLowerCase().includes('password')"), "no sign-in form"; return "sign-in form"
     check("home", "Sign in button", t)
     def t():
-        load(H + "/home"); out = []
+        load(H + "/home?embed=1"); out = []
         for app in ("radio", "music"):
-            js("window.__opened = []"); click(f'button[data-app="{app}"]'); time.sleep(0.5); u = js("window.__opened[0] || location.href"); out.append(f"{app}→{u[-28:]}"); load(H + "/home")
+            js("window.__opened = []"); click(f'button[data-app="{app}"]'); time.sleep(0.5); u = js("window.__opened[0] || location.href"); out.append(f"{app}→{u[-28:]}"); load(H + "/home?embed=1")
         return ", ".join(out)
     check("home", "Listen / Open buttons", t)
     def t():
-        load(H + "/home"); click("[data-agentora-panel]"); assert js("!!document.querySelector('.agentora-panel.open, [data-agentora-panel-open], dialog[open]')") or js("document.body.innerText.includes('GPU')"), "panel didn't open"; return "panel opens"
+        load(H + "/home?embed=1"); click("[data-agentora-panel]"); assert js("!!document.querySelector('.agentora-panel.open, [data-agentora-panel-open], dialog[open]')") or js("document.body.innerText.includes('GPU')"), "panel didn't open"; return "panel opens"
     check("home", "☰ panel", t)
     b.close()
 print(f"\n{sum(r[2] for r in results)} passed, {sum(not r[2] for r in results)} failed")

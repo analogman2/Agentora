@@ -49,7 +49,7 @@ with sync_playwright() as p:
     errs = []
     def page(url):
         pg = ctx.new_page(); pg.on("pageerror", lambda e: errs.append(str(e))); pg.goto(url); time.sleep(3); return pg
-    studio, radio = page(R + "/"), page(R + "/radio#lib/all")
+    studio, radio = page(R + "/?embed=1"), page(R + "/radio#lib/all")   # ?embed=1: the Music Studio on its own (else it opens as the radio page's Create tab)
     worst, lock, stop = [], threading.Lock(), threading.Event()
     def playing():
         return studio.evaluate(PLAYING) + radio.evaluate(PLAYING)

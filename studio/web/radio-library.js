@@ -1,6 +1,8 @@
 // Agentora radio page, part 3 of 5: The pages: routes, the path bar, song / station / Library / list pages, the list controls (search, sort, select), and playing from the Library.
 // Plain scripts loaded in order by radio.html; they share one global scope.
 // ---------------- views, laid out like folders (hash routes):
+//   #home                        Agentora Home (the default): the machine, the assistant (a pane, see showPane)
+//   #create  #create/rewrite=<id>  the Music Studio: make a song (a pane)
 //   #stations                    what's playing, or the stations to pick from (#now: its old name)
 //   #lib                         Library: ♥ My playlist, 🕘 Listen history, and every station
 //   #lib/playlist  #lib/history  a song list
@@ -10,7 +12,7 @@
 // Older addresses (#browse, #collection/..., #station/<id>, #song/<id>) still work.
 const view = {tab: "now", sub: "playlist", id: null, parent: null, q: ""};
 function route() {
-  let [tab, a, b] = decodeURIComponent(location.hash.slice(1) || "stations").split("/");
+  let [tab, a, b] = decodeURIComponent(location.hash.slice(1) || "home").split("/");
   if (tab === "now") tab = "stations";
   if (tab === "browse") { tab = "lib"; a = undefined; }
   if (tab === "collection") { tab = "lib"; a = a === "stations" ? undefined : (a || "playlist"); }
@@ -23,15 +25,43 @@ function route() {
     else if (a === "playlist" || a === "history" || a === "all") { view.tab = "collection"; view.sub = a; }
     else { view.tab = "station"; view.id = a; }
   } else if (tab === "search") { view.tab = "search"; view.q = a || ""; }
+  else if (tab === "home" || tab === "create") view.tab = tab;
   else view.tab = "now";
-  const on = view.tab === "now" ? "now" : view.tab === "search" ? "" : "lib";
+  const pane = view.tab === "home" || view.tab === "create" ? view.tab : null;
+  showPane(pane, pane && a);
+  const on = pane || (view.tab === "now" ? "now" : view.tab === "search" ? "" : "lib");
   document.querySelectorAll(".tabs a").forEach(x => x.classList.toggle("on", x.dataset.tab === on));
   if (view.tab !== "search") $("q").value = "";
+  if (pane) return;
   window.scrollTo(0, 0); renderView(true);
 }
 window.addEventListener("hashchange", route);
+
+// ---------- Home and Create: Agentora Home (:7871) and the Music Studio, each in a frame made on the first visit and
+// kept alive (hidden) while you switch tabs, so a song being written or a chat being answered carries on. One window:
+// the frames switch tabs through agentoraOpen (agentora.js) and play songs in this page's player (agentoraHostPlayer).
+const PANES = {home: () => `${location.protocol}//${location.hostname}:7871/home?embed=1`, create: () => "/?embed=1"};
+function showPane(name, arg) {
+  for (const k of Object.keys(PANES)) $("pane-" + k).hidden = k !== name;
+  document.body.classList.toggle("pane-on", !!name);
+  if (!name) return;
+  const el = $("pane-" + name), hash = arg ? "#" + arg : "";
+  let f = el.querySelector("iframe");
+  if (!f) {
+    f = document.createElement("iframe");
+    f.title = name === "home" ? "Agentora Home" : "Make a song";
+    f.allow = "autoplay; clipboard-write; microphone";
+    f.src = PANES[name]() + hash; el.append(f);
+  } else if (hash) {
+    try { f.contentWindow.location.hash = hash; } catch (e) { f.src = PANES[name]() + hash; }
+  }
+  if (arg) history.replaceState(null, "", "#" + name);     // the frame has it now; a reload shouldn't redo it
+}
+const navEl = document.querySelector(".nav");                // the panes start below the nav, whatever its height
+new ResizeObserver(() => document.documentElement.style.setProperty("--nav-h", navEl.getBoundingClientRect().height + "px")).observe(navEl);
 let renderSeq = 0;
 async function renderView(navigated) {
+  if (view.tab === "home" || view.tab === "create") return;   // a pane is showing
   const seq = ++renderSeq, page = $("page");
   if (!R) { page.innerHTML = `<p class="empty">Tuning in…</p>`; return; }
   // a background refresh doesn't redraw a list while one of its songs plays; opening a page, or Now Playing following
@@ -105,7 +135,7 @@ async function songView(id) {
         <button class="pill ${t.feedback === "keep" ? "primary" : ""}" data-act="song-fb" data-kind="${t.feedback === "keep" ? "clear" : "keep"}" title="Make more like this" aria-pressed="${t.feedback === "keep"}">👍</button>
         <button class="pill ${t.feedback === "dislike" ? "primary" : ""}" data-act="song-fb" data-kind="${t.feedback === "dislike" ? "clear" : "dislike"}" title="Fewer like this" aria-pressed="${t.feedback === "dislike"}">👎</button>
         <button class="pill ${t.in_playlist ? "primary" : ""}" data-act="song-plus" data-on="${t.in_playlist ? 1 : 0}">${t.in_playlist ? "✓ In my playlist" : "+ Playlist"}</button>
-        <a class="pill" href="/#rewrite=${esc(t.id)}" data-act="song-rewrite" data-id="${esc(t.id)}" title="Improve this song in the Music Studio: everything is filled in and the AI suggests changes">✏️ Rewrite</a>
+        <a class="pill" href="#create/rewrite=${esc(t.id)}" data-act="song-rewrite" data-id="${esc(t.id)}" title="Improve this song in Create: everything is filled in and the AI suggests changes">✏️ Rewrite</a>
         ${st ? `<button class="pill" data-act="song-more" data-station="${esc(st.id)}" title="Write and record a new song in the spirit of this one">🎵 More like this</button>` : ""}
         <button class="pill" data-act="song-art" title="Draw a new cover">🎨 New cover</button>
         <a class="pill" href="${esc(t.audio)}?download=1">⤓ Download</a>
@@ -246,6 +276,7 @@ async function stationView(id) {
         <div class="acts">
           <button class="pill primary" data-play="${esc(id)}">${playing ? "≋ Playing" : "▶ Play station"}</button>
           ${id !== RERUNS ? `<button class="pill" data-act="make-song" title="Write and record a new song for this station right away">🎵 Create a song now</button>
+          ${tracks.some(t => t.style) ? `<button class="pill" data-act="station-like" data-id="${esc(tracks.find(t => t.style).id)}" title="Open Create with this station's sound and write your own song">✏️ Write my own in this style</button>` : ""}
           <button class="pill" data-act="edit" title="Edit station">✎ Edit</button>` : ""}
         </div>
         <div class="small muted" id="mkStat" role="status"></div>
@@ -387,7 +418,8 @@ $("page").addEventListener("click", async (e) => {
   if (act === "song-art") { post("/api/radio/art", {track: view.id}).then(() => toast("Drawing a new cover — it appears in a minute or two.")).catch(e => toast(e.message)); return; }
   if (act === "song-more") { post(`/api/radio/stations/${encodeURIComponent(a.dataset.station)}/song`, {like: view.id}).then(() => toast("Writing a new song in the spirit of this one — it's recorded next.")).catch(e => toast(e.message)); return; }
   if (act === "song-play") return preview(a.dataset.audio, null, view.id);
-  if (act === "song-rewrite") { if (window.agentoraOpen) { e.preventDefault(); agentoraOpen("music", "#rewrite=" + a.dataset.id); } return; }
+  if (act === "song-rewrite") { e.preventDefault(); agentoraOpen("music", "#rewrite=" + a.dataset.id); return; }
+  if (act === "station-like") return agentoraOpen("music", "#like=" + a.dataset.id);
   if (act === "make-song") {
     a.disabled = true;
     post(`/api/radio/stations/${encodeURIComponent(view.id)}/song`).then(() => { hint("Writing a new song for this station — it's recorded next, ahead of everything else."); refresh().then(updateMk); })
@@ -422,14 +454,14 @@ function lpMark() {
 }
 function lpPlay(i) {
   const t = lp.queue[i]; if (!t) return lpStop();
-  lp.i = i; lp.t = t;
+  lp.i = i; lp.t = t; hostEmit();
   if (lid) { wantPlay = false; disconnect(); toast("Playing from your library — press ▶ on a station to go back to the radio."); }
   pv.src = t.audio; agentoraSolo.start(pv, () => pv.play().catch(err => toast(err.message)));
   syncNow(); lpMark();
 }
 function lpBack() { if (pv.currentTime > 3 || lp.i <= 0) { pv.currentTime = 0; agentoraSolo.start(pv, () => pv.play().catch(() => {})); } else lpPlay(lp.i - 1); }
 function lpStop(quiet) {
-  lp.t = null; lp.queue = []; lp.i = -1; pv.pause(); pv.removeAttribute("src");
+  lp.t = null; lp.queue = []; lp.i = -1; pv.pause(); pv.removeAttribute("src"); hostEmit();
   current = null; shownId = undefined; lpMark();
   if (!quiet) { syncNow(); renderBar(); setPlayingUI(); if (view.tab === "now") renderView(); }
 }
@@ -444,9 +476,35 @@ async function preview(src, row, id) {
   }
   lp.queue = queue; lpPlay(Math.max(0, queue.findIndex(t => t.id === id)));
 }
-pv.addEventListener("play", () => { setPlayingUI(); lpMark(); });
-pv.addEventListener("pause", () => { setPlayingUI(); lpMark(); });
+pv.addEventListener("play", () => { setPlayingUI(); lpMark(); hostEmit(); });
+pv.addEventListener("pause", () => { setPlayingUI(); lpMark(); hostEmit(); });
 pv.addEventListener("ended", () => { if (lp.t) lpPlay(lp.i + 1); });   // on to the next song in the list
+
+// The one player for the Create pane: the Music Studio's agentoraPlayer is this (agentora.js swaps it in when it runs in
+// a frame of this page), so its ▶ plays in this page's bar, through the same list as the Library.
+const hostCbs = new Set();
+function hostEmit() { for (const cb of hostCbs) try { cb(); } catch (e) { hostCbs.delete(cb); } }   // a reloaded frame's old callbacks throw
+// A song made in Create is ready: say so whichever tab is showing, with ▶ (this bar) and 📻 (next on the radio).
+let readyT = null;
+window.agentoraSongReady = (t) => {
+  const el = $("ready"); if (!t || !t.id) return;
+  el.innerHTML = `<span>🎵 <b>${esc(t.title || "Your song")}</b> is ready</span>
+    ${t.audio ? `<button class="pill" data-ready="play">▶ Play</button>` : ""}<button class="pill" data-ready="next">📻 Play next on the radio</button>
+    <button class="x" data-ready="x" aria-label="Dismiss">✕</button>`;
+  el.hidden = false; clearTimeout(readyT); readyT = setTimeout(() => { el.hidden = true; }, 30000);
+  el.onclick = async (e) => {
+    const b = e.target.closest("[data-ready]"); if (!b) return;
+    if (b.dataset.ready === "play") window.agentoraHostPlayer.play([t]);
+    if (b.dataset.ready === "next") { try { await post("/api/radio/upnext", {ids: [t.id]}); toast("📻 It plays next on the radio, for everyone listening."); } catch (err) { return toast(err.message); } }
+    el.hidden = true;
+  };
+};
+window.agentoraHostPlayer = {
+  get t() { return lp.t; }, audio: pv,
+  on(cb) { hostCbs.add(cb); },
+  toggle() { if (lp.t) pv.paused ? agentoraSolo.start(pv, () => pv.play().catch(e => toast(e.message))) : pv.pause(); },
+  play(list, i = 0) { lp.queue = (list || []).filter(t => t && t.audio); if (lp.queue.length) lpPlay(Math.min(Math.max(0, i), lp.queue.length - 1)); },
+};
 
 // station dialogs need these names
 function openDialog(title, html) { $("dlgT").textContent = title; $("dlgB").innerHTML = html; $("dlg").showModal(); }

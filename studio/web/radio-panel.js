@@ -18,7 +18,6 @@ $("sideFade").onclick = () => setSide(false);
 $("pinBtn").onclick = () => setSide(true, !side.pinned);
 document.addEventListener("keydown", e => { if (e.key === "Escape" && side.open && !(side.pinned && wide()) && !$("dlg").open) setSide(false); });
 window.matchMedia("(min-width: 1100px)").addEventListener("change", renderSide);
-$("hermesDash").href = `${location.protocol}//${location.hostname}:7880/`;
 $("copyStream").onclick = async () => {
   const url = new URL("/radio/stream.mp3", location.href).href;
   try { await navigator.clipboard.writeText(url); $("copyStream").textContent = "Copied ✓"; }

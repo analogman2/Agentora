@@ -2,6 +2,9 @@
 <html lang="en" data-agentora-app="music">
 <head>
 <meta charset="utf-8">
+<script>/* Agentora is one window: on its own, this page opens as the radio page's Create tab (#rewrite=… comes along).
+   ?embed=1 keeps it on its own (the pane's address; the controls test) */
+if (window.top === window && !/[?&]embed=1/.test(location.search)) location.replace("/radio#create" + (location.hash.length > 1 ? "/" + location.hash.slice(1) : ""));</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agentora Music Studio</title>
 <link rel="icon" id="favicon" type="image/svg+xml" href="/icons/studio.svg">
@@ -93,6 +96,8 @@ legend { font-size: 13px; font-weight: 600; padding: 0 6px; color: var(--muted);
 .prog.indet > i { width: 30%; animation: slide 1.4s ease-in-out infinite; }
 @keyframes slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
 .job .play { min-width: 76px; }
+.job.radio { border-style: dashed; }                     /* the radio's own recordings, shown for the whole picture */
+.job [data-act="fav"][aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .toolbar { display: flex; gap: 8px; margin-bottom: 10px; } .toolbar input { flex: 1; }
 .spotify { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
@@ -115,6 +120,11 @@ dialog pre { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(
 
 </style>
 <link rel="stylesheet" href="/agentora/agentora.css">
+<style>
+/* the Create tab of the radio page: its tabs and player bar are around this page */
+.agentora-embed header h1, .agentora-embed header > .muted.small { display: none; }
+.agentora-embed body { padding-bottom: 24px; }
+</style>
 </head>
 <body>
 <div class="wrap">
@@ -611,11 +621,19 @@ function progressBlock(j) {
   const el = j.started ? ` · ${mmss(Date.now() / 1000 - j.started)} elapsed` : "";
   return `<div class="prog ${pct == null ? "indet" : ""}"><i style="width:${pct ?? 30}%"></i></div><div class="small muted">${text}${el}</div>`;
 }
+let radioMaking = [], radioTick = 0;               // the radio's songs being recorded (same YuE2), shown under yours
+async function loadRadioMaking() {
+  try {
+    const r = await (await fetch("/api/radio/state", {cache: "no-store"})).json(), names = Object.fromEntries((r.stations || []).map(s => [s.id, s.name]));
+    radioMaking = (r.making || []).map(m => ({...m, station_name: names[m.station] || "the radio"}));
+  } catch { radioMaking = []; }
+}
 function renderQueue(st) {
-  const q = st.queue;
-  $("qcount").textContent = q.length ? `(${q.length})` : "";
-  if (!q.length) { $("queue").innerHTML = `<div class="empty">Nothing in the queue.</div>`; return; }
-  $("queue").innerHTML = q.map(j => `<div class="job"><div class="top">${badge(j.status)}<span class="title">${esc(j.title)}</span>${(j.author || "").startsWith("Spotify ") ? `<span class="small muted"> · ${esc(authorText(j.author))}</span>` : ""}</div>
+  const q = st.queue, radio = radioMaking.map(m => `<div class="job radio"><div class="top">${badge(m.status)}<span class="title">${esc(m.title || "A new song")}</span>
+    <span class="small muted"> · 📻 for ${esc(m.station_name)}${m.requested ? " (asked for)" : ""}</span></div>${progressBlock(m)}</div>`).join("");
+  $("qcount").textContent = q.length + radioMaking.length ? `(${q.length + radioMaking.length})` : "";
+  if (!q.length && !radio) { $("queue").innerHTML = `<div class="empty">Nothing in the queue.</div>`; return; }
+  $("queue").innerHTML = radio + q.map(j => `<div class="job"><div class="top">${badge(j.status)}<span class="title">${esc(j.title)}</span>${(j.author || "").startsWith("Spotify ") ? `<span class="small muted"> · ${esc(authorText(j.author))}</span>` : ""}</div>
     <div class="style" title="${esc(j.style)}">${esc(j.style)}</div>${progressBlock(j)}
     <div class="actions"><button class="btn small danger" data-act="cancel" data-id="${esc(j.id)}">Cancel</button></div></div>`).join("");
 }
@@ -647,7 +665,7 @@ function renderLibrary(st) {
   const items = st.library.filter(j => (f === "all" || (f === "mine" && mine.has(j.id)) || (f === "done" && j.status === "done") || (f === "failed" && j.status !== "done")) &&
     (!qtext || [j.title, j.style, j.author].join(" ").toLowerCase().includes(qtext)));
   $("libcount").textContent = `(${st.library.filter(j => j.status === "done").length} songs)`;
-  const sig = items.map(j => j.id + j.status).join("|") + f + qtext;
+  const sig = items.map(j => j.id + j.status + !!j.playlist_at).join("|") + f + qtext;
   libItems = items;
   if (sig === libSig) return; libSig = sig;
   if (!items.length) { $("library").innerHTML = `<div class="empty">${st.library.length ? "No matches." : "No songs yet — make the first one!"}</div>`; return; }
@@ -664,6 +682,7 @@ function renderLibrary(st) {
         <button class="btn small" data-act="details" data-id="${id}">Details</button>
         <button class="btn small accent" data-act="rewrite" data-id="${id}" title="Improve this song: its settings and lyrics load into the form, with AI suggestions">✏️ Rewrite</button>
         ${files.has("song.mp3") ? `<button class="btn small" data-act="upnext" data-id="${id}" title="Play this song next on the radio, for everyone listening">📻 Play next</button>` : ""}
+        ${songAudio(j) ? `<button class="btn small" data-act="fav" data-id="${id}" aria-pressed="${!!j.playlist_at}" title="${j.playlist_at ? "In" : "Add to"} your radio playlist">${j.playlist_at ? "♥ In playlist" : "♡ Playlist"}</button>` : ""}
         <button class="btn small" data-act="reuse" data-id="${id}" title="Load these settings into the form">Reuse</button>
         <button class="btn small" data-act="take" data-id="${id}" title="Same settings, new seed">New take</button>
         ${files.has("score.abc") ? `<button class="btn small" data-act="edit" data-id="${id}" title="Edit the melody/chords and render again">Edit score</button>` : ""}
@@ -679,10 +698,21 @@ function renderGpu(st) {
   el.innerHTML = `<span class="dot"></span><span>${esc(txt)}${g.owner === "studio" && g.idle_seconds_left != null ? ` · LLM returns automatically in ${mmss(g.idle_seconds_left)}` : ""}</span>`;
   $("release").hidden = !(g.owner === "studio" && !st.queue.length);
 }
+// Inside the radio page (its Create tab): when a song of yours finishes, the radio page offers ▶ Play / 📻 Play next
+let wasQueued = null;
+function noteFinished(st) {
+  const now = new Set(st.queue.map(j => j.id));
+  if (wasQueued && window.parent !== window) for (const id of wasQueued) {
+    const j = !now.has(id) && st.library.find(x => x.id === id && x.status === "done");
+    if (j) try { window.parent.agentoraSongReady && window.parent.agentoraSongReady(asTrack(j)); } catch (e) {}
+  }
+  wasQueued = now;
+}
 async function tick() {
   try {
+    if (radioTick++ % 3 === 0) await loadRadioMaking();
     const st = await (await fetch("/api/state", {cache: "no-store"})).json();
-    lastState = st; renderGpu(st); renderQueue(st); renderLibrary(st); updateEta();
+    lastState = st; renderGpu(st); renderQueue(st); renderLibrary(st); updateEta(); noteFinished(st);
   } catch { $("gpu").innerHTML = `<span class="dot"></span><span>studio unreachable</span>`; }
 }
 
@@ -710,6 +740,12 @@ async function act(kind, id) {
     const r = await fetch("/api/radio/upnext", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ids: [id]})});
     const d = await r.json().catch(() => ({}));
     if (b) { b.textContent = r.ok ? "✓ Plays next on the radio" : (d.error || "Couldn't queue it"); b.disabled = r.ok; }
+    return;
+  }
+  if (kind === "fav") {
+    const b = document.querySelector(`[data-act="fav"][data-id="${id}"]`), on = !(b && b.getAttribute("aria-pressed") === "true");
+    const r = await fetch("/api/radio/playlist", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({track: id, on})});
+    if (b && r.ok) { b.setAttribute("aria-pressed", on); b.textContent = on ? "♥ In playlist" : "♡ Playlist"; }
     return;
   }
   const j = await getJob(id);
@@ -894,7 +930,7 @@ function endRewrite(restore) {
   const backup = store.get("rwBackup", null);
   if (restore && backup && Object.keys(backup).length) { loadForm(backup); saveForm(); }
   store.set("rwBackup", null); rw.id = null; $("rw").hidden = true;
-  if (location.hash.startsWith("#rewrite=")) history.replaceState(null, "", location.pathname);
+  if (location.hash.startsWith("#rewrite=")) history.replaceState(null, "", location.pathname + location.search);   // keeps ?embed=1
 }
 async function suggest(ask) {
   const r = await fetch("/api/rewrite/suggest", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({id: rw.id, ask})});
@@ -949,8 +985,21 @@ $("rwGo").onclick = async () => {
 $("rwAsk").addEventListener("keydown", (e) => { if (e.key === "Enter") $("rwGo").click(); });
 $("rwClose").onclick = () => endRewrite(true);
 $("rwPlay").onclick = () => { if (rw.track && window.agentoraPlay) agentoraPlay([rw.track]); };
-function rewriteFromHash() { const m = location.hash.match(/^#rewrite=([\w-]+)/); if (m) startRewrite(m[1]); }
+function rewriteFromHash() {
+  const m = location.hash.match(/^#rewrite=([\w-]+)/); if (m) return startRewrite(m[1]);
+  const like = location.hash.match(/^#like=([\w-]+)/); if (like) styleLike(like[1]);
+}
 window.addEventListener("hashchange", rewriteFromHash);
+async function styleLike(id) {        // the style of that song (a station's sound); your lyrics and title stay
+  history.replaceState(null, "", location.pathname + location.search);
+  const j = await getJob(id).catch(() => null); if (!j || !j.style) return;
+  const before = $("style").value, note = $("enhanceNote");
+  setMode(j.mode || "song"); $("style").value = j.style; syncChips(); spiceNote(); saveForm();
+  note.hidden = false;
+  note.innerHTML = `📻 Style from “${esc(j.title)}” on the radio. Write your lyrics (or ✨ Write lyrics for me), then Create song. <button class="linkbtn" type="button" id="likeUndo">↩ Undo</button>`;
+  $("likeUndo").onclick = () => { $("style").value = before; syncChips(); spiceNote(); saveForm(); note.textContent = "Your style is back."; };
+  $("create").scrollIntoView({behavior: "smooth"});
+}
 
 // Easy / Advanced: how many controls the form shows (remembered on this browser)
 function setUi(ui) {

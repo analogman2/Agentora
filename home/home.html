@@ -2,6 +2,8 @@
 <html lang="en" data-agentora-app="home">
 <head>
 <meta charset="utf-8">
+<script>/* Agentora is one window: on its own, this page opens as the radio page's Home tab (?embed=1 keeps it on its own) */
+if (window.top === window && !/[?&]embed=1/.test(location.search)) location.replace(location.protocol + "//" + location.hostname + ":7860/radio#home");</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agentora Home</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>∞</text></svg>">
@@ -84,6 +86,10 @@ h1 { font-size: 26px; margin: 0 0 4px; }
 @media (max-width: 560px) { .acct .users th:nth-child(3), .acct .users td:nth-child(3) { display: none; } }
 </style>
 <link rel="stylesheet" href="/agentora/agentora.css">
+<style>
+/* the Home tab of the radio page: its tabs, ☰ panel and player bar are around this page */
+.agentora-embed .nav { display: none; }
+</style>
 </head>
 <body>
 <nav class="nav"><div class="nav-in">
@@ -103,7 +109,7 @@ h1 { font-size: 26px; margin: 0 0 4px; }
       <div class="btns"><button class="btn primary" data-app="radio">▶ Listen</button><a class="btn" id="npSong" href="#" hidden>Lyrics &amp; story</a></div>
     </section>
     <section class="card" aria-labelledby="hMusic">
-      <h2 id="hMusic"><i class="dot" id="musicDot"></i>🎵 Music Studio</h2>
+      <h2 id="hMusic"><i class="dot" id="musicDot"></i>🎵 Create</h2>
       <div class="small muted" id="musicMeta">Write and record songs by hand with the YuE2 music model.</div>
       <div class="btns"><button class="btn primary" data-app="music">Open</button></div>
     </section>
@@ -139,7 +145,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 const base = (port) => `${location.protocol}//${location.hostname}:${port}`;
 const size = (n) => n >= 2 ** 40 ? (n / 2 ** 40).toFixed(2) + " TB" : (n / 2 ** 30).toFixed(n >= 100 * 2 ** 30 ? 0 : 1) + " GB";
-const PRIO = {shared: "Shared", studio: "Image & Video Studio", radio: "Radio", assistant: "Assistant (Hermes)", clipsmith: "Clipsmith (Designer Studio)"};
+const PRIO = {shared: "Shared", studio: "Image & Video Studio", radio: "Radio", assistant: "Assistant (Hermes)", clipsmith: "Clipsmith (Designer Studio)", gaming: "🎮 Gaming"};
 async function load() {
   let d;
   try { d = await (await fetch("/api/home", {cache: "no-store"})).json(); } catch (e) { $("subline").textContent = "Couldn't reach Agentora."; return; }

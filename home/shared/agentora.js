@@ -1,6 +1,8 @@
 // Agentora shared script: Now Playing (the sheet, one-song-at-a-time, the shared player), the app switcher and the now-playing bar, for every app. Served at /agentora/agentora.js by the
 // radio (:7860) and Home (:7871). A page says which app it is with <html data-agentora-app="home|radio|music"> and puts <div data-agentora-apps></div> where
-// the switcher goes. Each app keeps one browser tab; switching jumps to that tab without reloading it (the radio keeps playing).
+// the switcher goes. Agentora is one window: the radio page (:7860/radio) has the tabs Home · Stations · Library · Create,
+// with Home and the Music Studio running inside it as panes (frames; AG_EMBED below). Switching changes the tab in place
+// (the radio keeps playing); a pane asks the page around it to switch, and the Music Studio plays in the radio page's bar.
 // ---- Now Playing, shared by every app:
 //   agentoraLyrics(t)        a song's lyrics as labelled [Verse] / [Chorus] blocks
 //   agentoraSolo             one song at a time: a registered media element that starts playing stops every other one, in
@@ -9,6 +11,9 @@
 //                            (tap or swipe), the song's details and the full controls. src says what to show and does what's pressed.
 //   agentoraPlayer           the one player on Home and the Music Studio (the radio page has its own): agentoraPlay(list, i)
 const agEsc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+// In a pane of the radio page: that page has the switcher, the ☰ panel, the now-playing bar and the player.
+const AG_EMBED = window.top !== window;
+if (AG_EMBED) document.documentElement.classList.add("agentora-embed");
 const agTime = (s) => { s = Math.max(0, Math.round(s || 0)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
 
 const AG_LY_SECTION = /^(verse|chorus|pre-?chorus|post-?chorus|bridge|intro|outro|hook|refrain|interlude|break|instrumental|solo|coda|drop|breakdown)\b/i;
@@ -492,24 +497,30 @@ window.agentoraPlayer = (() => {
   window.agentoraPlay = P.play;
   return P;
 })();
+if (AG_EMBED) try {                // the Create pane (same origin): ▶ plays in the radio page's bar, through its Library player
+  const host = window.parent.agentoraHostPlayer;
+  if (host) { window.agentoraPlayer = host; window.agentoraPlay = (list, i) => host.play(list, i); }
+} catch (e) { /* Home's pane is another port: it has nothing to play */ }
 
 (() => {
-  const APPS = [["home", "🏠", "Home", ":7871/home"], ["radio", "📻", "Radio", ":7860/radio"], ["music", "🎵", "Music", ":7860/"]];
+  const APPS = [["home", "🏠", "Home"], ["radio", "📻", "Radio"], ["music", "🎵", "Music"]];
   const THIS = document.documentElement.dataset.agentoraApp || "";
-  const url = (key, path = "") => `${location.protocol}//${location.hostname}${APPS.find(a => a[0] === key)[3]}${path}`;
-  if (!window.name || /^(b70|agentora)-/.test(window.name)) window.name = "agentora-" + THIS;
+  const TAB = {home: "#home", radio: "#stations", music: "#create"};   // each app's tab on the radio page
+  const url = (key, path = "") => `${location.protocol}//${location.hostname}:7860/radio${TAB[key]}${path ? "/" + path.replace(/^#/, "") : ""}`;
 
+  // Never a new window: on the radio page switch the tab, from a pane ask the radio page to, anywhere else go there.
   function open(key, path) {
-    if (key === THIS && !path) return;
-    if (key === THIS) { location.href = url(key, path); return; }
-    const w = window.open("", "agentora-" + key);
-    if (!w) { location.href = url(key, path); return; }          // pop-ups blocked: go there in this tab
-    let blank = false;
-    try { blank = !w.location.href || w.location.href === "about:blank"; } catch (e) { /* another app's page: already open */ }
-    if (blank || path) w.location.href = url(key, path);
-    w.focus();
+    if (!TAB[key]) return;
+    if (AG_EMBED) { window.parent.postMessage({agentora: "open", key, path: path || ""}, "*"); return; }
+    if (THIS === "radio") { location.hash = url(key, path).split("#")[1]; return; }
+    location.href = url(key, path);
   }
   window.agentoraOpen = open;
+  if (THIS === "radio" && !AG_EMBED) window.addEventListener("message", e => {
+    const d = e.data;
+    if (!d || d.agentora !== "open" || ![...document.querySelectorAll(".pane iframe")].some(f => f.contentWindow === e.source)) return;
+    open(d.key, d.path);
+  });
 
   // Assistant brain: <button data-agentora-brain> becomes a three-way slider. 🐹 Lemming = quick answers (always fits on the
   // GPU), ✨ Auto = the GPU broker picks AGI when it can have the card within a few seconds, else Lemming, 🧠 AGI = the
@@ -552,7 +563,7 @@ window.agentoraPlayer = (() => {
 
   // ---- the now-playing bar on Home and the Music Studio: a song playing here (the shared player, agentoraPlay), else
   // the radio's song. Pull it up (or tap it) for the Now Playing view. The radio page has its own bar and player.
-  if (THIS === "radio") return;
+  if (THIS === "radio" || AG_EMBED) return;
   const onRadio = location.port === "7860", RADIO = `${location.protocol}//${location.hostname}:7860`, P = window.agentoraPlayer, I = window.agentoraIcons;
   const post = (body) => ({method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   const api = onRadio ? {state: "/api/radio/state", act: (a, body) => fetch("/api/radio/" + a, post(body))}
@@ -741,12 +752,12 @@ window.agentoraAccount = (() => {
   return {who, fill, fillAll};
 })();
 
-// ---- ☰ control panel for apps without their own (Home, Music Studio): radio, GPU and priority, disk, apps.
+// ---- ☰ control panel for apps without their own (Home, Music Studio): radio, GPU, disk, apps.
 // A page opts in with <button data-agentora-panel></button> where the ☰ goes. Works on both servers: the radio's (:7860)
 // and Home's (:7871) expose the same facts under slightly different paths.
 (() => {
   const btn = document.querySelector("[data-agentora-panel]");
-  if (!btn) return;
+  if (!btn || AG_EMBED) { if (btn) btn.hidden = true; return; }
   const onRadio = location.port === "7860";
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
   const get = (p) => fetch(p, {cache: "no-store"}).then(r => r.ok ? r.json() : Promise.reject(new Error(r.status)));
@@ -759,19 +770,16 @@ window.agentoraAccount = (() => {
       const s = (st.stations || []).find(x => x.id === st.station), sv = st.stream || {};
       return {radio: {on: st.on, station: s && s.name, now: sv.now && sv.now.title, listeners: sv.listeners || 0,
                       making: (st.making || []).length, gpu: (st.gpu || {}).detail || (st.gpu || {}).owner},
-              vram: g.total_mb ? [g.used_mb, g.total_mb, g.name] : null, priority: p.priority, choices: p.choices, waiting: p.waiting, disk: d};
+              vram: g.total_mb ? [g.used_mb, g.total_mb, g.name] : null, waiting: p.waiting, disk: d};
     }
-    const signedIn = await get("/api/session").then(x => !!x.user).catch(() => false);   // priority and disk details need a sign-in
-    const [h, p, d] = await Promise.all([get("/api/home"), signedIn ? get("/api/gpu-priority").catch(() => ({})) : {},
-                                         signedIn ? get("/api/disk").catch(() => null) : null]);
+    const signedIn = await get("/api/session").then(x => !!x.user).catch(() => false);   // disk details need a sign-in
+    const [h, d] = await Promise.all([get("/api/home"), signedIn ? get("/api/disk").catch(() => null) : null]);
     const r = h.radio, sy = h.system || {};
     return {radio: r && {on: r.on, station: r.station && r.station.name, now: r.now && r.now.title, listeners: r.listeners || 0,
                          making: r.making || 0, gpu: r.detail || r.gpu},
-            vram: sy.vram_total ? [sy.vram_used, sy.vram_total, "Graphics card"] : null, priority: p.priority, choices: p.choices,
+            vram: sy.vram_total ? [sy.vram_used, sy.vram_total, "Graphics card"] : null,
             disk: d || (sy.disk_total ? {total: sy.disk_total, free: sy.disk_free, used: sy.disk_total - sy.disk_free} : null)};
   }
-  const setPriority = (v) => fetch(onRadio ? "/api/gpu/priority" : "/api/gpu-priority", {method: "POST",
-    headers: {"Content-Type": "application/json"}, body: JSON.stringify({priority: v})});
 
   btn.className = "agentora-panelbtn"; btn.type = "button"; btn.innerHTML = "☰"; btn.title = "Control panel: radio, GPU, disk and apps";
   btn.setAttribute("aria-label", "Open the control panel"); btn.setAttribute("aria-expanded", "false");
@@ -801,10 +809,7 @@ window.agentoraAccount = (() => {
             <p class="agentora-muted">${r.making ? `${r.making} song${r.making === 1 ? "" : "s"} being made` : "Nothing being made"}${r.gpu && r.gpu !== f.waiting ? ` · ${esc(r.gpu)}` : ""}</p>
             <a class="agentora-btn" href="${app(7860, "/radio")}" data-app="radio">Open the radio</a>` : `<p class="agentora-muted">The radio isn't answering.</p>`) : ""}
       ${f ? card("GPU", `${f.vram ? `${bar(f.vram[0], f.vram[1], f.vram[0] / f.vram[1] > 0.92)}<p class="agentora-muted">${(f.vram[0] / 1024).toFixed(1)} of ${Math.round(f.vram[1] / 1024)} GB in use · ${esc(f.vram[2])}</p>` : ""}
-            ${f.choices ? `<p class="agentora-label">Who goes first</p>
-            <div class="agentora-prio" role="group" aria-label="GPU priority">${Object.entries(f.choices || {}).map(([k, l]) =>
-              `<button type="button" data-prio="${k}" aria-pressed="${k === f.priority}">${esc(l)}</button>`).join("")}</div>` : ""}
-            ${f.waiting ? `<p class="agentora-muted">${esc(f.waiting)}</p>` : ""}<p class="agentora-muted" data-prio-msg></p>`) : ""}
+            ${f.waiting ? `<p class="agentora-muted">${esc(f.waiting)}</p>` : ""}`) : ""}
       ${f && f.disk ? card("Disk", `${bar(f.disk.used, f.disk.total, f.disk.free / f.disk.total < 0.1)}<p class="agentora-muted">${gb(f.disk.free)} GB free of ${Math.round(f.disk.total / 2 ** 30)} GB</p>`) : ""}
       ${card("Apps", `<div class="agentora-links">
           <a class="agentora-btn" href="${app(7871, "/home")}" data-app="home">🏠 Home</a><a class="agentora-btn" href="${app(7860, "/radio")}" data-app="radio">📻 Radio</a>
@@ -816,9 +821,5 @@ window.agentoraAccount = (() => {
   side.addEventListener("click", async (e) => {
     const a = e.target.closest("a[data-app]");
     if (a && window.agentoraOpen) { e.preventDefault(); open(false); return window.agentoraOpen(a.dataset.app); }
-    const p = e.target.closest("[data-prio]"); if (!p) return;
-    const r = await setPriority(p.dataset.prio).catch(() => null);
-    if (!r || !r.ok) { const m = side.querySelector("[data-prio-msg]"); if (m) m.textContent = r && r.status === 403 ? "Only an admin can change this." : "Couldn't change it."; return; }
-    render();
   });
 })();
