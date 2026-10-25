@@ -33,6 +33,7 @@ API (127.0.0.1:7890, JSON):
   GET  /status                        -> cards, leases (with queue positions), where each model runs
 Stdlib only. Usage: gpu_broker.py [--port 7890] [--ollama-port 11435]
 """
+from datetime import datetime
 import argparse, http.client, json, logging, os, re, subprocess, threading, time, urllib.request, uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -524,12 +525,31 @@ def is_unload(j):
 keep = {"note": None, "touched": 0.0, "lease": None, "loading": set()}
 
 
+def guest_left(m):
+    """Seconds until Ollama unloads a model by its keep_alive (None when it never will or the time can't be read)."""
+    try:
+        stamp = re.sub(r"(\.\d{6})\d+", r"\1", m["expires_at"])          # Ollama gives nanoseconds; Python reads up to micro
+        left = datetime.fromisoformat(stamp).timestamp() - time.time()
+    except Exception:
+        return None
+    return left if left < 86400 else None        # "forever" shows as a date centuries away
+
+
 def keep_homes():
     """Models with a card of their own stay loaded there (that Ollama also has OLLAMA_KEEP_ALIVE=-1); after a boot or
     a crash of it, load them again."""
     for model, home in HOMES.items():
         o = OLLAMA[home]
-        if not o.up() or model in o.loaded() or model in keep["loading"]:
+        if not o.up() or model in keep["loading"]:
+            continue
+        loaded = o.loaded()
+        if model in loaded:
+            continue
+        # a guest (e.g. the Image & Video Studio's prompt helper, qwen3.5:9b with a few minutes' keep_alive) took the card
+        # for a while: let it finish, then bring the home model back when Ollama unloads it. Hermes asking for its model
+        # still loads it at once.
+        guests = {n: guest_left(m) for n, m in loaded.items()}
+        if any(left is not None and left > 0 for left in guests.values()):
             continue
         keep["loading"].add(model)
         try:
