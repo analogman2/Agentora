@@ -258,12 +258,13 @@ const api = async (path, method = "GET", body) => {
 const ago = (t, now) => !t ? "never" : (s => s < 90 ? "just now" : s < 5400 ? Math.round(s / 60) + " min ago" : s < 129600 ? Math.round(s / 3600) + " h ago" : Math.round(s / 86400) + " days ago")(now - t);
 async function openAccount() {
   if (!ME) {
-    const setup = (await api("/api/session").catch(() => ({}))).setup;
+    const sess = await api("/api/session").catch(() => ({})), setup = sess.setup;
     dlg.innerHTML = `<form method="dialog" id="signin"><h2>${setup ? "Create the admin account" : "Sign in"}</h2>
       <p class="small muted">${setup ? "The first account runs everything: the radio, Home and the Hermes dashboard." : "One account for the radio, Music Studio, Home and the Hermes dashboard."}</p>
       <label>Username <input name="u" autocomplete="username" required></label>
       <label>Password <input name="p" type="password" autocomplete="${setup ? "new-password" : "current-password"}" required></label>
-      <p class="err" id="aErr"></p><div class="btns"><button class="btn primary" value="go">${setup ? "Create" : "Sign in"}</button><button class="btn" value="cancel" formnovalidate>Cancel</button></div></form>`;
+      <p class="err" id="aErr"></p><div class="btns"><button class="btn primary" value="go">${setup ? "Create" : "Sign in"}</button><button class="btn" value="cancel" formnovalidate>Cancel</button></div>
+      ${sess.pocketid && !setup ? `<p class="small muted">or</p><div class="btns"><a class="btn" target="_top" href="/api/oidc/start?next=${encodeURIComponent(location.protocol + "//" + location.hostname + ":7860/radio#home")}">🔑 Sign in with Pocket ID</a></div>` : ""}</form>`;
     $("signin").onsubmit = async (e) => {
       if (e.submitter && e.submitter.value === "cancel") return;
       e.preventDefault();

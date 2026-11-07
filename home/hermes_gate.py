@@ -36,8 +36,14 @@ button{font:inherit;font-weight:600;padding:10px;border:0;border-radius:10px;bac
 <form id="f"><h1>__ICON__ __NAME__</h1><p>Sign in with a Agentora <b>admin</b> account.</p>
 <input id="u" autocomplete="username" placeholder="Agentora username" aria-label="Agentora username" required>
 <input id="p" type="password" autocomplete="current-password" placeholder="Password" aria-label="Password" required>
-<button>Sign in</button><div id="e" role="alert"></div></form>
+<button>Sign in</button><div id="e" role="alert"></div>
+<a id="pid" hidden style="text-align:center;padding:10px;border:1px solid var(--line);border-radius:10px;color:var(--text);text-decoration:none;font-weight:600">🔑 Sign in with Pocket ID</a></form>
 <script>
+// Pocket ID sign-in happens on Agentora Home (:7871), which sets the shared account cookie and sends the browser back here
+const home = location.protocol + "//" + location.hostname + ":7871", pid = document.getElementById("pid");
+fetch(home + "/api/session", {credentials: "include"}).then(r => r.json()).then(j => {
+  if (j.pocketid) { pid.href = home + "/api/oidc/start?next=" + encodeURIComponent(location.href); pid.hidden = false; }
+}).catch(() => {});
 document.getElementById("f").onsubmit = async (ev) => {
   ev.preventDefault(); const e = document.getElementById("e"); e.textContent = "";
   const r = await fetch("/gate/login", {method: "POST", headers: {"Content-Type": "application/json"},

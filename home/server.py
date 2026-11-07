@@ -5,8 +5,9 @@ The radio and Music Studio (:7860), the Hermes gate (:7880) and the Jim gate (:7
 Also serves the shared look (/agentora/agentora.css, .js) and the now-playing bar's API. Listens on 127.0.0.1:7871.
 The Image & Video Studio used to live here too; it is its own app now (~/genstudio, :7870) with its own accounts.
 """
-import asyncio, hmac, json, os, re, shutil, time
+import asyncio, hmac, html, json, os, re, shutil, time
 from pathlib import Path
+from urllib.parse import urlparse
 
 import logging
 import aiohttp
@@ -14,6 +15,7 @@ from aiohttp import web
 
 import logsetup                     # logging for every component: journal + logs/<component>.log
 import auth
+import pocketid                     # "Sign in with Pocket ID" next to the password form
 
 HOST = os.environ.get("HOME_HOST", "127.0.0.1")
 PORT = int(os.environ.get("HOME_PORT", "7871"))
@@ -331,7 +333,7 @@ async def assistant_internet(request):
 
 # ---------- accounts: one account across the radio, Music Studio, Home and the gates ----------
 
-PUBLIC_PATHS = {"/", "/home", "/api/home", "/api/session", "/api/setup", "/api/login"}
+PUBLIC_PATHS = {"/", "/home", "/api/home", "/api/session", "/api/setup", "/api/login", "/api/oidc/start", "/api/oidc/callback"}
 
 # ---- user activity (logsetup.activity): what each signed-in person does, with their device
 ACTIONS = {   # (method, route) -> event name
@@ -380,9 +382,9 @@ async def note_activity(request, resp):
         logsetup.activity("home", "active", user, **w, every=600)
 
 
-# Agentora's own apps on this machine (radio + Music Studio, Home, the Hermes and Jim gates) may ask who's signed in and
-# sign out: one account across every app. Any other site is refused.
-OWN_PORTS = {"7860", "7871", "7880", "7885"}
+# Agentora's own apps on this machine (radio + Music Studio, Home, the Hermes, Jim, ComfyUI, House Lights and LedFx gates)
+# may ask who's signed in and sign out: one account across every app. Any other site is refused.
+OWN_PORTS = {"7860", "7871", "7880", "7885", "7886", "7887", "7888"}
 CORS_PATHS = {"/api/session", "/api/logout"}
 
 
@@ -438,7 +440,64 @@ def session_response(data, token=None, clear=False):
 
 
 async def session_info(request):
-    return web.json_response({"user": request["user"], "setup": auth.needs_setup()})
+    return web.json_response({"user": request["user"], "setup": auth.needs_setup(), "pocketid": POCKETID.enabled})
+
+
+# ---- Pocket ID (passkey sign-in on pve1): signs in the Agentora account with the same username; passwords still work
+
+POCKETID = pocketid.PocketID("agentora")
+
+
+def own_base(request):
+    """This site as the browser sees it. The tailnet relay ends HTTPS before us, so the scheme comes from the name."""
+    return ("https" if request.host.split(":")[0].endswith(".ts.net") else "http") + "://" + request.host
+
+
+def after_signin(url, request):
+    """Where to go after Pocket ID: a path here, or a page of another Agentora app on this same host."""
+    if not isinstance(url, str):
+        return "/home"
+    if url.startswith("/") and not url.startswith("//"):
+        return url
+    u = urlparse(url)
+    same_host = u.hostname == request.host.rpartition(":")[0] or u.hostname == request.host
+    return url if u.scheme in ("http", "https") and same_host and str(u.port or "") in OWN_PORTS else "/home"
+
+
+def signin_problem(text):
+    return web.Response(content_type="text/html", status=400, text=f"""<!doctype html><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign-in problem</title>
+<body style="font:16px system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 16px">
+<h1 style="font-size:20px">Pocket ID sign-in didn't work</h1><p>{html.escape(text)}</p><p><a href="/home">Back to Agentora</a></p>""")
+
+
+async def oidc_start(request):
+    if not POCKETID.enabled:
+        raise web.HTTPNotFound(text="Pocket ID sign-in isn't set up")
+    url, state = await asyncio.to_thread(POCKETID.start, own_base(request) + "/api/oidc/callback",
+                                         after_signin(request.query.get("next"), request))
+    resp = web.HTTPFound(url)
+    resp.set_cookie(pocketid.STATE_COOKIE, state, max_age=pocketid.PENDING_SECONDS, httponly=True, samesite="Lax", path="/api/oidc")
+    raise resp
+
+
+async def oidc_callback(request):
+    w = who(request)
+    try:
+        claims, next_url = await asyncio.to_thread(POCKETID.finish, dict(request.query), request.cookies.get(pocketid.STATE_COOKIE))
+    except pocketid.PocketIDError as e:
+        logsetup.activity("home", "sign-in failed", None, **w, via="Pocket ID", reason=str(e)[:120])
+        return signin_problem(str(e))
+    name = pocketid.account_for(claims, list(auth.users))
+    if not name:
+        logsetup.activity("home", "sign-in failed", None, **w, via="Pocket ID", tried=str(claims.get("preferred_username"))[:40])
+        return signin_problem(f"There's no Agentora account called {claims.get('preferred_username')!r}. An admin can add one.")
+    logsetup.activity("home", "sign in", name, **w, via="Pocket ID")
+    resp = web.HTTPFound(next_url)
+    resp.set_cookie(auth.COOKIE, auth.new_session(name, w["ip"], logsetup.device(w["ip"], w["ua"]) if w["ip"] else logsetup.browser(w["ua"])),
+                    max_age=auth.SESSION_DAYS * 86400, httponly=True, samesite="Lax", path="/")
+    resp.del_cookie(pocketid.STATE_COOKIE, path="/api/oidc")
+    raise resp
 
 
 async def setup(request):
@@ -566,6 +625,8 @@ def main():
     app.router.add_get("/api/session", session_info)
     app.router.add_post("/api/setup", setup)
     app.router.add_post("/api/login", login)
+    app.router.add_get("/api/oidc/start", oidc_start)
+    app.router.add_get("/api/oidc/callback", oidc_callback)
     app.router.add_post("/api/logout", logout)
     app.router.add_post("/api/password", change_password)
     app.router.add_get("/api/users", list_users)
