@@ -127,7 +127,7 @@
       <div class="agrid" id="psAgrid">${a.items.map(i => `<button type="button" data-key="${esc(i.key)}" class="${ps.picked.has(i.key) ? "on" : ""}" ${i.added || i.video ? "disabled" : ""}
         title="${esc(i.date ? fmtDate(i.date) : "")}"><img src="${esc(i.thumb)}" alt="" loading="lazy">${i.added ? `<span class="tag">added</span>` : i.video ? `<span class="tag">video</span>` : ""}</button>`).join("")}</div>
       <div class="wbar"><button class="btn small accent" type="button" id="psAlbumAdd" ${ps.picked.size ? "" : "disabled"}>Add ${ps.picked.size || ""} picked</button>
-        <button class="btn small" type="button" id="psAlbumSpread" ${left && room > 0 ? "" : "disabled"} title="Up to 20 photos spread evenly over the album's dates">✨ Pick for me</button>
+        <button class="btn small" type="button" id="psAlbumSpread" ${left && room > 0 ? "" : "disabled"} title="Up to 20 photos spread over the album's dates, chosen from their capture times: never two taken within an hour of each other (or of a photo already in the song)">✨ Pick for me</button>
         <button class="linkbtn" type="button" id="psAlbumHide">Hide the album</button></div>`;
   }
   function wireAlbum() {
@@ -161,17 +161,19 @@
   }
   async function importAlbum(body) {
     if (ps.busy) return; ps.busy = true; await flush();
-    let summary = null;
+    let summary = null, picked = null;
     try {
       await sse(`/api/photosong/${ps.id}/album/import`, body, (ev) => {
         if (ev.importing) status(`Downloading the original ${ev.importing} of ${ev.of}…`);
+        if (ev.picked != null) picked = ev;
         if (ev.done) summary = ev;
       });
       ps.picked = new Set(); ps.busy = false; ps.albumOpen = false;
       await open(ps.id);
       if (summary) {
         const sk = summary.skipped.length ? ` Skipped ${summary.skipped.length}: ${[...new Set(summary.skipped)].join("; ")}.` : "";
-        status(`Added ${summary.added} photo${summary.added === 1 ? "" : "s"} from the album.${sk}`, summary.skipped.length > 0 && !summary.added);
+        const why = picked ? ` Picked ${picked.picked} of ${picked.of}, at least an hour apart${picked.undated ? ` (${picked.undated} with no date left out)` : ""}.` : "";
+        status(`Added ${summary.added} photo${summary.added === 1 ? "" : "s"} from the album.${why}${sk}`, summary.skipped.length > 0 && !summary.added);
       }
     } catch (e) { ps.busy = false; await open(ps.id); status(e.message, true); }
   }

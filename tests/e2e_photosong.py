@@ -161,6 +161,19 @@ except app.BadRequest: ok(True, "radio refuses to queue it")
 try:
     radio_library.set_playlist(ids[0], True); ok(False, "radio playlist refuses it")
 except app.BadRequest: ok(True, "radio playlist refuses it")
+# --- ✨ Pick for me: one photo per hour, from the capture times alone
+from datetime import datetime as _dt, timedelta as _td
+_t0 = _dt(2024, 6, 1, 9, 0)
+_items = [{"key": f"k{i}", "date": (_t0 + _td(minutes=m)).isoformat(timespec="minutes"), "video": False}
+          for i, m in enumerate([0, 5, 10, 20, 50, 70, 75, 200, 205, 1440, 1441, 1442, 3000, 3030, 3059, 3100, 5000])]
+_items.append({"key": "nodate", "date": None, "video": False})
+_already = [(_t0 + _td(minutes=4990)).isoformat(timespec="minutes")]      # a photo already in the song
+_pick = photosong.spread(_items, 20, _already)
+_times = sorted(_dt.fromisoformat(i["date"]) for i in _pick)
+ok(all(b - a >= _td(hours=1) for a, b in zip(_times, _times[1:])), f"pick for me: {len(_pick)} picked, all at least an hour apart")
+ok(all(abs(t - _dt.fromisoformat(_already[0])) >= _td(hours=1) for t in _times), "pick for me: none within an hour of a photo already in the song")
+ok("nodate" not in {i["key"] for i in _pick}, "pick for me: photos with no date are left out")
+ok(len(photosong.spread(_items, 3)) == 3, "pick for me: no more than asked for")
 # --- 📁 a Google Photos shared album (a public test album kept by the google-photos-album-image-url-fetch project)
 if "--no-network" not in sys.argv:
     ALBUM = "https://photos.app.goo.gl/oJEMCo5g5eUptS2fA"

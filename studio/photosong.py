@@ -400,13 +400,37 @@ def album_thumb(d, n):
     return f.read_bytes()
 
 
-def spread(items, n):
-    """n photos spread evenly over the album's dates (the 'pick for me' choice)."""
-    items = sorted(items, key=lambda i: i.get("date") or "")
-    if len(items) <= n:
-        return items
-    step = len(items) / n
-    return [items[int(i * step + step / 2)] for i in range(n)]
+PICK_GAP = timedelta(hours=1)          # ✨ Pick for me: never two photos taken within this of each other
+
+
+def spread(items, n, taken=()):
+    """✨ Pick for me, from the album's metadata (each photo's capture time) before anything is downloaded:
+    - photos taken within an hour of each other count as one moment, and only its middle photo is a candidate;
+    - no candidate within an hour of another, or of a photo already in the song (taken: their dates);
+    - then up to n of them, spread evenly over the dates.
+    Photos with no date are left out: there's no telling when they were taken."""
+    when = lambda x: datetime.fromisoformat(x)
+    dated = sorted((i for i in items if i.get("date")), key=lambda i: i["date"])
+    bursts = []
+    for i in dated:
+        if bursts and when(i["date"]) - when(bursts[-1][0]["date"]) < PICK_GAP:
+            bursts[-1].append(i)
+        else:
+            bursts.append([i])
+    anchors = [when(x) for x in taken if x]
+    kept = []
+    for b in bursts:
+        i = b[len(b) // 2]
+        t = when(i["date"])
+        if kept and t - when(kept[-1]["date"]) < PICK_GAP:
+            continue
+        if any(abs(t - a) < PICK_GAP for a in anchors):
+            continue
+        kept.append(i)
+    if len(kept) <= n:
+        return kept
+    step = len(kept) / n
+    return [kept[int(k * step + step / 2)] for k in range(n)]
 
 
 def import_album(did, keys, emit):
@@ -417,7 +441,9 @@ def import_album(did, keys, emit):
     have = {p.get("source") for p in d["photos"]}
     if keys == "spread":
         room = MAX_PHOTOS - len(d["photos"])
-        chosen = spread([i for i in by_key.values() if not i["video"] and i["key"] not in have], max(0, min(room, 20)))
+        pool = [i for i in by_key.values() if not i["video"] and i["key"] not in have]
+        chosen = spread(pool, max(0, min(room, 20)), [p.get("date") for p in d["photos"]])
+        emit({"picked": len(chosen), "of": len(pool), "undated": sum(1 for i in pool if not i.get("date"))})
     else:
         chosen = [by_key[k] for k in keys if k in by_key and k not in have]
     emit({"todo": len(chosen)})
