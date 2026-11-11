@@ -436,7 +436,7 @@ def _take_upnext():
 def play_next(ids):
     """Add songs (any song in the library, e.g. a Music Studio rewrite) to the front of the broadcast, in order."""
     with app.lock:
-        ok = [i for i in ids if isinstance(i, str) and i in app.jobs]
+        ok = [i for i in ids if isinstance(i, str) and i in app.jobs and not app.is_private(app.jobs[i])]   # 📷 photo songs: never on air
     if not ok:
         raise app.BadRequest("No such song")
     with rs.lock:

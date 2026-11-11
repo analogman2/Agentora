@@ -1087,6 +1087,9 @@ TAG_NAMES = {"intro": "Intro", "verse": "Verse", "prechorus": "Pre-Chorus", "cho
 
 def lyrics_prompt(b):
     action = b.get("action", "write")
+    if action == "photos":                  # 📷 a song from photos: the prompt comes from the draft's story
+        import photosong
+        return photosong.lyrics_prompt(b, b.get("_user"))
     style = clean_text(b.get("style"), "Style", 1500)
     lang = clean_text(b.get("language"), "Language", 40)
     parts = [f"Style: {style or 'any'}"]
@@ -1342,14 +1345,22 @@ def summary(job):
             "progress", "created", "started", "finished", "seconds", "gen_seconds", "error", "cfg_scale", "max_seconds",
             "radio_feedback", "playlist_at", "engine")
     s = {k: job.get(k) for k in keys}
+    if job.get("private"):
+        s["private"], s["photosong"] = True, job.get("photosong")
     d = DATA / job["id"]
     s["files"] = [name for name, (rel, _) in FILES.items() if (d / rel).is_file()]
     return s
 
 
-def state():
+def is_private(job):
+    """📷 photo songs (and their takes and rewrites): only their maker sees them; never on the radio."""
+    return bool(job and job.get("private"))
+
+
+def state(viewer=None):
     with lock:
-        allj = sorted((j for j in jobs.values() if j.get("source") != "radio"), key=lambda j: -j["created"])
+        allj = sorted((j for j in jobs.values() if j.get("source") != "radio" and (not j.get("private") or j.get("owner") == viewer)),
+                      key=lambda j: -j["created"])
         queue = sorted((j for j in allj if j["status"] in ("queued", "running")), key=lambda j: j["created"])
         library = [j for j in allj if j["status"] in ("done", "failed", "cancelled")]
         idle_left = None
@@ -1590,6 +1601,10 @@ class Handler(BaseHTTPRequestHandler):
     def job_or_404(self, jid):
         with lock:
             job = jobs.get(jid)
+        if job and job.get("private"):                  # a 📷 photo song: only its maker
+            import photosong
+            if not photosong.visible(job, photosong.user_of(self)):
+                job = None
         if not job:
             self.send(404, {"error": "No such song"})
         return job
@@ -1642,7 +1657,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/gpu/priority":
             return self.send(200, {"priority": gpu_priority(), "choices": PRIORITIES, "waiting": gpu["detail"] if gpu["owner"] == "waiting" else None})
         if path == "/api/state":
-            return self.send(200, state())
+            import photosong
+            return self.send(200, state(photosong.user_of(self)))
+        if path.startswith("/api/photosong"):
+            import photosong
+            if photosong.handle(self, "GET", path):
+                return
         if path == "/api/spotify/status":
             return self.send(200, spotify_status())
         if path == "/api/spotify/tracks":
@@ -1704,6 +1724,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         path = self.path.split("?")[0]
+        if path.startswith("/api/photosong"):
+            import photosong
+            if photosong.handle(self, "PUT", path):
+                return
         import radio
         if not (path.startswith("/api/radio/") and radio.handle(self, "PUT", path)):
             self.send(404, {"error": "not found"})
@@ -1721,15 +1745,30 @@ class Handler(BaseHTTPRequestHandler):
             import radio
             if radio.handle(self, "POST", path):
                 return
+        if path.startswith("/api/photosong"):
+            import photosong
+            if photosong.handle(self, "POST", path):
+                return
         try:
             if path == "/api/jobs":
-                return self.send(200, {"ids": new_jobs(self.body())})
+                import photosong
+                b = self.body()
+                extra = photosong.job_extra(self, b)         # 📷 photo songs (and takes of them) stay private
+                ids = new_jobs(b, extra)
+                photosong.after_jobs(ids, extra)
+                return self.send(200, {"ids": ids})
             if path == "/api/lyrics":
-                return stream_lyrics(self, self.body())
+                b = self.body()
+                if b.get("action") == "photos":
+                    import photosong
+                    b["_user"] = photosong.user_of(self)     # never from the page
+                return stream_lyrics(self, b)
             if path == "/api/style/enhance":
                 return self.send(200, enhance_style(self.body()))
             if path == "/api/rewrite/suggest":
                 b = self.body()
+                if is_private(jobs.get(str(b.get("id") or ""))) and not self.job_or_404(str(b.get("id"))):
+                    return
                 return self.send(200, rewrite_suggestions(str(b.get("id") or ""), b.get("ask") or ""))
             if path == "/api/spotify/run":
                 b = self.body()
@@ -1764,6 +1803,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send(404, {"error": "not found"})
 
     def do_DELETE(self):
+        if self.path.startswith("/api/photosong"):
+            import photosong
+            if photosong.handle(self, "DELETE", self.path.split("?")[0]):
+                return
         if self.path.startswith("/api/radio/"):
             import radio
             if radio.handle(self, "DELETE", self.path.split("?")[0]):

@@ -70,7 +70,11 @@ def _event(method, path, b):
         if m:
             return {"song": "create a song now", "analyze": "learn from music"}[m.group(2)], {"station": station(m.group(1))}
         if path == "/api/jobs":
-            return "make a song (Music Studio)", {"rewrite_of": title(b.get("rewrite_of"))}
+            return "make a song (Music Studio)", {"rewrite_of": title(b.get("rewrite_of")), "from_photos": True if b.get("photosong") else None}
+        if path.startswith("/api/photosong"):            # 📷 never the photos, places, captions or lyrics: just what happened
+            end = path.rstrip("/").rsplit("/", 1)[-1]
+            name = {"photosong": "start a song from photos", "analyze": "read photos (song from photos)", "story": "story from photos"}.get(end)
+            return (name, {}) if name else None
         if path == "/api/lyrics":
             return "write lyrics", {}
         if path == "/api/rewrite/suggest":
@@ -95,6 +99,8 @@ def _event(method, path, b):
             return ("forget taste" if m.group(2) else "delete a station"), {"station": station(m.group(1))}
         if re.fullmatch(r"/api/jobs/[\w-]+", path):
             return "delete a song", {}
+        if re.fullmatch(r"/api/photosong/[0-9a-f]+", path):
+            return "delete a song from photos", {}
     return None
 
 

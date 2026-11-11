@@ -193,6 +193,7 @@ dialog pre { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(
         <label class="f" for="lyrics"><span id="lyricsLabel">Lyrics</span> <span class="hint" id="lyricsHint">— use section tags; one line per sung phrase</span></label>
         <div class="row" id="writerBtns" style="margin:2px 0 6px">
           <span style="flex:0 0 auto"><button class="btn small accent" type="button" id="openWriter">✨ Write lyrics for me</button>
+          <button class="btn small accent" type="button" id="openPhotos" title="A song made from your photos: what's in them, when and where. Made for love songs">📷 From photos</button>
           <button class="btn small adv-only" type="button" id="polish" title="Keep your words; fix section tags, line breaks and repeated choruses">Polish my lyrics</button>
           <button class="btn small" type="button" id="libLyrics" title="Fill in the lyrics of a random song from the radio library. Press again for another one">🎲 Lyrics from the library</button></span>
         </div>
@@ -242,6 +243,7 @@ dialog pre { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(
             <button class="btn small" type="button" id="wRewrite">Rewrite</button>
           </div>
         </div>
+        <div class="writer photos" id="photoWriter" hidden></div>
         <div class="chips adv-only" id="tags"></div>
         <textarea id="lyrics" class="lyrics" placeholder="[Verse]&#10;Neon fades along the lane&#10;Footsteps keep the time of rain&#10;&#10;[Chorus]&#10;Let the day come into view&#10;Every road begins with you"></textarea>
         <div class="row small muted" style="justify-content:space-between;margin-top:4px">
@@ -293,6 +295,7 @@ dialog pre { white-space: pre-wrap; font: 13px/1.5 var(--mono); background: var(
         <span class="muted small" id="eta"></span>
         <span class="err" id="formErr" role="alert"></span>
       </div>
+      <div class="small muted" id="photoNote" hidden></div>
     </section>
 
     <!-- ======================= QUEUE + LIBRARY ======================= -->
@@ -341,6 +344,17 @@ const PRESET_GROUPS = {
     "Hyperpop": "English, hyperpop, pitched-up glitchy female vocal, distorted 808s, sparkly chiptune synths, chaotic energy, 160 BPM",
     "Indie folk": "English, indie folk, gentle male voice, fingerpicked acoustic guitar, soft harmonies, warm and intimate, 96 BPM",
     "80s synthwave": "English, 80s synthwave, dreamy male vocal, analog synth pads, arpeggiated bass, gated drums, nostalgic night drive, 110 BPM",
+  },
+  "Love": {
+    "First-dance ballad": "English, acoustic first-dance ballad, warm intimate male vocal, fingerpicked acoustic guitar, soft strings, gentle piano, tender and slow, 72 BPM",
+    "Piano soul love song": "English, piano soul, rich heartfelt female vocal, grand piano, warm Rhodes, brushed drums, gospel-tinged harmonies, 76 BPM",
+    "90s R&B slow jam": "English, 90s R&B slow jam, smooth silky male vocal, lush layered harmonies, warm bass, soft finger snaps, romantic, 68 BPM",
+    "Indie folk duet": "English, indie folk duet, male and female voices trading lines and harmonising, acoustic guitar, banjo, soft kick drum, warm, 92 BPM",
+    "Country love song": "English, modern country love song, warm male vocal with a slight twang, acoustic and pedal steel guitar, steady drums, heartfelt, 84 BPM",
+    "Bossa nova romance": "English, bossa nova, soft breathy female vocal, nylon-string guitar, light brushed percussion, upright bass, gentle and sunny, 120 BPM",
+    "Synth-pop crush": "English, bright synth pop, sweet airy female vocal, shimmering synths, punchy drum machine, giddy falling-in-love energy, 116 BPM",
+    "Wedding-band swing": "English, big band swing, smooth crooner male vocal, horns, upright bass, swinging brushes, joyful and classy, 132 BPM",
+    "Voice and guitar demo": "English, stripped-down love song, close raw male vocal, a single acoustic guitar, room sound, honest and intimate, 80 BPM",
   },
   "Rock & punk": {
     "Rock anthem": "English, arena rock anthem, powerful male vocal, distorted electric guitars, driving bass, big drums, uplifting chorus, 128 BPM",
@@ -599,6 +613,7 @@ async function submit() {
   };
   if (engine === "minimax") { delete body.abc; delete body.cot; }      // MiniMax has no score planning
   if (rw.id) body.rewrite_of = rw.id;
+  if (window.photoSong) body.photosong = window.photoSong;           // 📷 a song from photos: private to you
   if (document.body.classList.contains("easy") && body.style.trim()) {    // Easy mode: the sliders
     const w = spiceWords(), sp = spiceSampling();
     if (w.length) body.style = body.style.trim().replace(/,\s*$/, "") + ", " + w.join(", ");
@@ -688,7 +703,7 @@ function renderLibrary(st) {
     const id = esc(j.id), files = new Set(j.files || []);
     const audio = "";
     const err = j.status !== "done" ? `<div class="small" style="color:var(--bad)">${esc(j.error || j.status)}</div>` : "";
-    return `<div class="job"><div class="top">${j.status !== "done" ? badge(j.status) : ""}<span class="title">${esc(j.title)}</span><span class="muted small">${meta(j)}</span></div>
+    return `<div class="job"><div class="top">${j.status !== "done" ? badge(j.status) : ""}<span class="title">${j.private ? `<span title="From your photos: only you see it, never on the radio">🔒📷 </span>` : ""}${esc(j.title)}</span><span class="muted small">${meta(j)}</span></div>
       <div class="style" title="${esc(j.style)}">${esc(j.style)}</div>${err}${audio}
       <div class="actions">
         ${songAudio(j) ? `<button class="btn small accent play" data-act="play" data-id="${id}" title="Play in the Now Playing player">${playLabel(j.id)}</button>` : ""}
@@ -696,8 +711,8 @@ function renderLibrary(st) {
         ${files.has("audio.flac") ? `<a class="btn small" href="/files/${id}/audio.flac?download=1">⬇ FLAC</a>` : ""}
         <button class="btn small" data-act="details" data-id="${id}">Details</button>
         <button class="btn small accent" data-act="rewrite" data-id="${id}" title="Improve this song: its settings and lyrics load into the form, with AI suggestions">✏️ Rewrite</button>
-        ${files.has("song.mp3") ? `<button class="btn small" data-act="upnext" data-id="${id}" title="Play this song next on the radio, for everyone listening">📻 Play next</button>` : ""}
-        ${songAudio(j) ? `<button class="btn small" data-act="fav" data-id="${id}" aria-pressed="${!!j.playlist_at}" title="${j.playlist_at ? "In" : "Add to"} your radio playlist">${j.playlist_at ? "♥ In playlist" : "♡ Playlist"}</button>` : ""}
+        ${files.has("song.mp3") && !j.private ? `<button class="btn small" data-act="upnext" data-id="${id}" title="Play this song next on the radio, for everyone listening">📻 Play next</button>` : ""}
+        ${songAudio(j) && !j.private ? `<button class="btn small" data-act="fav" data-id="${id}" aria-pressed="${!!j.playlist_at}" title="${j.playlist_at ? "In" : "Add to"} your radio playlist">${j.playlist_at ? "♥ In playlist" : "♡ Playlist"}</button>` : ""}
         <button class="btn small" data-act="reuse" data-id="${id}" title="Load these settings into the form">Reuse</button>
         <button class="btn small" data-act="take" data-id="${id}" title="Same settings, new seed">New take</button>
         ${files.has("score.abc") ? `<button class="btn small" data-act="edit" data-id="${id}" title="Edit the melody/chords and render again">Edit score</button>` : ""}
@@ -735,6 +750,7 @@ async function tick() {
 async function getJob(id) { const r = await fetch(`/api/jobs/${id}`); return r.json(); }
 function fillFrom(j, {newSeed = false, abc = null} = {}) {
   setMode(j.mode || "song"); setEngine(j.engine || "yue2");
+  if (window.setPhotoSong) setPhotoSong(j.photosong || null);         // reuse / new take of a photo song stays private
   $("style").value = j.style || ""; $("lyrics").value = j.lyrics || ""; $("title").value = j.title || "";
   $("cot").value = j.cot || "full"; $("seed").value = newSeed ? "" : (j.seed ?? ""); $("maxlen").value = j.max_seconds || 360;
   $("cfg").value = j.cfg_scale || 1; $("steps").value = j.ode_steps || 32; $("abc").value = abc ?? (j.abc || "");
@@ -1040,7 +1056,7 @@ for (const id of ["title", "author", "cot", "takes", "seed", "abc"]) $(id).oncha
 document.addEventListener("input", (e) => { if (e.target.dataset && e.target.dataset.s) { e.target.nextElementSibling.textContent = e.target.value; saveForm(); } });
 $("dice").onclick = () => { $("seed").value = Math.floor(Math.random() * 2 ** 31); saveForm(); };
 $("example").onclick = () => { if (mode === "song") { $("lyrics").value = EXAMPLE; if (!$("style").value) $("style").value = PRESETS["Warm piano pop"]; } else { $("lyrics").value = EXAMPLE_STRUCTURE; if (!$("style").value) $("style").value = PRESETS["Calm piano (instrumental)"]; } syncChips(); lyricStats(); saveForm(); };
-$("clearForm").onclick = () => { if (!confirm("Clear style, lyrics and title?")) return; $("style").value = ""; $("lyrics").value = ""; $("title").value = ""; syncChips(); lyricStats(); saveForm(); };
+$("clearForm").onclick = () => { if (!confirm("Clear style, lyrics and title?")) return; $("style").value = ""; $("lyrics").value = ""; $("title").value = ""; if (window.setPhotoSong) setPhotoSong(null); syncChips(); lyricStats(); saveForm(); };
 $("resetAdv").onclick = resetAdvanced;
 $("abcFile").onchange = async () => { const f = $("abcFile").files[0]; if (f) { $("abc").value = await f.text(); saveForm(); } };
 $("go").onclick = submit;
@@ -1112,6 +1128,7 @@ spotifyStatus(); spotifyTracks();
 rewriteFromHash();
 
 </script>
+<script src="/web/photosong.js"></script>
 <script src="/agentora/agentora.js" defer></script>
 </body>
 </html>

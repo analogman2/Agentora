@@ -151,7 +151,7 @@ def request_song(sid, like=None):
     if like:
         with app.lock:
             lj = dict(app.jobs.get(like) or {})
-        if not lj:
+        if not lj or app.is_private(lj):
             raise app.BadRequest("No such song")
     threading.Thread(target=produce, args=(sid, True, lj), daemon=True).start()
     return {"ok": True, "banked": bool(rs.stations[sid].get("bank")) and not lj}

@@ -13,7 +13,7 @@ import radio_state as rs, radio_stations as rst, radio_songwriter as rsw, radio_
 def track_details(tid):
     with app.lock:
         j = app.jobs.get(tid)
-    if not j:
+    if not j or app.is_private(j):                # 📷 photo songs stay off the radio
         raise app.BadRequest("No such song")
     return track_view(j) | {"critic": j.get("critic"), "writer": j.get("spec_writer"), "story": j.get("story"), "wildcard": j.get("wildcard"), "created": j.get("created"),
                             "approved_at": j.get("approved_at"), "airings": j.get("airings", 0), "status": j.get("radio_status"),
@@ -170,7 +170,7 @@ def feedback(track_id, kind):
         raise app.BadRequest("feedback must be keep, skip, dislike or clear")
     with app.lock:
         j = app.jobs.get(track_id)
-    if not j:
+    if not j or app.is_private(j):
         raise app.BadRequest("No such song")
     # any library song can be on air (📻 Play next); a Music Studio rewrite teaches its original's station
     orig = app.jobs.get(j.get("rewrite_of") or "") or {}
@@ -232,7 +232,7 @@ def all_songs(limit=3000):
     """🎵 All songs: every finished song with audio - aired or waiting radio songs from every station, and Music Studio songs."""
     with app.lock:
         js = [j for j in app.jobs.values() if j.get("status") == "done" and (app.DATA / j["id"] / "song.mp3").is_file()
-              and (j.get("source") != "radio" or j.get("radio_status") in ("approved", "played"))]
+              and not app.is_private(j) and (j.get("source") != "radio" or j.get("radio_status") in ("approved", "played"))]
     js.sort(key=lambda j: -(j.get("played_at") or j.get("finished") or j.get("created") or 0))
     return [track_view(j) | {"created": j.get("created"), "airings": j.get("airings", 0), "source": j.get("source", "studio"),
                              "up_next": j.get("source") == "radio" and j.get("radio_status") == "approved"} for j in js[:limit]]
@@ -241,14 +241,14 @@ def all_songs(limit=3000):
 def playlist():
     """Songs saved with +, any station, most recently added first."""
     with app.lock:
-        saved = [j for j in app.jobs.values() if j.get("playlist_at")]
+        saved = [j for j in app.jobs.values() if j.get("playlist_at") and not app.is_private(j)]
     return [track_view(j) | {"added_at": j["playlist_at"]} for j in sorted(saved, key=lambda j: -j["playlist_at"])]
 
 
 def set_playlist(track_id, on):
     with app.lock:
         j = app.jobs.get(track_id)
-        if not j:
+        if not j or app.is_private(j):
             raise app.BadRequest("No such song")
         j["playlist_at"] = time.time() if on else None
         app.save_job(j)
