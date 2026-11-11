@@ -16,6 +16,7 @@ import app
 ROOT = Path(os.environ.get("PHOTOSONG_DATA") or app.DATA.parent / "photosongs").expanduser()
 VISION_URL = os.environ.get("PHOTOSONG_VISION", "http://127.0.0.1:11435/api/chat")   # the broker's Ollama proxy (leases)
 VISION_MODEL = os.environ.get("PHOTOSONG_VISION_MODEL", "qwen3.8-agent")              # Qwen3.8 27B: vision on the 4090
+VISION_THINK = os.environ.get("PHOTOSONG_VISION_THINK", "1") != "0"
 MAX_PHOTOS, MAX_BYTES, MAX_DRAFT = 30, 25 << 20, 300 << 20
 TYPES = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/heic": "heic", "image/heif": "heic"}
 lock = threading.Lock()
@@ -88,6 +89,7 @@ def _clean(v, n):
 def clean_answers(a):
     a = a or {}
     out = {"for": _clean(a.get("for"), 60), "from": _clean(a.get("from"), 60), "since": _clean(a.get("since"), 80),
+           "others": _clean(a.get("others"), 300),
            "include": _clean(a.get("include"), 1500), "leave_out": _clean(a.get("leave_out"), 800), "language": _clean(a.get("language"), 40)}
     out["occasion"] = a.get("occasion") if a.get("occasion") in OCCASIONS else "anniversary"
     out["feel"] = a.get("feel") if a.get("feel") in FEELS else "tender"
@@ -481,15 +483,37 @@ def import_album(did, keys, emit):
 
 
 # ----------------------------------------------------------------------------- what's in each photo
-VISION_PROMPT = """You are helping someone write a song from their own photos{occasion}. Look at this photo{when}{where}.
-Describe what you see, for a songwriter. Strict rules: never guess who anyone is, their name, age, ethnicity or body; say
-"two people", "a woman in a green coat", "a child" at most. Pick concrete details someone who was there would remember.
+VISION_PROMPT = """You are helping {singer} write a song{for_whom}{occasion} from their own photos. Look at this photo{when}{where}.
+Describe it for a songwriter, as specifically as you can.
+- Name what you recognise, using the place as a clue: landmarks, buildings, venues and attractions ("the Amazon Spheres",
+  "the Space Needle"), plant and animal species or breeds ("a corpse flower in bloom", "a tabby cat"), dishes, games, rides.
+  Real names rather than generic words when you're fairly sure; otherwise describe.
+- People: {people_rule} Never identify anyone from their face; for anyone else, describe how they look ("a woman in a
+  green coat", "a boy in a red cap"), without guessing age, ethnicity or body.
+- Pick concrete details someone who was there would remember.
 Reply with JSON only, no other text:
-{{"scene": "one sentence, 10-25 words: what is happening, where",
+{{"scene": "one sentence, 10-25 words: what is happening, where, with the names you know",
+ "landmark": "the named place or attraction, or empty", "named": ["species, landmarks, dishes, attractions you named"],
  "setting": "a few words", "time_of_day": "morning|day|evening|night|unknown", "season_weather": "a few words or unknown",
  "people": 0, "child": false, "mood": ["one", "two"], "details": ["3 to 5 concrete visual details"],
  "song_detail": "one vivid, singable image from this photo, 6-14 words",
  "kind": "photo|screenshot|document|meme"}}"""
+
+
+def _people_rule(a):
+    """Names from context the person gave us (who it's for, their own name, who else appears): never from faces."""
+    you, them = a.get("from"), a.get("for")
+    couple = f"{them} and {you}" if them and you else f"{them} and you" if them else None
+    rule = []
+    if couple and a["occasion"] != "other":
+        rule.append(f'the song is about {couple}. If two adults pose together like a couple (a selfie, a hug, side by side), '
+                    f'they are "{couple}": write that, never "a couple" or "two people".')
+    elif couple:
+        rule.append(f"the song is for {them}" + (f", from {you}" if you else "") + ".")
+    if a.get("others"):
+        rule.append(f'Others who may appear: {a["others"]}. Use those names only when the match is obvious from that '
+                    'description (e.g. "our two boys" and the photo shows two boys).')
+    return " ".join(rule) or "you don't know who anyone is."
 
 
 def _vision(d, p):
@@ -499,10 +523,12 @@ def _vision(d, p):
         dt = datetime.fromisoformat(p["date"])
         when = f", taken {dt:%B %Y}" + (f" in the {['night', 'morning', 'afternoon', 'evening'][dt.hour // 6]}" if p["date_src"] == "camera" else "")
     prompt = VISION_PROMPT.format(occasion=f" for {OCCASIONS[a['occasion']]}" if a["occasion"] != "other" else "",
-                                  when=when, where=f", in {p['place']}" if p.get("place") else "")
+                                  singer=a.get("from") or "someone", for_whom=f" for {a['for']}" if a.get("for") else "",
+                                  people_rule=_people_rule(a), when=when, where=f", in {p['place']}" if p.get("place") else "")
     img = base64.b64encode((_dir(d["id"]) / "view" / f"{p['n']}.jpg").read_bytes()).decode()
-    body = {"model": VISION_MODEL, "stream": False, "think": False, "keep_alive": "10m",
-            "options": {"temperature": 0.3, "num_predict": 450},          # a hard cap: an open-ended reply can run for minutes
+    # Thinking names far more (the Amazon Spheres, a corpse flower, "Amanda and James") at ~7 s a photo instead of ~2 s.
+    body = {"model": VISION_MODEL, "stream": False, "think": VISION_THINK, "keep_alive": "10m",
+            "options": {"temperature": 0.3, "num_predict": 1800 if VISION_THINK else 450},   # a hard cap: an open-ended reply can run for minutes
             "messages": [{"role": "user", "content": prompt, "images": [img]}]}
     req = urllib.request.Request(VISION_URL, json.dumps(body).encode(), {"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=240) as r:          # waits in the broker's queue while a song records
@@ -510,7 +536,8 @@ def _vision(d, p):
     import radio_songwriter
     v = radio_songwriter.parse_json_reply(text)
     s = lambda k, n=200: _clean(v.get(k), n)
-    out = {"scene": s("scene", 300), "setting": s("setting", 80), "time_of_day": s("time_of_day", 20),
+    out = {"scene": s("scene", 300), "landmark": s("landmark", 100), "named": [_clean(m, 80) for m in (v.get("named") or [])[:6] if m],
+           "setting": s("setting", 80), "time_of_day": s("time_of_day", 20),
            "season_weather": s("season_weather", 60), "song_detail": s("song_detail", 160),
            "mood": [_clean(m, 30) for m in (v.get("mood") or [])[:4] if m],
            "details": [_clean(m, 80) for m in (v.get("details") or [])[:6] if m],
@@ -525,10 +552,11 @@ def _vision(d, p):
     return out
 
 
-def analyze(did, emit):
-    """Read every photo not read yet (one at a time), then group them into moments. emit(dict) streams progress."""
+def analyze(did, emit, again=False):
+    """Read every photo not read yet (again=True: every photo), then group them into moments. emit(dict) streams progress.
+    Reading again replaces the AI's caption and detail, but never ones the person wrote or changed."""
     d = _load(did)
-    todo = [p for p in d["photos"] if not p.get("vision")]
+    todo = [p for p in d["photos"] if again or not p.get("vision")]
     emit({"todo": len(todo), "total": len(d["photos"])})
     t0 = time.time()
     for i, p in enumerate(todo):
@@ -542,12 +570,18 @@ def analyze(did, emit):
         def put(dd, n=p["n"], v=v, err=err):
             for q in dd["photos"]:
                 if q["n"] == n:
-                    q["vision"], q["vision_error"] = v, err
+                    first = not q.get("vision")
+                    old = q.get("vision") or {}
+                    if v or first:
+                        q["vision"], q["vision_error"] = v or q.get("vision"), err
                     if v:
-                        q["caption"] = q.get("caption") or v["scene"]
-                        q["detail"] = q.get("detail") or v["song_detail"]
+                        for k, ai in (("caption", "scene"), ("detail", "song_detail")):
+                            mine = q.get(k) and q[k] != q.get(k + "_ai", old.get(ai))     # written or changed by the person
+                            if not mine:
+                                q[k] = v[ai]
+                            q[k + "_ai"] = v[ai]
                         q["kind"] = v["kind"]
-                        if v["kind"] != "photo":
+                        if first and v["kind"] != "photo":
                             q["skip"] = True                 # screenshots, documents, memes sit out unless put back
                     return q
         q = _update(did, put)
@@ -593,6 +627,10 @@ def ask_questions(did, more=False):
     lines = [f"Occasion: {OCCASIONS[a['occasion']]}"]
     if a["for"]:
         lines.append(f"The song is for: {a['for']}")
+    if a.get("from"):
+        lines.append(f"The person asking (the singer): {a['from']}")
+    if a.get("others"):
+        lines.append(f"Others who appear: {a['others']} (ask to confirm who's who when it isn't obvious)")
     if a["since"]:
         lines.append(f"Together / how long: {a['since']}")
     if a["include"]:
@@ -685,6 +723,10 @@ def _story_input(d):
     lines = [f"Occasion: {OCCASIONS[a['occasion']]}", f"Feel: {FEELS[a['feel']]}"]
     if a["for"]:
         lines.append(f"The song is for: {a['for']}")
+    if a.get("from"):
+        lines.append(f"The singer: {a['from']}")
+    if a.get("others"):
+        lines.append(f"Others in the photos: {a['others']}")
     if a["since"]:
         lines.append(f"Together / how long: {a['since']}")
     if a["include"]:
@@ -702,7 +744,9 @@ def _story_input(d):
             p = by_n.get(n)
             if p:
                 star = " (a favourite)" if p.get("star") else ""
-                lines.append(f"  - {p.get('caption') or '(no description)'}{star}" + (f" | detail: {p['detail']}" if p.get("detail") else ""))
+                named = (p.get("vision") or {}).get("named") or []
+                lines.append(f"  - {p.get('caption') or '(no description)'}{star}" + (f" | detail: {p['detail']}" if p.get("detail") else "")
+                             + (f" | recognised: {', '.join(named)}" if named else ""))
                 for x in _qa_lines(p.get("qa")):
                     lines.append(f"      they told us: {x}")
     return "\n".join(lines)
@@ -771,6 +815,10 @@ def lyrics_prompt(b, user):
                      "(a repeated chorus counts once), never forced into a rhyme.")
     elif a["for"]:
         parts.append(f"It's for {a['for']}. Use that name in one or two lines at most.")
+    if a.get("from"):
+        parts.append(f"The singer is {a['from']}; sing as them ('I'), and don't sing their own name.")
+    if a.get("others"):
+        parts.append(f"Others who appear in the photos (their names may be sung once each): {a['others']}.")
     if a["since"]:
         parts.append(f"Background: {a['since']}.")
     title = app.clean_text(b.get("title"), "Title", 120) or d.get("title") or st.get("title")
@@ -999,9 +1047,10 @@ def handle(h, method, path):
                 return True
         if method == "POST" and rest == ["analyze"]:
             owned(did, user)
+            again = bool(h.body().get("again"))
             emit = _sse(h)
             try:
-                analyze(did, emit)
+                analyze(did, emit, again)
                 emit({"done": True})
             except (BrokenPipeError, ConnectionResetError):
                 pass

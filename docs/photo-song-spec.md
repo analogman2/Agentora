@@ -3,6 +3,9 @@
 Status: **phase 1 built** (2026-11-10): `studio/photosong.py`, `studio/web/photosong.js`, `tests/e2e_photosong.py`.
 Phase 1 differs from this spec in a few places: photos are ordered by date (no drag to reorder yet), the place under a
 photo can't be edited yet, the default engine is MiniMax with 2 takes, and the share link, video and painted cover are phase 2.
+**Naming** (added 2026-11-10): the vision model runs with thinking (~7-11 s a photo) and names landmarks, species and
+attractions; it calls a couple shot "<for> and <your name>" and uses "Others in the photos" only when the match is
+obvious from that description. ↻ Read them again re-reads every photo and keeps captions the person wrote or changed.
 **💬 Questions** (added 2026-11-10): after reading the photos, the AI asks 1-2 questions per photo and 2-4 about the whole set
 (who people are, by how they look; what happened; what the photo can't show). Answers feed the story and lyrics, and names
 given there may be sung. Nothing is ever guessed from faces.

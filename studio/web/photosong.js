@@ -93,22 +93,25 @@
   function answersHTML(a) {
     const opt = (o, v) => Object.entries(o).map(([k, t]) => `<option value="${k}" ${k === v ? "selected" : ""}>${esc(t[0].toUpperCase() + t.slice(1))}</option>`).join("");
     return `<div class="grid2">
-      <div><label class="f small" for="psFor">For <span class="hint">their name (optional)</span></label><input type="text" id="psFor" maxlength="60" value="${esc(a.for)}" placeholder="e.g. Ana"></div>
+      <div><label class="f small" for="psFor">For <span class="hint">their name</span></label><input type="text" id="psFor" maxlength="60" value="${esc(a.for)}" placeholder="e.g. Amanda"></div>
+      <div><label class="f small" for="psFrom">Your name <span class="hint">so photos of you two say so</span></label><input type="text" id="psFrom" maxlength="60" value="${esc(a.from)}" placeholder="e.g. James"></div>
       <div><label class="f small" for="psOcc">Occasion</label><select id="psOcc">${opt(ps.d.occasions, a.occasion)}</select></div>
       <div><label class="f small" for="psFeel">Feel</label><select id="psFeel">${opt(ps.d.feels, a.feel)}</select></div>
       <div><label class="f small" for="psSince">Together since <span class="hint">(optional)</span></label><input type="text" id="psSince" maxlength="80" value="${esc(a.since)}" placeholder="e.g. met in 2019, married in 2023"></div>
     </div>
+    <label class="f small" for="psOthers">Others in the photos <span class="hint">(optional) who they are, so the photos can name them</span></label>
+    <input type="text" id="psOthers" maxlength="300" value="${esc(a.others)}" placeholder="e.g. our boys Liam (8) and Michael (5); Amanda's mum">
     <label class="f small" for="psInc">Must include <span class="hint">things no photo shows: inside jokes, what was said</span></label>
     <input type="text" id="psInc" maxlength="1500" value="${esc(a.include)}" placeholder="e.g. the night the car broke down in Big Sur; she calls me 'bear'">
     <label class="f small" for="psOut">Leave out <span class="hint">(optional)</span></label>
     <input type="text" id="psOut" maxlength="800" value="${esc(a.leave_out)}" placeholder="e.g. anything about work">`;
   }
   function answers() {
-    return {for: $("psFor").value, occasion: $("psOcc").value, feel: $("psFeel").value, since: $("psSince").value,
+    return {for: $("psFor").value, from: $("psFrom").value, others: $("psOthers").value, occasion: $("psOcc").value, feel: $("psFeel").value, since: $("psSince").value,
             include: $("psInc").value, leave_out: $("psOut").value, language: (ps.d && ps.d.answers.language) || ""};
   }
   function cardHTML(p) {
-    const child = p.child && ps.d.answers.occasion !== "other" ? `<div class="note">This one seems to show a child: maybe it belongs in a family song? ✕ leaves it out.</div>` : "";
+    const child = p.child && ps.d.answers.occasion !== "other" && !ps.d.answers.others ? `<div class="note">This one seems to show a child: maybe it belongs in a family song? ✕ leaves it out.</div>` : "";
     const err = p.vision_error ? `<div class="note">${esc(p.vision_error)}: press Read again.</div>` : "";
     const kind = p.kind && p.kind !== "photo" ? `<div class="note">Looks like a ${esc(p.kind)}, so it's left out (✕ to put it back).</div>` : "";
     return `<div class="card ${p.skip ? "skip" : ""}" data-n="${p.n}">
@@ -220,9 +223,10 @@
         <button class="btn small" type="button" id="psAlbumGo">${d.album ? "Open another album" : "📁 Open album"}</button></div>
       <div id="psAlbum">${albumHTML()}</div>
       <div class="cards" id="psCards">${d.photos.map(cardHTML).join("")}</div>
-      <div class="wbar"><button class="btn ${read < d.photos.length ? "primary" : ""}" type="button" id="psRead" ${d.photos.length ? "" : "disabled"}>
-        ${read && read < d.photos.length ? `Read the ${d.photos.length - read} new photo${d.photos.length - read > 1 ? "s" : ""}` : read ? "Photos read ✓" : "Read the photos"}</button>
-        <span class="small muted">${read ? `${read} read · ${use} in the song` : "about 5–10 seconds a photo"}</span></div>
+      <div class="wbar"><button class="btn ${read < d.photos.length ? "primary" : ""}" type="button" id="psRead" ${d.photos.length ? "" : "disabled"} data-again="${read && read === d.photos.length ? 1 : ""}"
+        title="${read === d.photos.length && read ? "Read every photo again (e.g. after adding names above). Captions you wrote or changed are kept." : ""}">
+        ${read && read < d.photos.length ? `Read the ${d.photos.length - read} new photo${d.photos.length - read > 1 ? "s" : ""}` : read ? "↻ Read them again" : "Read the photos"}</button>
+        <span class="small muted">${read ? `${read} read · ${use} in the song` : "about 7 seconds a photo"}</span></div>
       <h4><span class="n">3</span> Tell me about them <span class="small muted" style="font-weight:400">optional, but it's what makes the song yours</span></h4>
       <div id="psQa">${(d.qa || []).map((x, i) => `<label class="q">💬 ${esc(x.q)}<input type="text" data-oqa="${i}" value="${esc(x.a)}" placeholder="your answer (optional)"></label>`).join("")}</div>
       ${qaCount(d).asked ? `<div class="small muted" style="margin-top:6px">Questions about single photos are on their cards above. Names you give here can be sung; nothing is guessed from faces.</div>` : ""}
@@ -288,7 +292,7 @@
       if (!confirm(`Delete these ${ps.d.photos.length} photos and everything read from them?` + (songs ? `\n\nThe ${songs} song${songs > 1 ? "s" : ""} made from them stay${songs > 1 ? "" : "s"} in your library.` : ""))) return;
       try { await api("DELETE", `/${ps.id}?keep_song=1`); ps.d = null; remember(null); setPhotoSong(null); render(); } catch (e) { status(e.message, true); }
     };
-    for (const id of ["psFor", "psOcc", "psFeel", "psSince", "psInc", "psOut"]) $(id).onchange = () => queueSave({answers: answers()});
+    for (const id of ["psFor", "psFrom", "psOthers", "psOcc", "psFeel", "psSince", "psInc", "psOut"]) $(id).onchange = () => queueSave({answers: answers()});
     $("psAlbumGo").onclick = openAlbum;
     $("psAlbumUrl").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); openAlbum(); } };
     wireAlbum();
@@ -360,10 +364,13 @@
   }
 
   async function readPhotos() {
-    if (ps.busy) return; ps.busy = true; await flush();
-    const btn = $("psRead"); btn.disabled = true;
+    if (ps.busy) return;
+    const btn = $("psRead"), again = !!btn.dataset.again;
+    if (again && !confirm(`Read all ${ps.d.photos.length} photos again? About ${Math.ceil(ps.d.photos.length * 7 / 60)} min.\n\nCaptions and details you wrote or changed are kept; the rest are replaced.`)) return;
+    ps.busy = true; await flush();
+    btn.disabled = true;
     try {
-      await sse(`/api/photosong/${ps.id}/analyze`, {}, (ev) => {
+      await sse(`/api/photosong/${ps.id}/analyze`, {again}, (ev) => {
         if (ev.reading) btn.textContent = `Reading photo ${ev.i} of ${ev.of}…`;
         if (ev.asking) btn.textContent = "Thinking of questions to ask you…";
         if (ev.photo) {
