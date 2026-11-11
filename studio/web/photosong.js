@@ -4,7 +4,7 @@
 (function () {
   const box = $("photoWriter");
   if (!box) return;
-  const ps = {id: null, d: null, busy: false};
+  const ps = {id: null, d: null, busy: false, albumOpen: false, picked: new Set()};
   const PARTS = {verse1: "Verse 1", verse2: "Verse 2", chorus: "Chorus", bridge: "Bridge", outro: "Outro"};
   const KEY = "studio.photosong";
   const remember = (id) => { try { id ? localStorage.setItem(KEY, id) : localStorage.removeItem(KEY); } catch {} };
@@ -29,6 +29,15 @@
     .photos .moment { border: 1px solid var(--line); border-radius: 10px; padding: 8px; margin: 6px 0; background: var(--panel); display: grid; grid-template-columns: auto 1fr 130px; gap: 8px; align-items: start; }
     .photos .moment .th { display: flex; gap: 3px; } .photos .moment .th img { width: 38px; height: 38px; object-fit: cover; border-radius: 5px; }
     .photos .moment .w { font-size: 12px; color: var(--muted); }
+    .photos .albumbar { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+    .photos .albumbar input { flex: 1 1 240px; }
+    .photos .agrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 6px; margin-top: 8px; max-height: 360px; overflow: auto; padding: 2px; }
+    .photos .agrid button { position: relative; padding: 0; border: 2px solid transparent; border-radius: 8px; overflow: hidden; background: var(--soft); cursor: pointer; aspect-ratio: 1; }
+    .photos .agrid button img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .photos .agrid button.on { border-color: var(--accent); }
+    .photos .agrid button.on::after { content: "✓"; position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: 13px; display: grid; place-items: center; }
+    .photos .agrid button[disabled] { opacity: .35; cursor: default; }
+    .photos .agrid .tag { position: absolute; left: 3px; bottom: 3px; font-size: 10px; background: rgba(0,0,0,.6); color: #fff; padding: 0 4px; border-radius: 4px; }
     @media (max-width: 560px) { .photos .moment { grid-template-columns: 1fr; } .photos .cards { grid-template-columns: 1fr 1fr; } }
   </style>`);
 
@@ -101,13 +110,70 @@
     const kind = p.kind && p.kind !== "photo" ? `<div class="note">Looks like a ${esc(p.kind)}, so it's left out (✕ to put it back).</div>` : "";
     return `<div class="card ${p.skip ? "skip" : ""}" data-n="${p.n}">
       <img src="${thumb(p.n)}" alt="" loading="lazy">
-      <div class="b"><div class="when">${esc(fmtDate(p.date))}${p.date && p.date_src !== "camera" ? ` <span title="from the ${esc(p.date_src)}">(≈)</span>` : ""}${p.place ? " · " + esc(p.place) : ""}</div>
+      <div class="b"><div class="when">${esc(fmtDate(p.date))}${p.date && !["camera", "Google Photos"].includes(p.date_src) ? ` <span title="from the ${esc(p.date_src)}">(≈)</span>` : ""}${p.place ? " · " + esc(p.place) : ""}</div>
         ${p.read ? `<textarea rows="2" data-k="caption" aria-label="What's in this photo">${esc(p.caption)}</textarea>
         <input type="text" data-k="detail" value="${esc(p.detail)}" aria-label="A detail for the song" placeholder="a detail for the song">` : `<div class="small muted">${p.vision_error ? "" : "Not read yet"}</div>`}
         ${child}${kind}${err}
         <div class="tools"><button class="btn small" data-t="star" aria-pressed="${!!p.star}" title="A favourite: the story leans on it, and it can be the cover">⭐</button>
           <button class="btn small" data-t="skip" aria-pressed="${!!p.skip}" title="Leave this photo out of the song">✕ Leave out</button>
           <button class="btn small" data-t="del" title="Remove the photo">🗑</button></div></div></div>`;
+  }
+  function albumHTML() {
+    const a = ps.d && ps.d.album;
+    if (!a) return `<div class="small muted" style="margin-top:4px">In Google Photos: open the album → Share → Create link, then paste it here. The originals come with their dates (and places, if the album shares them).</div>`;
+    const room = 30 - ps.d.photos.length, left = a.items.filter(i => !i.added && !i.video).length;
+    if (!ps.albumOpen) return `<div class="small muted" style="margin-top:6px">📁 ${esc(a.title || "Album")}: ${a.count} items, ${a.count - left - a.items.filter(i => i.video).length} added · <button class="linkbtn" type="button" id="psAlbumShow">Show the album</button></div>`;
+    return `<div class="wbar" style="margin-top:8px"><b>📁 ${esc(a.title || "Album")}</b><span class="small muted">${a.count} items · tap photos to pick (room for ${Math.max(0, room)} more)</span></div>
+      <div class="agrid" id="psAgrid">${a.items.map(i => `<button type="button" data-key="${esc(i.key)}" class="${ps.picked.has(i.key) ? "on" : ""}" ${i.added || i.video ? "disabled" : ""}
+        title="${esc(i.date ? fmtDate(i.date) : "")}"><img src="${esc(i.thumb)}" alt="" loading="lazy">${i.added ? `<span class="tag">added</span>` : i.video ? `<span class="tag">video</span>` : ""}</button>`).join("")}</div>
+      <div class="wbar"><button class="btn small accent" type="button" id="psAlbumAdd" ${ps.picked.size ? "" : "disabled"}>Add ${ps.picked.size || ""} picked</button>
+        <button class="btn small" type="button" id="psAlbumSpread" ${left && room > 0 ? "" : "disabled"} title="Up to 20 photos spread evenly over the album's dates">✨ Pick for me</button>
+        <button class="linkbtn" type="button" id="psAlbumHide">Hide the album</button></div>`;
+  }
+  function wireAlbum() {
+    const show = $("psAlbumShow"), hide = $("psAlbumHide"), grid = $("psAgrid");
+    if (show) show.onclick = () => { ps.albumOpen = true; $("psAlbum").innerHTML = albumHTML(); wireAlbum(); };
+    if (hide) hide.onclick = () => { ps.albumOpen = false; $("psAlbum").innerHTML = albumHTML(); wireAlbum(); };
+    if (grid) grid.onclick = (e) => {
+      const b = e.target.closest("[data-key]"); if (!b || b.disabled) return;
+      const k = b.dataset.key, room = 30 - ps.d.photos.length;
+      if (ps.picked.has(k)) ps.picked.delete(k);
+      else if (ps.picked.size < room) ps.picked.add(k);
+      else return status(`There's room for ${room} more photo${room === 1 ? "" : "s"} (30 at most).`, true);
+      b.classList.toggle("on", ps.picked.has(k));
+      $("psAlbumAdd").disabled = !ps.picked.size; $("psAlbumAdd").textContent = `Add ${ps.picked.size || ""} picked`;
+    };
+    if ($("psAlbumAdd")) $("psAlbumAdd").onclick = () => importAlbum({keys: [...ps.picked]});
+    if ($("psAlbumSpread")) $("psAlbumSpread").onclick = () => importAlbum({spread: true});
+  }
+  async function openAlbum() {
+    const url = $("psAlbumUrl").value.trim();
+    if (!url || ps.busy) return;
+    ps.busy = true; await flush();
+    const btn = $("psAlbumGo"); btn.disabled = true; btn.textContent = "Opening…";
+    try {
+      const {album} = await api("POST", `/${ps.id}/album`, {url});
+      ps.d.album = album; ps.albumOpen = true; ps.picked = new Set();
+      $("psAlbum").innerHTML = albumHTML(); wireAlbum(); $("psAlbumUrl").value = "";
+      status(`${album.count} items in “${album.title || "the album"}”.`);
+    } catch (e) { status(e.message, true); }
+    finally { ps.busy = false; btn.disabled = false; btn.textContent = "Open another album"; }
+  }
+  async function importAlbum(body) {
+    if (ps.busy) return; ps.busy = true; await flush();
+    let summary = null;
+    try {
+      await sse(`/api/photosong/${ps.id}/album/import`, body, (ev) => {
+        if (ev.importing) status(`Downloading the original ${ev.importing} of ${ev.of}…`);
+        if (ev.done) summary = ev;
+      });
+      ps.picked = new Set(); ps.busy = false; ps.albumOpen = false;
+      await open(ps.id);
+      if (summary) {
+        const sk = summary.skipped.length ? ` Skipped ${summary.skipped.length}: ${[...new Set(summary.skipped)].join("; ")}.` : "";
+        status(`Added ${summary.added} photo${summary.added === 1 ? "" : "s"} from the album.${sk}`, summary.skipped.length > 0 && !summary.added);
+      }
+    } catch (e) { ps.busy = false; await open(ps.id); status(e.message, true); }
   }
   function momentsHTML() {
     const ms = ps.d.moments || [];
@@ -144,6 +210,9 @@
       <h4><span class="n">2</span> Your photos <span class="small muted">${d.photos.length}/30 · JPEG, PNG, HEIC</span></h4>
       <label class="drop" id="psDrop">Drop photos here, or <b style="color:var(--accent)">pick them</b>
         <input type="file" id="psFile" accept="image/*,.heic,.heif" multiple hidden></label>
+      <div class="albumbar"><input type="url" id="psAlbumUrl" placeholder="…or paste a Google Photos album link (photos.app.goo.gl/…)" aria-label="Google Photos album link">
+        <button class="btn small" type="button" id="psAlbumGo">${d.album ? "Open another album" : "📁 Open album"}</button></div>
+      <div id="psAlbum">${albumHTML()}</div>
       <div class="cards" id="psCards">${d.photos.map(cardHTML).join("")}</div>
       <div class="wbar"><button class="btn ${read < d.photos.length ? "primary" : ""}" type="button" id="psRead" ${d.photos.length ? "" : "disabled"}>
         ${read && read < d.photos.length ? `Read the ${d.photos.length - read} new photo${d.photos.length - read > 1 ? "s" : ""}` : read ? "Photos read ✓" : "Read the photos"}</button>
@@ -194,6 +263,9 @@
       try { await api("DELETE", `/${ps.id}?keep_song=1`); ps.d = null; remember(null); setPhotoSong(null); render(); } catch (e) { status(e.message, true); }
     };
     for (const id of ["psFor", "psOcc", "psFeel", "psSince", "psInc", "psOut"]) $(id).onchange = () => queueSave({answers: answers()});
+    $("psAlbumGo").onclick = openAlbum;
+    $("psAlbumUrl").onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); openAlbum(); } };
+    wireAlbum();
     const drop = $("psDrop"), file = $("psFile");
     file.onchange = () => upload([...file.files]);
     drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };

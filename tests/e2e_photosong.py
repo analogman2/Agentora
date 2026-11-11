@@ -161,6 +161,27 @@ except app.BadRequest: ok(True, "radio refuses to queue it")
 try:
     radio_library.set_playlist(ids[0], True); ok(False, "radio playlist refuses it")
 except app.BadRequest: ok(True, "radio playlist refuses it")
+# --- 📁 a Google Photos shared album (a public test album kept by the google-photos-album-image-url-fetch project)
+if "--no-network" not in sys.argv:
+    ALBUM = "https://photos.app.goo.gl/oJEMCo5g5eUptS2fA"
+    ok(all(call("jt-test", "POST", f"/api/photosong/{did}/album", {"url": u}).code == 400
+           for u in ("https://evil.example/share/x", "http://photos.app.goo.gl/x", "https://photos.google.com/albums/x")), "album: only Google Photos share links")
+    ok(call("someone-else", "POST", f"/api/photosong/{did}/album", {"url": ALBUM}).code == 404, "album: another account can't use the draft")
+    h = call("jt-test", "POST", f"/api/photosong/{did}/album", {"url": ALBUM})
+    al = (h.out or {}).get("album") or {}
+    ok(h.code == 200 and al.get("count", 0) >= 3, f"album: listed {al.get('count')} items")
+    t = call("jt-test", "GET", al["items"][1]["thumb"]) if al.get("items") else None
+    ok(t is not None and t.code == 200 and isinstance(t.out, bytes) and t.out[:2] == b"\xff\xd8", "album: thumbnail served by the Studio")
+    ok(call("someone-else", "GET", al["items"][1]["thumb"]).code == 404 if al.get("items") else False, "album: another account can't see its thumbnails")
+    before = len(photosong._load(did)["photos"])
+    keys = [i["key"] for i in al.get("items", [])[:2]]
+    ev = call("jt-test", "POST", f"/api/photosong/{did}/album/import", {"keys": keys}).events()
+    done_ev = next((e for e in ev if e.get("done")), {})
+    after = photosong._load(did)["photos"]
+    ok(done_ev.get("added") == 2 and len(after) == before + 2, "album: 2 originals imported")
+    ok(any(p.get("date_src") in ("camera", "Google Photos") for p in after[-2:]), "album: imported photos carry a date")
+    again = call("jt-test", "POST", f"/api/photosong/{did}/album/import", {"keys": keys}).events()
+    ok(next((e for e in again if e.get("done")), {}).get("added") == 0, "album: the same photos aren't added twice")
 # --- delete
 for i in ids: app.jobs[i]["status"] = "done"
 ok(call("jt-test", "DELETE", f"/api/photosong/{did}?keep_song=1").code == 200 and not (app.DATA.parent / "ps" / did).exists() and ids[0] in app.jobs,

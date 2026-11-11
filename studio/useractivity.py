@@ -73,7 +73,8 @@ def _event(method, path, b):
             return "make a song (Music Studio)", {"rewrite_of": title(b.get("rewrite_of")), "from_photos": True if b.get("photosong") else None}
         if path.startswith("/api/photosong"):            # 📷 never the photos, places, captions or lyrics: just what happened
             end = path.rstrip("/").rsplit("/", 1)[-1]
-            name = {"photosong": "start a song from photos", "analyze": "read photos (song from photos)", "story": "story from photos"}.get(end)
+            name = {"photosong": "start a song from photos", "analyze": "read photos (song from photos)", "story": "story from photos",
+                    "album": "open a Google Photos album (song from photos)", "import": "add photos from a Google Photos album"}.get(end)
             return (name, {}) if name else None
         if path == "/api/lyrics":
             return "write lyrics", {}

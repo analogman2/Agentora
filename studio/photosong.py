@@ -7,8 +7,8 @@ A draft lives in PHOTOSONGS/<id>/:  draft.json, originals/<n>.<ext>, view/<n>.jp
 Privacy: photos, captions, places and lyrics never go to the activity log or an outside service. GPS is turned into a
 city name on this machine and the coordinates are not kept.
 """
-import base64, hashlib, io, json, os, re, shutil, threading, time, urllib.parse, urllib.request, uuid
-from datetime import datetime, timedelta
+import base64, hashlib, io, json, os, re, shutil, threading, time, urllib.error, urllib.parse, urllib.request, uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import app
@@ -109,6 +109,7 @@ def view(d):
     v["photos"] = [{k: p.get(k) for k in ("n", "date", "date_src", "place", "kind", "caption", "detail", "star", "skip", "vision_error")}
                    | {"read": bool(p.get("vision"))} for p in d["photos"]]
     v["occasions"], v["feels"] = OCCASIONS, FEELS
+    v["album"] = album_view(d)
     return v
 
 
@@ -196,8 +197,9 @@ def _gps(exif):
 FNAME_DATE = re.compile(r"(20\d\d|19\d\d)[-_.]?(0[1-9]|1[0-2])[-_.]?(0[1-9]|[12]\d|3[01])(?:[-_ T.]?([01]\d|2[0-3])[-_.]?([0-5]\d)[-_.]?([0-5]\d))?")
 
 
-def photo_date(exif, filename, file_ms):
-    """(ISO date-time, where it came from): the camera's clock, then the file name (IMG_20240214_…), then the file's date."""
+def photo_date(exif, filename, file_ms, known=None):
+    """(ISO date-time, where it came from): the camera's clock, then Google Photos' date (known), then the file name
+    (IMG_20240214_…), then the file's date."""
     try:
         sub = exif.get_ifd(0x8769)
         raw = sub.get(36867) or sub.get(36868) or exif.get(306)
@@ -205,6 +207,8 @@ def photo_date(exif, filename, file_ms):
             return datetime.strptime(str(raw).strip()[:19], "%Y:%m:%d %H:%M:%S").isoformat(timespec="minutes"), "camera"
     except Exception:
         pass
+    if known:
+        return known, "Google Photos"
     m = FNAME_DATE.search(filename or "")
     if m:
         try:
@@ -220,7 +224,7 @@ def photo_date(exif, filename, file_ms):
     return None, None
 
 
-def add_photo(did, raw, filename="", ctype="", file_ms=None):
+def add_photo(did, raw, filename="", ctype="", file_ms=None, known_date=None, source=None):
     Image, ImageOps = _pil()
     if not raw:
         raise app.BadRequest("Empty photo")
@@ -244,7 +248,7 @@ def add_photo(did, raw, filename="", ctype="", file_ms=None):
     except Exception:
         raise app.BadRequest("That file isn't a photo this can read (JPEG, PNG, WebP or HEIC)")
     exif = im.getexif()
-    date, src = photo_date(exif, filename, file_ms)
+    date, src = photo_date(exif, filename, file_ms, known_date)
     gps = _gps(exif)
     camera = _clean(" ".join(str(exif.get(t) or "") for t in (271, 272)), 60)
     im = ImageOps.exif_transpose(im).convert("RGB")
@@ -259,6 +263,8 @@ def add_photo(did, raw, filename="", ctype="", file_ms=None):
     photo = {"n": n, "hash": h, "date": date, "date_src": src, "place": place_name(*gps) if gps else None,
              "camera": bool(camera), "size": [im.width, im.height], "kind": "photo", "caption": "", "detail": "",
              "star": False, "skip": False, "vision": None}
+    if source:
+        photo["source"] = source                    # e.g. the Google Photos item key, so it isn't imported twice
 
     def put(d):
         if not any(x["hash"] == h for x in d["photos"]):
@@ -275,6 +281,176 @@ def remove_photo(did, n):
     _update(did, drop)
     for f in _dir(did).glob(f"*/{n}.*"):
         f.unlink(missing_ok=True)
+
+
+# ----------------------------------------------------------------------------- 📁 a Google Photos shared album
+# Google's Photos APIs no longer read a user's own albums (only the Picker, which needs an OAuth app), so this reads the
+# album's share link the way a browser does: the share page embeds each item's address, size and capture time, and
+# "<address>=d" downloads the original file with its metadata (location too, if the owner shares it with the link).
+# Unofficial: if Google changes the page, list_album fails with a clear message and uploading still works.
+ALBUM_HOSTS = ("photos.app.goo.gl", "photos.google.com", "goo.gl")
+MEDIA_HOST = re.compile(r"^https://lh\d\.googleusercontent\.com/")
+BROWSER_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
+
+
+class _GoogleOnly(urllib.request.HTTPRedirectHandler):
+    """Follow redirects only to Google Photos itself (a share link can't send us anywhere else)."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        host = urllib.parse.urlsplit(newurl).hostname or ""
+        if urllib.parse.urlsplit(newurl).scheme != "https" or host not in ALBUM_HOSTS:
+            raise app.BadRequest("That link doesn't lead to a Google Photos album")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _album_link(url):
+    url = str(url or "").strip()
+    u = urllib.parse.urlsplit(url)
+    ok = u.scheme == "https" and (u.hostname == "photos.app.goo.gl" or (u.hostname == "goo.gl" and u.path.startswith("/photos/"))
+                                  or (u.hostname == "photos.google.com" and re.match(r"^/(u/\d+/)?share/", u.path)))
+    if not ok:
+        raise app.BadRequest("Paste a Google Photos album's share link (photos.app.goo.gl/… or photos.google.com/share/…). "
+                             "In Google Photos: open the album → Share → Create link")
+    return url
+
+
+def list_album(url):
+    """The album's title and its photos: [{key, url, w, h, date, video}] (the first page: up to a few hundred)."""
+    url = _album_link(url)
+    opener = urllib.request.build_opener(_GoogleOnly)
+    req = urllib.request.Request(url, headers={"User-Agent": BROWSER_UA, "Accept-Language": "en"})
+    try:
+        with opener.open(req, timeout=30) as r:
+            html = r.read(12 << 20).decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        raise app.BadRequest("Google Photos says that album doesn't exist or isn't shared by link any more" if e.code in (403, 404)
+                             else f"Google Photos didn't answer ({e.code}): try again in a minute")
+    except urllib.error.URLError:
+        raise app.BadRequest("Couldn't reach Google Photos")
+    data = None
+    for m in re.finditer(r"AF_initDataCallback\(\{key: 'ds:\d+'.*?data:(.*?), sideChannel: \{\}\}\);</script>", html, re.S):
+        try:
+            d = json.loads(m.group(1))
+        except ValueError:
+            continue
+        if isinstance(d, list) and len(d) > 3 and isinstance(d[1], list) and d[1] and isinstance(d[1][0], list):
+            data = d
+            break
+    if data is None:
+        if "accounts.google.com" in html[:20000] or "ServiceLogin" in html[:20000]:
+            raise app.BadRequest("That album isn't shared by link: in Google Photos, open it → Share → Create link")
+        raise app.BadRequest("Couldn't read that album's page (Google may have changed it): download the photos and add them instead")
+    items = []
+    for e in data[1]:
+        try:
+            key, det, taken = e[0], e[1], e[2]
+            if not (isinstance(key, str) and isinstance(det, list) and isinstance(det[0], str) and MEDIA_HOST.match(det[0])):
+                continue
+            tz = e[4] if len(e) > 4 and isinstance(e[4], (int, float)) else 0
+            date = (datetime.fromtimestamp((taken + tz) / 1000, timezone.utc).replace(tzinfo=None).isoformat(timespec="minutes")
+                    if isinstance(taken, (int, float)) else None)        # the capture time, in the place it was taken
+            extra = json.dumps(e[-1]) if isinstance(e[-1], dict) else ""
+            video = "76647426" in extra or "76647427" in extra            # Google's markers for a video item
+            items.append({"key": key[:80], "url": det[0], "w": det[1], "h": det[2], "date": date, "video": video})
+        except (IndexError, TypeError, ValueError, OverflowError, OSError):
+            continue
+    title = ""
+    try:
+        title = _clean(data[3][1], 120)
+    except (IndexError, TypeError):
+        pass
+    return {"title": title, "items": items}
+
+
+def open_album(did, url):
+    """Remember the album on the draft and return it for the page (thumbnails come straight from Google)."""
+    album = list_album(url)
+    album["link"] = _album_link(url)
+    album["at"] = time.time()
+    _update(did, lambda d: d.__setitem__("album", album))
+    shutil.rmtree(_dir(did) / "album", ignore_errors=True)        # thumbnails of an album opened before
+    return album_view(_load(did))
+
+
+def album_view(d):
+    a = d.get("album")
+    if not a:
+        return None
+    have = {p.get("source") for p in d["photos"]}
+    return {"title": a["title"], "count": len(a["items"]),
+            "items": [{"key": i["key"], "thumb": f"/api/photosong/{d['id']}/album/thumb/{n}.jpg", "date": i["date"], "video": i["video"],
+                       "added": i["key"] in have} for n, i in enumerate(a["items"])]}
+
+
+def album_thumb(d, n):
+    """A small square of album item n, fetched from Google once and kept with the draft (the page only talks to the Studio)."""
+    items = (d.get("album") or {}).get("items") or []
+    if not 0 <= n < len(items):
+        raise Denied("No such photo")
+    f = _dir(d["id"]) / "album" / f"{n}.jpg"
+    if not f.is_file():
+        url = items[n]["url"]
+        if not MEDIA_HOST.match(url):
+            raise Denied("No such photo")
+        with urllib.request.urlopen(urllib.request.Request(url + "=w240-h240-c", headers={"User-Agent": BROWSER_UA}), timeout=30) as r:
+            if not MEDIA_HOST.match(r.geturl()) or not r.headers.get("Content-Type", "").startswith("image/"):
+                raise Denied("No such photo")
+            raw = r.read(4 << 20)
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(raw)
+    return f.read_bytes()
+
+
+def spread(items, n):
+    """n photos spread evenly over the album's dates (the 'pick for me' choice)."""
+    items = sorted(items, key=lambda i: i.get("date") or "")
+    if len(items) <= n:
+        return items
+    step = len(items) / n
+    return [items[int(i * step + step / 2)] for i in range(n)]
+
+
+def import_album(did, keys, emit):
+    """Download the chosen originals ("=d": full size, with their metadata) and add them like uploads."""
+    d = _load(did)
+    a = d.get("album") or {}
+    by_key = {i["key"]: i for i in a.get("items", [])}
+    have = {p.get("source") for p in d["photos"]}
+    if keys == "spread":
+        room = MAX_PHOTOS - len(d["photos"])
+        chosen = spread([i for i in by_key.values() if not i["video"] and i["key"] not in have], max(0, min(room, 20)))
+    else:
+        chosen = [by_key[k] for k in keys if k in by_key and k not in have]
+    emit({"todo": len(chosen)})
+    added, skipped = 0, []
+    for n, it in enumerate(chosen):
+        emit({"importing": n + 1, "of": len(chosen)})
+        if it["video"]:
+            skipped.append("a video"); continue
+        try:
+            req = urllib.request.Request(it["url"] + "=d", headers={"User-Agent": BROWSER_UA})
+            with urllib.request.urlopen(req, timeout=60) as r:
+                if not MEDIA_HOST.match(r.geturl()):
+                    raise ValueError("left Google's photo server")
+                ctype = r.headers.get("Content-Type", "")
+                if not ctype.startswith("image/"):
+                    skipped.append("a video" if ctype.startswith("video/") else "not a photo"); continue
+                size = int(r.headers.get("Content-Length") or 0)
+                if size > MAX_BYTES:
+                    skipped.append(f"over {MAX_BYTES >> 20} MB"); continue
+                raw = r.read(MAX_BYTES + 1)
+                name = (re.search(r'filename="?([^";]+)', r.headers.get("Content-Disposition", "")) or [None, ""])[1]
+            photo, new = add_photo(did, raw, name, ctype, None, known_date=it["date"], source=it["key"])
+            added += new
+            emit({"added": {k: photo.get(k) for k in ("n", "date", "date_src", "place")}})
+        except app.BadRequest as e:
+            skipped.append(str(e))
+            if str(e).startswith("Up to"):
+                break
+        except Exception as e:
+            skipped.append(f"couldn't download one ({type(e).__name__})")
+            app.log("photo song: album download failed", type(e).__name__)
+    app.log("photo song: imported", added, "from an album", f"({len(skipped)} skipped)" if skipped else "")
+    emit({"done": True, "added": added, "skipped": skipped})
 
 
 # ----------------------------------------------------------------------------- what's in each photo
@@ -675,6 +851,35 @@ def handle(h, method, path):
             owned(did, user)
             remove_photo(did, int(rest[1]))
             return h.send(200, {"ok": True}) or True
+        if rest[:1] == ["album"]:                                   # 📁 a Google Photos shared album
+            d = owned(did, user)
+            if method == "GET" and rest == ["album"]:
+                return h.send(200, {"album": album_view(d)}) or True
+            if method == "GET" and len(rest) == 3 and rest[1] == "thumb" and re.fullmatch(r"\d{1,5}\.jpg", rest[2]):
+                try:
+                    img = album_thumb(d, int(rest[2][:-4]))
+                except (urllib.error.URLError, OSError):
+                    return h.send(502, {"error": "Google Photos didn't send that picture"}) or True
+                return h.send(200, img, "image/jpeg", {"Cache-Control": "private, max-age=86400"}) or True
+            if method == "POST" and rest == ["album"]:
+                return h.send(200, {"album": open_album(did, h.body().get("url"))}) or True
+            if method == "POST" and rest == ["album", "import"]:
+                b = h.body()
+                keys = "spread" if b.get("spread") else [str(k) for k in (b.get("keys") or [])][:MAX_PHOTOS]
+                if not d.get("album"):
+                    raise app.BadRequest("Open the album first")
+                emit = _sse(h)
+                try:
+                    import_album(did, keys, emit)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                except Exception as e:
+                    app.log("photo song: album import failed", type(e).__name__)
+                    try:
+                        emit({"error": f"Adding the album's photos failed: {type(e).__name__}"})
+                    except Exception:
+                        pass
+                return True
         if method == "POST" and rest == ["analyze"]:
             owned(did, user)
             emit = _sse(h)
