@@ -118,6 +118,21 @@ if MODELS:
     for m in moments: print(f"   moment {m['id']}: {m['when']} {m['where']} photos {m['photos']}")
     ok(len(photos) == 7 and all(p["read"] for p in photos), "every photo read")
     ok(len(moments) >= 3, "photos grouped into moments")
+    # --- 💬 questions about the photos (asked right after reading)
+    dv = call("jt-test", "GET", f"/api/photosong/{did}").out
+    asked = [(p["n"], x["q"]) for p in dv["photos"] for x in (p.get("qa") or [])] + [(0, x["q"]) for x in dv.get("qa") or []]
+    print(f"   {len(asked)} questions asked:"); [print(f"     #{n}: {q}") for n, q in asked]
+    ok(any(e.get("questions") for e in ev) and len(asked) >= 3, "questions asked after reading")
+    first = next((p for p in dv["photos"] if p.get("qa")), None)
+    reply = "That's Ana and me on the night we met, laughing at my terrible Portuguese"
+    body = {"qa_replies": ["Her sister Bia took most of these; Ana hums Fado in the kitchen"] + [""] * 5}
+    if first:
+        body["photos"] = [{"n": first["n"], "replies": [reply]}]
+    h = call("jt-test", "PUT", f"/api/photosong/{did}", body)
+    ok(h.code == 200 and (not first or next(p for p in h.out["photos"] if p["n"] == first["n"])["qa"][0]["a"] == reply), "answers saved")
+    h = call("jt-test", "POST", f"/api/photosong/{did}/questions", {"more": True})
+    ok(h.code == 200 and (not first or next(p for p in h.out["photos"] if p["n"] == first["n"])["qa"][0]["a"] == reply), "asking more keeps the answers")
+    ok(call("someone-else", "POST", f"/api/photosong/{did}/questions", {}).code == 404, "another account can't ask about them")
     # --- story
     t = time.time(); h = call("jt-test", "POST", f"/api/photosong/{did}/story", {})
     st = h.out.get("story") or {}
@@ -138,6 +153,8 @@ if MODELS:
         print(f"   lyrics by {done['source']} in {done['seconds']}s, title {done['title']!r}\n" + "\n".join("     " + l for l in done["lyrics"].splitlines()))
         import radio_songwriter
         print("   cliché hits:", radio_songwriter.cliche_hits(done["lyrics"]), "| 'Ana' x", done["lyrics"].count("Ana"), "| 'work':", "work" in done["lyrics"].lower())
+        low = done["lyrics"].lower()
+        ok(any(w in low for w in ("portuguese", "bia", "fado")), "lyrics use what they told us (Portuguese / Bia / Fado)")
 ok(call("someone-else", "POST", "/api/lyrics", {"action": "photos", "photosong": did}).code == 400, "another account can't write lyrics from it")
 # --- the song (queued in this process only)
 body = {"style": "acoustic ballad", "lyrics": (done or {}).get("lyrics") or "[Verse]\nla", "engine": "minimax", "takes": 2, "photosong": did}

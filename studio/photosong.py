@@ -106,7 +106,8 @@ def new_draft(user, answers):
 def view(d):
     """What the page gets: everything but the owner and the original file names."""
     v = {k: d.get(k) for k in ("id", "created", "updated", "answers", "moments", "story", "lyrics", "title", "style", "jobs")}
-    v["photos"] = [{k: p.get(k) for k in ("n", "date", "date_src", "place", "kind", "caption", "detail", "star", "skip", "vision_error")}
+    v["qa"] = d.get("qa") or []
+    v["photos"] = [{k: p.get(k) for k in ("n", "date", "date_src", "place", "kind", "caption", "detail", "star", "skip", "vision_error", "qa")}
                    | {"read": bool(p.get("vision"))} for p in d["photos"]]
     v["occasions"], v["feels"] = OCCASIONS, FEELS
     v["album"] = album_view(d)
@@ -556,6 +557,79 @@ def analyze(did, emit):
     d = _update(did, lambda dd: dd.__setitem__("moments", group_moments(dd["photos"])))
     emit({"moments": d["moments"]})
     app.log("photo song: read", len(todo), "photos", f"{time.time() - t0:.0f}s")
+    if todo and any(p.get("vision") for p in d["photos"]):
+        emit({"asking": True})
+        try:
+            d = ask_questions(did)
+            emit({"questions": True})
+        except Exception as e:                         # the questions are a help, never a blocker
+            app.log("photo song: questions failed", type(e).__name__, str(e)[:120])
+
+
+# ----------------------------------------------------------------------------- 💬 questions about the photos
+QUESTIONS_SYSTEM = """You help someone write a song from their own photos. You get the occasion, who the song is for, and
+what each photo shows (numbered). Ask them short, warm questions whose answers would make the song personal:
+- who the people are, described by how they look or what they're doing ("Who's the woman in the green coat?");
+- what was happening, what was said, why that moment mattered;
+- what the photo can't show: a song that was playing, a smell, an inside joke, what happened just before or after.
+Never guess who anyone is or name anyone. Don't ask what they already told you. 1-2 questions for each photo with
+people or a story in it (skip plain ones), each under 15 words. Then 2-4 questions about the whole set, for example
+a person who seems to appear in several photos, how it all started, what they love most about the person.
+Reply with JSON only: {"photos": [{"n": 1, "questions": ["..."]}], "overall": ["..."]}"""
+
+
+def _qa_lines(qa, limit=400):
+    return [f"{_clean(x['q'], 160)} → {_clean(x['a'], limit)}" for x in (qa or []) if x.get("a", "").strip()]
+
+
+def ask_questions(did, more=False):
+    """Questions for the person about the photos (who's in them, what was happening). Answers already given are kept;
+    more=True asks new questions besides the ones there."""
+    d = _load(did)
+    a = d["answers"]
+    use = [p for p in d["photos"] if p.get("vision") and not p.get("skip")]
+    if not use:
+        raise app.BadRequest("Read the photos first")
+    lines = [f"Occasion: {OCCASIONS[a['occasion']]}"]
+    if a["for"]:
+        lines.append(f"The song is for: {a['for']}")
+    if a["since"]:
+        lines.append(f"Together / how long: {a['since']}")
+    if a["include"]:
+        lines.append(f"Already told us: {a['include']}")
+    told = _qa_lines(d.get("qa"))
+    for p in use:
+        v = p["vision"]
+        lines.append(f"[{p['n']}] {p.get('date') or 'no date'}" + (f", {p['place']}" if p.get("place") else "") +
+                     f": {p.get('caption') or v.get('scene')} (people: {v.get('people', 0)}; detail: {p.get('detail') or v.get('song_detail')})")
+        told += [f"photo {p['n']}: " + x for x in _qa_lines(p.get("qa"))]
+    if told:
+        lines.append("\nAlready answered (don't ask these again):\n" + "\n".join(told[:40]))
+    if more:
+        lines.append("\nAsk different questions from the ones already asked.")
+    import radio_songwriter
+    text, label = _chat(QUESTIONS_SYSTEM, "\n".join(lines), max_tokens=1400, temperature=0.6)
+    r = radio_songwriter.parse_json_reply(text)
+    per = {}
+    for x in r.get("photos") or []:
+        try:
+            per[int(x.get("n"))] = [_clean(q, 160) for q in (x.get("questions") or [])[:2] if _clean(q, 160)]
+        except (TypeError, ValueError, AttributeError):
+            continue
+    overall = [_clean(q, 160) for q in (r.get("overall") or [])[:4] if _clean(q, 160)]
+
+    def merge(old, new):                       # old: what stays (answered ones; with more=True all of them)
+        have = {x["q"] for x in old}
+        return (old + [{"q": q, "a": ""} for q in new if q not in have])[:6]
+
+    def put(dd):
+        for q in dd["photos"]:
+            if q["n"] in per:
+                q["qa"] = merge(q.get("qa") if more else [x for x in (q.get("qa") or []) if x.get("a", "").strip()], per[q["n"]])
+        dd["qa"] = merge(dd.get("qa") if more else [x for x in (dd.get("qa") or []) if x.get("a", "").strip()], overall)
+    d = _update(did, put)
+    app.log("photo song: questions", f"via {label}", sum(len(p.get("qa") or []) for p in d["photos"]) + len(d.get("qa") or []))
+    return d
 
 
 # ----------------------------------------------------------------------------- moments and the story
@@ -599,8 +673,9 @@ Reply with JSON only:
  "moments": [{"id": "m1", "summary": "one sentence: what this moment is, in the singer's words", "part": "verse1|verse2|chorus|bridge|outro"}],
  "lines": ["8 to 14 short, concrete, singable fragments taken from the photo details"],
  "style": "a style line for an AI singer: language, genre, voice, instruments, tempo (15-30 words) that suits the occasion and feel"}
-Every moment gets a part; several moments may share one. Use only what the photos and the person's notes say: never invent
-names, places or events. Never use anything the person asked to leave out."""
+Every moment gets a part; several moments may share one. What the person told us (their answers) matters most: build the
+story around it, and prefer their words. Use only what the photos and the person say: never invent names, places or events;
+names they gave may be used. Never use anything the person asked to leave out."""
 
 
 def _story_input(d):
@@ -616,6 +691,9 @@ def _story_input(d):
         lines.append(f"They want this in the song (things no photo shows): {a['include']}")
     if a["leave_out"]:
         lines.append(f"NEVER mention: {a['leave_out']}")
+    told = _qa_lines(d.get("qa"))
+    if told:
+        lines.append("What they told us about it all:\n" + "\n".join("  " + x for x in told))
     lines.append("Song parts: " + "; ".join(f"{k} = {v}" for k, v in roles.items()))
     lines.append("\nMoments:")
     for m in d["moments"]:
@@ -625,6 +703,8 @@ def _story_input(d):
             if p:
                 star = " (a favourite)" if p.get("star") else ""
                 lines.append(f"  - {p.get('caption') or '(no description)'}{star}" + (f" | detail: {p['detail']}" if p.get("detail") else ""))
+                for x in _qa_lines(p.get("qa")):
+                    lines.append(f"      they told us: {x}")
     return "\n".join(lines)
 
 
@@ -709,6 +789,11 @@ def lyrics_prompt(b, user):
         parts.append("Real details from the photos to use (at least two in every verse): " + "; ".join(st["lines"]))
     if a["include"]:
         parts.append(f"Must be in the song: {a['include']}")
+    told = _qa_lines(d.get("qa"), 300) + [x for p in d["photos"] if not p.get("skip") for x in _qa_lines(p.get("qa"), 300)]
+    if told:
+        parts.append("What the singer told us (use these real memories; they matter more than the photo descriptions):\n" +
+                     "\n".join("- " + x for x in told[:24]))
+        parts.append("Names of other people from these answers may appear, once each at most.")
     if a["leave_out"]:
         parts.append(f"Never mention: {a['leave_out']}")
     parts.append("Rules: only names, places and events from above; places may be sung, but no addresses or exact dates. "
@@ -809,11 +894,17 @@ def _put(did, user, b):
                 p["caption"] = _clean(e["caption"], 300)
             if "detail" in e:
                 p["detail"] = _clean(e["detail"], 160)
+            if isinstance(e.get("replies"), list):                  # 💬 answers to the questions, by position
+                for x, r in zip(p.get("qa") or [], e["replies"]):
+                    x["a"] = _clean(r, 600)
             for k in ("star", "skip"):
                 if k in e:
                     if k == "skip" and bool(e[k]) != p.get("skip"):
                         d["moments"] = []                    # left out / back in: group again
                     p[k] = bool(e[k])
+        if isinstance(b.get("qa_replies"), list):
+            for x, r in zip(d.get("qa") or [], b["qa_replies"]):
+                x["a"] = _clean(r, 600)
         if b.get("moments") and d["moments"]:
             got = {m.get("id"): m for m in b["moments"] if isinstance(m, dict)}
             for m in d["moments"]:
@@ -921,6 +1012,9 @@ def handle(h, method, path):
                 except Exception:
                     pass
             return True
+        if method == "POST" and rest == ["questions"]:
+            owned(did, user)
+            return h.send(200, view(ask_questions(did, more=bool(h.body().get("more"))))) or True
         if method == "POST" and rest == ["story"]:
             owned(did, user)
             return h.send(200, view(write_story(did))) or True

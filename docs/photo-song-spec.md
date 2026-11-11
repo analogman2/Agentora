@@ -3,6 +3,9 @@
 Status: **phase 1 built** (2026-11-10): `studio/photosong.py`, `studio/web/photosong.js`, `tests/e2e_photosong.py`.
 Phase 1 differs from this spec in a few places: photos are ordered by date (no drag to reorder yet), the place under a
 photo can't be edited yet, the default engine is MiniMax with 2 takes, and the share link, video and painted cover are phase 2.
+**💬 Questions** (added 2026-11-10): after reading the photos, the AI asks 1-2 questions per photo and 2-4 about the whole set
+(who people are, by how they look; what happened; what the photo can't show). Answers feed the story and lyrics, and names
+given there may be sung. Nothing is ever guessed from faces.
 **Google Photos albums** (added 2026-11-10): paste an album's share link, pick photos (or ✨ Pick for me), and the originals
 are downloaded with their metadata. Google's APIs no longer read a user's albums without an OAuth Picker app, so this
 reads the share page like a browser does: unofficial, and it may need fixing if Google changes that page.

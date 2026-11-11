@@ -74,7 +74,8 @@ def _event(method, path, b):
         if path.startswith("/api/photosong"):            # 📷 never the photos, places, captions or lyrics: just what happened
             end = path.rstrip("/").rsplit("/", 1)[-1]
             name = {"photosong": "start a song from photos", "analyze": "read photos (song from photos)", "story": "story from photos",
-                    "album": "open a Google Photos album (song from photos)", "import": "add photos from a Google Photos album"}.get(end)
+                    "album": "open a Google Photos album (song from photos)", "import": "add photos from a Google Photos album",
+                    "questions": "questions about photos"}.get(end)
             return (name, {}) if name else None
         if path == "/api/lyrics":
             return "write lyrics", {}

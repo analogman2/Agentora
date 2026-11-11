@@ -29,6 +29,9 @@
     .photos .moment { border: 1px solid var(--line); border-radius: 10px; padding: 8px; margin: 6px 0; background: var(--panel); display: grid; grid-template-columns: auto 1fr 130px; gap: 8px; align-items: start; }
     .photos .moment .th { display: flex; gap: 3px; } .photos .moment .th img { width: 38px; height: 38px; object-fit: cover; border-radius: 5px; }
     .photos .moment .w { font-size: 12px; color: var(--muted); }
+    .photos label.q { display: block; font-size: 12px; font-weight: 600; margin-top: 4px; }
+    .photos label.q input { margin-top: 2px; width: 100%; font-weight: 400; }
+    .photos #psQa label.q { font-size: 13px; margin-top: 8px; }
     .photos .albumbar { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
     .photos .albumbar input { flex: 1 1 240px; }
     .photos .agrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 6px; margin-top: 8px; max-height: 360px; overflow: auto; padding: 2px; }
@@ -112,7 +115,8 @@
       <img src="${thumb(p.n)}" alt="" loading="lazy">
       <div class="b"><div class="when">${esc(fmtDate(p.date))}${p.date && !["camera", "Google Photos"].includes(p.date_src) ? ` <span title="from the ${esc(p.date_src)}">(≈)</span>` : ""}${p.place ? " · " + esc(p.place) : ""}</div>
         ${p.read ? `<textarea rows="2" data-k="caption" aria-label="What's in this photo">${esc(p.caption)}</textarea>
-        <input type="text" data-k="detail" value="${esc(p.detail)}" aria-label="A detail for the song" placeholder="a detail for the song">` : `<div class="small muted">${p.vision_error ? "" : "Not read yet"}</div>`}
+        <input type="text" data-k="detail" value="${esc(p.detail)}" aria-label="A detail for the song" placeholder="a detail for the song">
+        ${(p.qa || []).map((x, i) => `<label class="q">💬 ${esc(x.q)}<input type="text" data-qa="${i}" value="${esc(x.a)}" placeholder="your answer (optional)"></label>`).join("")}` : `<div class="small muted">${p.vision_error ? "" : "Not read yet"}</div>`}
         ${child}${kind}${err}
         <div class="tools"><button class="btn small" data-t="star" aria-pressed="${!!p.star}" title="A favourite: the story leans on it, and it can be the cover">⭐</button>
           <button class="btn small" data-t="skip" aria-pressed="${!!p.skip}" title="Leave this photo out of the song">✕ Leave out</button>
@@ -219,11 +223,16 @@
       <div class="wbar"><button class="btn ${read < d.photos.length ? "primary" : ""}" type="button" id="psRead" ${d.photos.length ? "" : "disabled"}>
         ${read && read < d.photos.length ? `Read the ${d.photos.length - read} new photo${d.photos.length - read > 1 ? "s" : ""}` : read ? "Photos read ✓" : "Read the photos"}</button>
         <span class="small muted">${read ? `${read} read · ${use} in the song` : "about 5–10 seconds a photo"}</span></div>
-      <h4><span class="n">3</span> The story</h4>
+      <h4><span class="n">3</span> Tell me about them <span class="small muted" style="font-weight:400">optional, but it's what makes the song yours</span></h4>
+      <div id="psQa">${(d.qa || []).map((x, i) => `<label class="q">💬 ${esc(x.q)}<input type="text" data-oqa="${i}" value="${esc(x.a)}" placeholder="your answer (optional)"></label>`).join("")}</div>
+      ${qaCount(d).asked ? `<div class="small muted" style="margin-top:6px">Questions about single photos are on their cards above. Names you give here can be sung; nothing is guessed from faces.</div>` : ""}
+      <div class="wbar"><button class="btn ${read && !qaCount(d).asked ? "primary" : ""}" type="button" id="psAsk" ${read ? "" : "disabled"}>${qaCount(d).asked ? "Ask me more" : "Ask me about the photos"}</button>
+        <span class="small muted" id="psQaCount">${qaCount(d).asked ? `${qaCount(d).answered} of ${qaCount(d).asked} answered` : read ? "who's in them, what was happening, what the photos can't show" : ""}</span></div>
+      <h4><span class="n">4</span> The story</h4>
       <div id="psMoments">${momentsHTML()}</div>
       <div class="wbar"><button class="btn ${read && !d.story ? "primary" : ""}" type="button" id="psStory" ${read ? "" : "disabled"}>${d.story ? "Write the story again" : "Write the story"}</button>
         ${d.story ? `<span class="small muted">by ${esc(d.story.writer || "the writer")} · change any line, then write the lyrics</span>` : ""}</div>
-      <h4><span class="n">4</span> The lyrics</h4>
+      <h4><span class="n">5</span> The lyrics</h4>
       <div class="wbar"><button class="btn ${d.story ? "primary" : ""}" type="button" id="psLyrics" ${d.story ? "" : "disabled"}>${d.lyrics ? "Write them again" : "Write the lyrics"}</button>
         <span class="small muted" id="psStatus"></span></div>
       <pre id="psPreview" ${d.lyrics ? "" : "hidden"}>${esc(d.lyrics)}</pre>
@@ -234,6 +243,21 @@
     wire();
   }
 
+  function qaCount(d) {
+    const all = (d.qa || []).concat(...d.photos.filter(p => !p.skip).map(p => p.qa || []));
+    return {asked: all.length, answered: all.filter(x => (x.a || "").trim()).length};
+  }
+  function recount() {
+    const c = qaCount(ps.d), el = $("psQaCount");
+    if (el && c.asked) el.textContent = `${c.answered} of ${c.asked} answered`;
+  }
+  async function askQuestions() {
+    if (ps.busy) return; ps.busy = true; await flush();
+    const btn = $("psAsk"), more = qaCount(ps.d).asked > 0;
+    btn.disabled = true; btn.textContent = "Thinking of questions…";
+    try { ps.d = await api("POST", `/${ps.id}/questions`, {more}); ps.busy = false; render(); $("psQa").scrollIntoView({behavior: "smooth", block: "start"}); }
+    catch (e) { ps.busy = false; btn.disabled = false; btn.textContent = more ? "Ask me more" : "Ask me about the photos"; status(e.message, true); }
+  }
   async function listDrafts() {
     try {
       const {drafts} = await api("GET", "");
@@ -274,9 +298,23 @@
     drop.ondragleave = () => drop.classList.remove("over");
     drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); upload([...e.dataTransfer.files].filter(f => /^image\//.test(f.type) || /\.hei[cf]$/i.test(f.name))); };
     $("psCards").oninput = (e) => {
-      const k = e.target.dataset.k, c = e.target.closest(".card"); if (!k || !c) return;
+      const c = e.target.closest(".card"); if (!c) return;
+      if (e.target.dataset.qa != null) {
+        const replies = [...c.querySelectorAll("[data-qa]")].map(i => i.value);
+        const p = ps.d.photos.find(x => x.n === +c.dataset.n); if (p && p.qa) p.qa.forEach((x, i) => { x.a = replies[i]; });
+        recount();
+        return queueSave({photos: [{n: +c.dataset.n, replies}]});
+      }
+      const k = e.target.dataset.k; if (!k) return;
       queueSave({photos: [{n: +c.dataset.n, [k]: e.target.value}]});
     };
+    $("psQa").oninput = () => {
+      const replies = [...$("psQa").querySelectorAll("[data-oqa]")].map(i => i.value);
+      (ps.d.qa || []).forEach((x, i) => { x.a = replies[i]; });
+      recount();
+      queueSave({qa_replies: replies});
+    };
+    $("psAsk").onclick = askQuestions;
     $("psCards").onclick = async (e) => {
       const b = e.target.closest("[data-t]"), c = e.target.closest(".card"); if (!b || !c) return;
       const n = +c.dataset.n, p = ps.d.photos.find(x => x.n === n);
@@ -327,13 +365,15 @@
     try {
       await sse(`/api/photosong/${ps.id}/analyze`, {}, (ev) => {
         if (ev.reading) btn.textContent = `Reading photo ${ev.i} of ${ev.of}…`;
+        if (ev.asking) btn.textContent = "Thinking of questions to ask you…";
         if (ev.photo) {
           const p = ps.d.photos.find(x => x.n === ev.photo.n);
           if (p) { Object.assign(p, ev.photo); const c = box.querySelector(`.card[data-n="${p.n}"]`); if (c) c.outerHTML = cardHTML(p); }
         }
       });
       ps.busy = false; await open(ps.id);
-      $("psStory").focus();
+      if (qaCount(ps.d).asked) { status("A few questions for you below each photo and in step 3: answer any you like."); $("psQa").scrollIntoView({behavior: "smooth", block: "center"}); }
+      else $("psStory").focus();
     } catch (e) { ps.busy = false; await open(ps.id); status("Reading the photos stopped: " + e.message, true); }
   }
 
